@@ -1,0 +1,31 @@
+# Example alternative pack: a regulated environment where autonomy is narrower.
+name: regulated
+description: Every artifact needs a named approver; nothing auto-resolves; higher bar to ship.
+
+gates:
+  clarify:              { mode: require }
+  approve_vision:       { mode: require }
+  approve_backlog:      { mode: require }
+  approve_architecture: { mode: require }
+  approve_sprint:       { mode: require }
+  failed_story:         { mode: require }
+  approve_release:      { mode: require }
+
+build:
+  max_repair_attempts: 2
+  max_rework_rounds: 2
+  sandbox_image: python:3.12-slim
+  test_timeout_seconds: 1200
+
+review:
+  ship_threshold: 85
+  release_requires_working_app: true
+  release_requires_ship_verdict: true
+  max_human_rebuilds: 2
+
+definition_of_done:
+  - All acceptance criteria have a passing test
+  - The deployed app opens in a real browser and every story's screen works against the live API
+  - Every architecture deviation has a recorded, approved decision
+  - Reviewer verdict is 'ship' with zero major findings
+  - Named human approver recorded on every gate

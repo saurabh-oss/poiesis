@@ -1,0 +1,7 @@
+neo4j==5.27.0
+GitPython==3.1.43
+pyyaml==6.0.2
+tree-sitter==0.23.2
+tree-sitter-language-pack==0.4.0
+rich==13.9.4
+typer==0.15.1

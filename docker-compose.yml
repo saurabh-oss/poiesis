@@ -1,0 +1,83 @@
+name: poiesis
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: poiesis
+      POSTGRES_PASSWORD: poiesis
+      POSTGRES_DB: poiesis
+    volumes: [ "./data/postgres:/var/lib/postgresql/data" ]
+    ports: [ "5432:5432" ]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U poiesis"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports: [ "6379:6379" ]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  neo4j:
+    image: neo4j:5-community
+    environment:
+      NEO4J_AUTH: neo4j/poiesisdev
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_server_memory_heap_max__size: 2G
+    volumes:
+      - ./data/neo4j:/data
+    ports: [ "7474:7474", "7687:7687" ]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 >/dev/null || exit 1"]
+      interval: 10s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes: [ "./data/qdrant:/qdrant/storage" ]
+    ports: [ "6333:6333" ]
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: poiesis
+      MINIO_ROOT_PASSWORD: poiesisdev
+    volumes: [ "./data/minio:/data" ]
+    ports: [ "9000:9000", "9001:9001" ]
+
+  orchestrator:
+    build: ./services/orchestrator
+    env_file: .env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      neo4j: { condition: service_healthy }
+    volumes:
+      - ./workspaces:/workspaces
+      - ./packs:/app/packs:ro
+      - ./scaffolds:/app/scaffolds:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports: [ "8080:8080" ]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+
+  indexer:
+    build: ./services/indexer
+    env_file: .env
+    depends_on:
+      neo4j: { condition: service_healthy }
+    volumes:
+      - ./services/indexer/portfolio.yaml:/app/portfolio.yaml:ro
+      - ./data/repos:/repos
+    profiles: [ "tools" ]
+
+  ui:
+    build: ./services/ui
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:8080
+    depends_on: [ orchestrator ]
+    ports: [ "3000:3000" ]

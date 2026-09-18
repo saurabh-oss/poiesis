@@ -1,0 +1,7 @@
+# The image installs its own dependencies in the deps stage. A local node_modules
+# (from running tsc or next dev on the host) only bloats the build context, and its
+# .bin symlinks make the context fail to load outright.
+node_modules
+.next
+npm-debug.log*
+.env*.local

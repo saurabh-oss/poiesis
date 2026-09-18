@@ -1,0 +1,97 @@
+# Domain pack: the policy layer.
+#
+# Everything an organisation would argue about lives here, not in agent code.
+# Swap this file to change how much autonomy the platform has without touching
+# a single prompt or node.
+
+name: default
+description: Balanced policy for internal product work with a single business stakeholder.
+
+gates:
+  # mode: require  -> the graph blocks until a human answers
+  # mode: auto     -> the gate is recorded and auto-resolved with its default
+  clarify:              { mode: require }
+  approve_vision:       { mode: require }
+  approve_backlog:      { mode: require }
+  approve_architecture: { mode: require }
+  approve_sprint:       { mode: auto }
+  failed_story:         { mode: require }
+  approve_release:      { mode: require }   # never set this to auto in a shared environment
+
+build:
+  max_repair_attempts: 3
+  max_rework_rounds: 2          # automatic review -> build rounds before the stakeholder decides
+  sandbox_image: python:3.12-slim
+  test_timeout_seconds: 900
+
+review:
+  ship_threshold: 70
+  # The release gate offers "Release" only when the deployed app opened cleanly in a
+  # real browser and no story is red. Turning this off lets a human ship a broken app.
+  release_requires_working_app: true
+  # ...and only when the Reviewer's computed verdict is not "rework" (a blocker, a
+  # score under the threshold, or a story that misses what it promised).
+  release_requires_ship_verdict: true
+  max_human_rebuilds: 2         # "Send it back for another build round" at the release gate
+  weights:
+    acceptance_criteria_met: 0.35
+    reuse_compliance: 0.15
+    test_adequacy: 0.20
+    maintainability: 0.15
+    operational_safety: 0.15
+
+# The runtime contract: what shape of thing a run is allowed to end with.
+#
+# Without this the pipeline has no definition of "an application" and every run is
+# free to stop at a single module. The archetype is chosen before design, and the
+# Architect, Developer and scaffold stage all read it.
+archetypes:
+  default: web-app
+
+  web-app:
+    description: A browser application with an HTTP API and a database.
+    scaffold: web-app          # directory under scaffolds/
+    entrypoint: frontend       # the service a stakeholder opens
+    services:
+      - { name: frontend, role: ui,        port: 80,   healthcheck: /        }
+      - { name: backend,  role: api,       port: 8000, healthcheck: /health  }
+      - { name: db,       role: datastore                                    }
+    definition_of_deployable:
+      - docker compose up -d brings every service to healthy
+      - The backend answers 200 on /health
+      - The frontend is served and reaches the API from the browser
+      - Every story has a screen that opens in a real browser without errors
+      - At least one acceptance criterion can be exercised through the interface
+
+  api-service:
+    description: A headless HTTP API with a database and no user interface.
+    scaffold: web-app
+    entrypoint: backend
+    services:
+      - { name: backend, role: api,       port: 8000, healthcheck: /health }
+      - { name: db,      role: datastore                                   }
+    definition_of_deployable:
+      - docker compose up -d brings every service to healthy
+      - The backend answers 200 on /health
+      - Every endpoint in the story appears in the OpenAPI document
+
+  cli-tool:
+    description: A command-line program. No server, no port, no URL.
+    scaffold: cli-tool
+    entrypoint: cli
+    services: []
+    definition_of_deployable:
+      - The documented run command executes and exits 0 on the sample input
+
+definition_of_ready:
+  - Story has at least two acceptance criteria written as Given/When/Then
+  - Story cites at least one evidence id
+  - Story has no unresolved dependency on a story outside the sprint
+
+definition_of_done:
+  - All acceptance criteria have a passing test
+  - The deployed app opens in a real browser and every story's screen works against the live API
+  - Reuse plan honoured, or a recorded decision explains the deviation
+  - No blocker findings from the Reviewer
+  - Release notes written in stakeholder language
+  - The increment satisfies its archetype's definition of deployable

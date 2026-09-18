@@ -1,0 +1,58 @@
+# The projects the platform is allowed to reuse from.
+# Add a repo here and the architect agent starts recommending it.
+#
+# !! THE URLs BELOW ARE UNVERIFIED PLACEHOLDERS. Replace them with your real ones.
+# The indexer now exits non-zero and names every entry it could not read, so a
+# wrong URL fails the bootstrap instead of quietly producing an empty graph.
+#
+# Each entry needs either:
+#   repo: https://github.com/you/thing      cloned into clone_root
+#   path: /local/meridian                   a directory mounted into the indexer
+#
+# For `path:`, add the mount to the indexer service in docker-compose.yml:
+#   volumes: [ "C:/code/meridian:/local/meridian:ro" ]
+# For a one-off local index without editing this file:
+#   .\scripts\index-local.ps1 -Path C:\code\meridian -Name "Meridian"
+
+clone_root: /repos
+
+projects:
+  - name: ForgeAI Pipeline Intelligence
+    repo: https://github.com/jenkinsci/forgeai-pipeline-intelligence-plugin
+    capabilities: [ci analysis, release verdict, pipeline telemetry, weighted scoring]
+    technologies: [Java, Jenkins, Maven]
+
+  - name: ArchiLens
+    repo: https://github.com/saurabh-oss/archilens
+    capabilities: [ast parsing, architecture diagram generation, repo comprehension]
+    technologies: [Python, tree-sitter, Anthropic API]
+
+  - name: TestLoom
+    repo: https://github.com/saurabh-oss/testloom
+    capabilities: [requirements to tests, traceability matrix, test generation]
+    technologies: [Python, LiteLLM, ChromaDB]
+
+  - name: TraceGuard AI
+    repo: https://github.com/saurabh-oss/traceguard-ai
+    capabilities: [failure triage, automated remediation, pull request generation]
+    technologies: [Python, GitHub Actions]
+
+  - name: GEPA LangChain Lab
+    repo: https://github.com/saurabh-oss/gepa-langchain-lab
+    capabilities: [prompt optimisation, closed loop evaluation, experiment tracking]
+    technologies: [Python, LangChain, MLflow]
+
+  - name: SentinelShield
+    repo: https://github.com/saurabh-oss/sentinelshield
+    capabilities: [anomaly detection, threat resolution, resolver generation]
+    technologies: [Python, Anthropic API]
+
+  - name: VulnHawk
+    repo: https://github.com/saurabh-oss/vulnhawk
+    capabilities: [security scanning, scope enforcement, bug bounty automation]
+    technologies: [Python]
+
+  - name: AgentAxis
+    repo: https://github.com/saurabh-oss/agentaxis
+    capabilities: [adoption assessment, domain packs, maturity scoring]
+    technologies: [Python, YAML]

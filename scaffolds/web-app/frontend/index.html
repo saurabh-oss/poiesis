@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{project_name}}</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="bar">
+    <h1>{{project_name}}</h1>
+    <span id="status" class="status" data-state="checking">checking API…</span>
+  </header>
+  <nav id="nav" class="nav" hidden></nav>
+
+  <!-- The shell (app.js) renders the story screens from frontend/screens/ here. -->
+  <main id="app" aria-live="polite">
+    <p class="muted">Loading…</p>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

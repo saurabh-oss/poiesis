@@ -1,0 +1,6 @@
+# Root manifest: what the test sandbox installs.
+# The platform runs pytest from the repository root, so this pulls in the
+# backend's own dependencies plus the test tooling.
+-r backend/requirements.txt
+pytest==8.3.4
+httpx==0.27.2
