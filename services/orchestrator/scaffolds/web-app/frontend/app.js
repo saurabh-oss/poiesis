@@ -3,18 +3,24 @@
  * Stories never edit this file. Each story adds its own screen as
  * frontend/screens/<resource>.js; the platform regenerates
  * frontend/screens/index.js to list them, and this shell loads them, draws the
- * navigation, routes between them and catches their errors.
+ * navigation and the page header, routes between them and catches their errors.
  *
  * It exists because a story that rewrote the old single app.js deleted the
  * api() helper it then called: the page threw "api is not defined" on load and
- * showed nothing but the scaffold placeholder. A shell no story can touch cannot
- * lose its helpers, and one story's screen cannot overwrite another's.
+ * showed nothing at all. A shell no story can touch cannot lose its helpers,
+ * and one story's screen cannot overwrite another's.
+ *
+ * Layout lives here too, on purpose. A screen renders its own content and gets
+ * the application frame — sidebar, active nav state, page title and subtitle —
+ * for free, so twelve screens written by twelve separate passes still look like
+ * one product.
  *
  * A screen module:
  *
  *   export default {
- *     title: "Leave requests",   // the navigation label
- *     story: "S1",               // the story (or "S1, S3") it delivers
+ *     title: "Leave requests",        // navigation label and page heading
+ *     subtitle: "Request time off",   // optional line under the heading
+ *     story: "S1",                    // the story (or "S1, S3") it delivers
  *     async render(root, { api, h, navigate, params }) { ... }
  *   };
  *
@@ -89,8 +95,16 @@ export function navigate(hash) {
 const state = (window.__poiesis = { ready: false, screens: [], errors: [], current: null });
 const app = document.getElementById("app");
 const nav = document.getElementById("nav");
+const pageTitle = document.getElementById("page-title");
+const pageSubtitle = document.getElementById("page-subtitle");
+const pageActions = document.getElementById("page-actions");
 let screens = [];
 let token = 0;
+
+function initials(text) {
+  const words = String(text || "?").trim().split(/\s+/).slice(0, 2);
+  return words.map((w) => w[0]).join("").toUpperCase() || "?";
+}
 
 function errorPanel(title, err) {
   const message = err && err.message ? err.message : String(err);
@@ -104,15 +118,24 @@ function parseHash() {
   return { id: parts[0] || "", params: parts.slice(1) };
 }
 
+function setHeader(entry) {
+  pageTitle.textContent = entry ? entry.title : document.title;
+  const subtitle = entry && entry.module.subtitle;
+  pageSubtitle.textContent = subtitle || "";
+  pageSubtitle.hidden = !subtitle;
+  pageActions.replaceChildren();
+}
+
 async function show() {
   const mine = ++token;
   const { id, params } = parseHash();
   const entry = screens.find((s) => s.id === id) || screens[0];
   if (!entry) {
+    setHeader(null);
     app.replaceChildren(
-      h("section", { class: "panel" },
-        h("h2", {}, "No screens yet"),
-        h("p", { class: "muted" }, "Screens appear here as stories are built.")),
+      h("div", { class: "empty-state" },
+        h("strong", {}, "No screens yet"),
+        "Screens appear here as stories are built."),
     );
     state.current = { hash: location.hash, id: "", done: true };
     state.ready = true;
@@ -120,10 +143,13 @@ async function show() {
   }
   state.current = { hash: `#/${entry.id}`, id: entry.id, done: false };
   for (const link of nav.querySelectorAll("a")) link.classList.toggle("active", link.dataset.id === entry.id);
+  setHeader(entry);
   const root = h("div", { class: "screen" });
   app.replaceChildren(root);
   try {
-    await entry.module.render(root, { api, h, navigate, params });
+    // `actions` lets a screen put its primary button in the page header, where a
+    // real product keeps it, without knowing anything about the frame around it.
+    await entry.module.render(root, { api, h, navigate, params, actions: pageActions });
   } catch (err) {
     if (mine === token) root.replaceChildren(errorPanel(`${entry.title} hit an error`, err));
   }
@@ -139,14 +165,16 @@ async function showConnectionState() {
   try {
     const { database } = await api("/status");
     el.dataset.state = "ok";
-    el.textContent = `API ok · database ${database}`;
+    el.textContent = `API ok · db ${database}`;
   } catch (err) {
     el.dataset.state = "down";
-    el.textContent = `API unreachable — ${err.message}`;
+    el.textContent = "API unreachable";
+    el.title = err.message;
   }
 }
 
 async function start() {
+  document.getElementById("brand-mark").textContent = initials(document.title);
   showConnectionState();
   let registry = [];
   try {
@@ -167,8 +195,13 @@ async function start() {
       module: r.module,
     }));
   state.screens = screens.map(({ id, title, story, example }) => ({ id, title, story, example, hash: `#/${id}` }));
-  nav.replaceChildren(...screens.map((s) => h("a", { href: `#/${s.id}`, "data-id": s.id }, s.title)));
-  nav.hidden = screens.length < 2;
+  nav.replaceChildren(
+    h("div", { class: "nav-label" }, "Sections"),
+    ...screens.map((s) =>
+      h("a", { href: `#/${s.id}`, "data-id": s.id },
+        h("span", { class: "nav-mark" }, initials(s.title)),
+        s.title)),
+  );
   window.addEventListener("hashchange", show);
   await show();
 }

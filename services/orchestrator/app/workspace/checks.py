@@ -435,6 +435,204 @@ def _seeding_issues(run_id: str, path: Path, rel: str) -> list[str]:
     return issues
 
 
+# --- the generated backend's own Python ----------------------------------------------
+
+def _story_python(run_id: str, own_files: set[str] | None) -> list[tuple[str, str]]:
+    """(path, source) for the backend Python this story wrote — never the scaffold's."""
+    root = workspace_path(run_id)
+    out: list[tuple[str, str]] = []
+    for path in router_files(run_id):
+        if path.name == EXAMPLE_ROUTER:
+            continue
+        rel = path.relative_to(root).as_posix()
+        if own_files is not None and rel not in own_files:
+            continue
+        out.append((rel, path.read_text(encoding="utf-8", errors="replace")))
+    return out
+
+
+def backend_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
+    """The handful of Python mistakes the Developer makes over and over.
+
+    Taken from run history rather than imagined. Across fourteen runs the same
+    few errors accounted for about half of every story that went red, and each
+    one cost a full repair round to rediscover through a traceback:
+
+    * `db = db.get_session()` — a helper shadowing the module it is calling, so
+      every request raises UnboundLocalError. The tests pass anyway whenever
+      they exercise a different router, and it surfaces only in the browser.
+    * `from backend.app import ...` — a path that exists in the repository tree
+      but not on the import path, so pytest cannot even collect the module and
+      the whole suite reports as one error.
+    * a SQLAlchemy model handed to `response_model=`, which fails at import and
+      takes the entire application down with it, smoke tests included.
+
+    Each is one AST walk to find here, before pytest runs at all.
+    """
+    models = set(_model_tables(run_id))
+    issues: list[str] = []
+    for rel, src in _story_python(run_id, own_files):
+        if re.search(r"^\s*(?:from|import)\s+backend[.\s]", src, re.M):
+            issues.append(
+                f"{rel}: imports `backend...`, a path that does not exist at runtime or under "
+                "test — pytest cannot even collect a module that does this, so the whole suite "
+                "fails as one error. The package root is `app`: import siblings with two dots "
+                "(`from ..db import get_session`, `from ..models import Thing`)."
+            )
+        try:
+            tree = ast.parse(src)
+        except SyntaxError as exc:
+            issues.append(f"{rel}: does not parse as Python — {exc.msg} at line {exc.lineno}.")
+            continue
+
+        for node in ast.walk(tree):
+            # `db = db.get_session()` — the name being assigned is the very module
+            # the call is reaching through, so the local shadows it and the lookup
+            # happens before assignment: UnboundLocalError on every request.
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Attribute)
+                    and isinstance(node.value.func.value, ast.Name)
+                    and node.value.func.value.id == node.targets[0].id):
+                name = node.targets[0].id
+                issues.append(
+                    f"{rel}: `{name} = {name}.{node.value.func.attr}()` shadows the module it is "
+                    f"calling — Python treats `{name}` as local for the whole function, so the "
+                    "call raises UnboundLocalError on every request. Take the session as a "
+                    "parameter instead: `def endpoint(db: Session = Depends(get_session))`, "
+                    "exactly as routers/examples.py does."
+                )
+
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                for kw in node.keywords:
+                    if kw.arg != "response_model":
+                        continue
+                    target = kw.value
+                    if (isinstance(target, ast.Subscript) and isinstance(target.slice, ast.Name)):
+                        target = target.slice
+                    if isinstance(target, ast.Name) and target.id in models:
+                        issues.append(
+                            f"{rel}: `response_model={target.id}` names a SQLAlchemy model. "
+                            "FastAPI raises `Invalid args for response field` at import time, "
+                            "which takes the whole application down — every test fails, "
+                            "including the scaffold's own. response_model must be a Pydantic "
+                            f"schema from schemas.py (e.g. `{target.id}Out`); return the ORM "
+                            "object and let it serialise."
+                        )
+
+        if re.search(r"\bstrptime\s*\(", src):
+            issues.append(
+                f"{rel}: calls strptime(). A field typed `datetime.date` in the schema is "
+                "already parsed by FastAPI before your function runs, so parsing it again "
+                "raises TypeError on a value that is a date, not a string. Type the field and "
+                "use it directly."
+            )
+    return list(dict.fromkeys(issues))
+
+
+# --- the Tester's own output ----------------------------------------------------------
+
+_CLIENT_CALL = re.compile(
+    r"""\bclient\.(get|post|put|patch|delete)\(\s*f?(['"])([^'"]+)\2""", re.I)
+_STATUS_ASSERT = re.compile(r"status_code\s*==\s*(\d{3})")
+_NONEMPTY = re.compile(r"len\([^)]*\)\s*>\s*0|\)\s*\[0\]|assert\s+(?:body|rows|data|result)\s*$", re.M)
+_MARKUP = re.compile(r"""assert\s+['"][^'"]*<[a-zA-Z/][^'"]*['"]""")
+_LABELISH = re.compile(r"""assert\s+['"]([A-Z][A-Za-z ]{2,30})['"]\s+in\s+\w+\[""")
+_SEEDS = re.compile(r"client\.post\(|db_session\.add\(")
+
+
+def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
+    """Tests that cannot pass however correct the implementation is.
+
+    The Tester writes its suite once, before a line of it has ever run, and the
+    Developer is forbidden to edit tests — rightly, since that is what stops a
+    model writing tests that pass. The cost of that rule is that an impossible
+    test is unfixable by anyone until the Tester is asked again, which used to
+    happen only after three Developer repairs had already been spent on code
+    that was never wrong. These are the shapes that actually showed up:
+    `assert 405 == 422` (a POST to a path serving only GET), `assert 0 > 0`
+    (rows expected from a database nothing seeded), and a button's label
+    asserted inside a JSON body. Catching them here costs one Tester revision
+    instead of a whole story.
+    """
+    root = workspace_path(run_id)
+    routes = declared_routes(run_id)
+    served = ", ".join(sorted({f"{r['method']} {r['path']}" for r in routes})) or "none"
+    by_path: dict[str, set[str]] = {}
+    status_for: dict[tuple[str, str], int] = {}
+    for r in routes:
+        key = r["path"].rstrip("/") or "/"
+        by_path.setdefault(key, set()).add(r["method"])
+        status_for[(r["method"], key)] = r["status"]
+
+    issues: list[str] = []
+    for rel in test_paths:
+        target = root / rel
+        if not target.is_file():
+            continue
+        src = target.read_text(encoding="utf-8", errors="replace")
+        for block in re.split(r"^(?=\s*(?:async\s+)?def\s+test_)", src, flags=re.M):
+            name_match = re.search(r"def\s+(test_\w+)", block)
+            if not name_match:
+                continue
+            name = name_match.group(1)
+            for call in _CLIENT_CALL.finditer(block):
+                method, path = call.group(1).upper(), _normalise(call.group(3))
+                path = path.rstrip("/") or "/"
+                matches = [p for p in by_path if _route_pattern(p).match(path)]
+                if not matches:
+                    issues.append(
+                        f"{rel}::{name} requests {method} {path}, which the API does not serve. "
+                        f"Served routes: {served}. Test what exists, or leave the criterion in "
+                        "criteria_not_covered."
+                    )
+                    continue
+                allowed = set().union(*(by_path[p] for p in matches))
+                if method not in allowed:
+                    issues.append(
+                        f"{rel}::{name} sends {method} {path}, but that path serves only "
+                        f"{', '.join(sorted(allowed))} — FastAPI answers 405 and no "
+                        "implementation can change that. Either the story needs that endpoint "
+                        "(say so and test it once it exists) or the assertion does not belong."
+                    )
+                    continue
+                expected = {int(m) for m in _STATUS_ASSERT.findall(block)}
+                declared = {status_for[(method, p)] for p in matches if (method, p) in status_for}
+                if expected and declared and not (expected & declared) and not (expected & {422, 404, 400, 405}):
+                    issues.append(
+                        f"{rel}::{name} expects status {sorted(expected)} from {method} {path}, "
+                        f"which the route declares as {sorted(declared)}. Assert the status the "
+                        "contract states."
+                    )
+            if _NONEMPTY.search(block) and not _SEEDS.search(block):
+                issues.append(
+                    f"{rel}::{name} asserts a non-empty result but never creates the data it "
+                    "expects — the test database starts empty, so this fails whatever the "
+                    "implementation does. Create the row first (client.post, or db_session.add "
+                    "then commit), or assert the shape of an empty result instead."
+                )
+            if _MARKUP.search(block):
+                issues.append(
+                    f"{rel}::{name} asserts HTML in an API response. The API returns data; the "
+                    "markup lives in the screen, which the platform checks in a real browser. "
+                    "Assert the data behind it."
+                )
+            hit = _LABELISH.search(block)
+            if hit:
+                issues.append(
+                    f"{rel}::{name} asserts the label \"{hit.group(1)}\" inside a response field. "
+                    "A button or link label belongs to the screen, not the payload."
+                )
+            for literal in re.findall(r"""==\s*['"]([^'"]{140,})['"]""", block):
+                issues.append(
+                    f"{rel}::{name} compares against {len(literal)} characters of text copied "
+                    "verbatim. Content changes wording without changing meaning; assert that it "
+                    "is present and names the key terms instead."
+                )
+    return list(dict.fromkeys(issues))
+
+
 # --- routers declared at "/" --------------------------------------------------------
 
 _TEST_CALL = re.compile(r"""\bclient\.(get|post|put|patch|delete)\(\s*f?(['"])([^'"]+)\2""", re.I)
@@ -676,6 +874,8 @@ async def platform_checks(
         # Only meaningful once init.sql is known to at least run: a column missing
         # from a table that itself failed to create would just be noise on top.
         issues += schema_drift_issues(run_id)
+
+    issues += backend_issues(run_id, own_files)
 
     if not (root / "frontend").is_dir():
         body = "\n\n".join(f"- {i}" for i in issues)

@@ -48,23 +48,34 @@ in the navigation and renders:
 
 ```js
 export default {
-  title: "Leave requests",          // the navigation label
-  story: "S1",                      // the story id(s) this screen delivers
-  async render(root, { api, h, navigate, params }) {
+  title: "Leave requests",              // sidebar label AND the page heading
+  subtitle: "Request time off and track approvals",   // optional, sits under the heading
+  story: "S1",                          // the story id(s) this screen delivers
+  async render(root, { api, h, navigate, params, actions }) {
     const rows = await api("/leave-requests");
-    const list = rows.length
-      ? h("ul", { class: "list" }, rows.map((r) => h("li", {}, r.reason)))
-      : h("div", { class: "empty-state" }, "No leave requests yet.");
+    actions.append(h("button", { onclick: () => navigate("#/leave-requests/new") }, "New request"));
     root.append(
       h("section", { class: "panel stack" },
-        h("div", { class: "row", style: { alignItems: "center", justifyContent: "space-between" } },
-          h("h2", {}, "Leave requests"),
+        h("div", { class: "between" },
+          h("h2", {}, "All requests"),
           h("span", { class: "badge" }, `${rows.length} total`)),
-        list),
+        rows.length
+          ? h("div", { class: "table-wrap" }, h("table", {},
+              h("thead", {}, h("tr", {}, h("th", {}, "Reason"), h("th", {}, "Status"))),
+              h("tbody", {}, rows.map((r) => h("tr", {},
+                h("td", {}, r.reason),
+                h("td", {}, h("span", { class: "badge badge-ok" }, r.status)))))))
+          : h("div", { class: "empty-state" },
+              h("strong", {}, "No requests yet"), "Submit the first one to see it here.")),
     );
   },
 };
 ```
+
+**The shell already drew the page.** The sidebar, the page heading and the subtitle come
+from `title` and `subtitle` above — so never render your own `<h1>`, app title, nav or
+header inside `root`. Start at `<section class="panel">`. A screen that draws its own page
+chrome ends up with two headings and looks broken.
 
 - `api(path, { method, body })` calls the backend. `api("/leave-requests")` GETs
   `/api/leave-requests` and returns the parsed JSON.
@@ -127,22 +138,28 @@ themed, animated and dark-mode aware.
 
 | Need | Class |
 |---|---|
-| A card / content surface | `panel` or `card` (`card interactive` if it's clickable — it lifts on hover) |
+| A content section (the default building block) | `panel` |
+| A tile inside a grid | `card` (`card interactive` if clickable — it lifts on hover) |
 | Vertical spacing between children | `stack` |
-| A horizontal, wrapping group (forms, toolbars) | `row` |
-| A responsive grid of cards | `grid` (cards ≥240px) or `grid-2` (two-up, ≥280px) |
-| A status pill | `badge`, or `badge-ok` / `badge-warn` / `badge-down` for green/amber/red |
-| An inline banner | `notice`, or `notice-ok` / `notice-warn` |
-| Nothing to show yet | `empty-state` — a real message, e.g. "No leave requests yet." never a bare `<li>` |
-| Loading before data arrives | put a `spinner` next to a loading label, or a `skeleton` block sized to the content it will replace |
-| A secondary / destructive button | `button.secondary`, `button.danger` (the default button is already the primary, gradient-filled action) |
-| De-emphasised text | `muted` (body-sized) or `faint` (small, e.g. timestamps) |
+| A heading with something pushed to the right | `between` |
+| A horizontal, wrapping group | `row` |
+| A responsive grid | `grid` (tiles ≥260px) or `grid-2` (two-up, ≥300px) |
+| A row of headline numbers | `stats` wrapping `stat` > `stat-label` + `stat-value` |
+| Tabular data | `table-wrap` wrapping a plain `<table>` with `<thead>`/`<tbody>` — already styled, scrolls on narrow screens |
+| A form field | `field` wrapping `<label>`, the input, and an optional `span.hint`; group fields in `form-grid`; buttons in `form-actions` |
+| A status pill | `badge`, or `badge-ok` / `badge-warn` / `badge-down` |
+| An inline banner | `notice`, `notice-ok`, `notice-warn` |
+| Nothing to show yet | `empty-state` with a `<strong>` headline and a line telling them what to do next |
+| Loading | a `spinner` next to a label, or a `skeleton` block sized to what it replaces |
+| Secondary / destructive / quiet button | `button.secondary`, `button.danger`, `button.ghost` |
+| De-emphasised text | `muted`, or `faint` for small print like timestamps and ids |
 
-Screens already animate in on navigation and list rows animate in on render — you do not add
-that yourself. What you do control is information design: a clear `h2`, the day's real data
-above the fold, one obvious primary action, and an `empty-state` instead of a blank panel
-before any data exists. Structure a page as a `panel` (or a `grid` of `card`s for a list of
-things), never as bare text loose in `root`.
+Screens animate in on navigation and list rows animate on render — you do not add that
+yourself. What you control is information design, and it is judged: the real data above the
+fold, one obvious primary action (in the header via `actions`), a table rather than a wall of
+divs when the data is tabular, an `empty-state` that says what to do next rather than a blank
+panel, and errors shown on the page rather than thrown. Two or three well-separated `panel`
+sections beat one crowded one.
 
 For a `web-app`, a story is only implemented when a user can reach it. Every story needs a
 screen, either its own or its id added to the screen it extends.
@@ -162,6 +179,30 @@ Copy the shape of `routers/examples.py`:
 - Persist through Postgres via `Depends(get_session)`. Never swap in SQLite, and never write
   a database file into the repository.
 - Never write `from backend.app import ...`. That path does not exist at runtime or under test.
+
+## The five mistakes that actually break these builds
+
+These are not hypothetical. Each one has taken down real runs here, repeatedly, and each
+costs a whole repair round to rediscover through a traceback. The platform now checks for
+them before your code ever runs, so getting them right first time is the difference between
+a story that passes and a story that burns its repairs.
+
+1. **Never shadow the module you are calling.** `db = db.get_session()` makes `db` local for
+   the whole function, so the call itself raises `UnboundLocalError` on every request. Take
+   the session as a parameter: `def endpoint(db: Session = Depends(get_session))`.
+2. **Never `from backend.app import ...`.** That path exists in the repository tree but not
+   on the import path — pytest cannot even collect a module that does it, so the entire suite
+   reports one error and nothing else runs. The package root is `app`: `from ..db import
+   get_session`, `from ..models import Thing`.
+3. **`response_model=` takes a Pydantic schema, never a SQLAlchemy model.** Passing the model
+   raises `Invalid args for response field` at import, which takes the whole application down
+   — every test fails, including the scaffold's own. Return the ORM object; let the schema
+   serialise it.
+4. **Do not parse what FastAPI already parsed.** A field typed `datetime.date` arrives as a
+   `date`. Calling `strptime()` on it raises `TypeError`.
+5. **Read a row's fields before the session closes, or re-`refresh` it.** Touching an
+   attribute on a committed, detached instance raises SQLAlchemy's `DetachedInstanceError`.
+   `db.refresh(row)` after `db.commit()` — as routers/examples.py does — avoids it.
 
 ## Hard rules
 

@@ -13,6 +13,7 @@ the same output the repair loop hands back to the Developer.
 """
 from __future__ import annotations
 
+import ast
 import re
 from typing import Any
 
@@ -27,6 +28,7 @@ from ...workspace.checks import (
     platform_checks,
     preserve_shared,
     regenerate_registry,
+    test_issues,
 )
 from ...workspace.interface import (
     EDITABLE,
@@ -319,6 +321,80 @@ async def _tests_for(
     ))
 
 
+def _unsound_test_names(issues: list[str]) -> set[str]:
+    """The test functions the platform itself judged impossible, by name."""
+    return {m.group(1) for m in (re.search(r"::(test_\w+)", i) for i in issues) if m}
+
+
+async def _sound_tests(
+    run_id: str, state: RunState, sid: str, rnd: int, story: dict[str, Any],
+    impl: dict[str, Any], revisions: int = 2,
+) -> tuple[dict[str, Any], dict[str, str], list[str]]:
+    """The Tester's suite, revised until it is at least *possible* to pass.
+
+    The Developer may not edit tests — that rule is what stops a model writing
+    tests that pass — so a test asserting something no implementation can do
+    used to be unfixable by anyone until the Tester was asked again, which only
+    happened after three Developer repairs had already been spent on code that
+    was never wrong. Checking the suite the moment it is written, and handing
+    the Tester its own findings, spends one cheap revision instead of a story.
+
+    Returns (the Tester's reply, the files written, the unsound tests that
+    survived every revision — reported so the Reviewer sees the gap rather than
+    the Developer being blamed for it).
+    """
+    try:
+        tests = await _tests_for(run_id, sid, rnd, story, impl)
+    except ValueError as exc:
+        await emit(run_id, f"{sid}: the Tester's reply could not be parsed — {exc}",
+                   agent="tester", stage="build", level="error")
+        return {"files": {}, "criteria_covered": [], "criteria_not_covered": []}, {}, []
+
+    files: dict[str, str] = {}
+    problems: list[str] = []
+    for attempt in range(revisions + 1):
+        files, _ = _guard(state, _tidy(tests.get("files", {})))
+        repo.write_files(run_id, files)
+        paths = sorted(p for p in files if p.startswith("tests/"))
+        problems = test_issues(run_id, paths)
+        if not problems or attempt == revisions:
+            break
+        await emit(
+            run_id,
+            f"{sid}: {len(problems)} test(s) cannot pass as written — asking the Tester to "
+            "revise before the Developer sees them",
+            agent="tester", stage="build", level="warn", data={"problems": problems},
+        )
+        try:
+            tests = await remember(run_id, f"tests:{sid}:r{rnd}:fix{attempt}", lambda: TESTER.json(
+                f"STORY {sid}: {story.get('title','')}\n"
+                "ACCEPTANCE CRITERIA:\n"
+                + "\n".join(f"- {c}" for c in story.get("acceptance_criteria", []))
+                + import_contract(run_id)
+                + route_contract(run_id)
+                + "\n\nTHESE TESTS CANNOT PASS AS WRITTEN. The platform checked them against "
+                "the routes the API actually serves, before running them:\n"
+                + "\n".join(f"- {p}" for p in problems)
+                + "\n\nCURRENT TEST FILES:\n"
+                + "\n\n".join(f"### {p}\n{repo.read(run_id, p)[:3000]}" for p in paths)
+                + "\n\nRewrite only what those findings name. A criterion the API genuinely "
+                "cannot demonstrate belongs in `criteria_not_covered` with the reason, not in a "
+                "test that must fail. Return the complete test files.",
+                max_tokens=4000,
+            ))
+        except ValueError:
+            break  # keep the version already on disk
+
+    if problems:
+        await emit(
+            run_id,
+            f"{sid}: {len(problems)} test(s) still cannot pass; recorded as uncovered rather "
+            "than failing the story on them",
+            agent="tester", stage="build", level="warn", data={"problems": problems},
+        )
+    return tests, files, problems
+
+
 async def _implement_with_recovery(
     run_id: str, state: RunState, story: dict[str, Any], rnd: int,
 ) -> dict[str, Any] | None:
@@ -425,6 +501,21 @@ async def _repair_once(
 _TEST_FN = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)", re.M)
 
 
+def _function_source(src: str, names: set[str]) -> list[str]:
+    """The original source of named top-level functions, to put back what a revision dropped."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    out: list[str] = []
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in names:
+            segment = ast.get_source_segment(src, node)
+            if segment:
+                out.append(segment)
+    return out
+
+
 async def _reconcile_tests(
     run_id: str, sid: str, rnd: int, story: dict[str, Any],
     test_paths: list[str], failed: ExecResult, attempts: int,
@@ -440,9 +531,16 @@ async def _reconcile_tests(
     the only agent allowed into the repair loop was forbidden to fix it.
 
     The revision is narrow, and the narrowness is enforced here rather than
-    requested: only this story's own test files are accepted (never conftest or
-    the smoke tests), and a revision that drops any existing test function is
-    rejected outright, so "fix the test" cannot become "delete the test".
+    requested: only this story's own test files are accepted, never conftest or
+    the smoke tests.
+
+    A dropped test function used to reject the entire revision, which threw away
+    the corrections in it as well — the story then stayed red with nobody left
+    who was allowed to touch it. Now the revision lands and anything it deleted
+    is put back, so "fix the test" still cannot become "delete the test"; the
+    one exception is a test the platform's own checks independently judged
+    impossible, where deleting it is the honest outcome and the criterion is
+    reported as uncovered instead.
     """
     current = {p: repo.read(run_id, p) for p in test_paths}
     current = {p: c for p, c in current.items() if c}
@@ -486,17 +584,24 @@ async def _reconcile_tests(
     proposed = {p: str(c) for p, c in (revision.get("files") or {}).items() if p in current}
     if not proposed:
         return False
-    for path, body in proposed.items():
-        dropped = before[path] - set(_TEST_FN.findall(body))
-        if dropped:
-            await emit(
-                run_id,
-                f"{sid}: rejected the Tester's revision — it removed "
-                + ", ".join(sorted(dropped)),
-                agent="governance", stage="build", level="warn",
-                data={"dropped": sorted(dropped)},
-            )
-            return False
+    allowed_to_go = _unsound_test_names(test_issues(run_id, list(current)))
+    restored: list[str] = []
+    for path, body in list(proposed.items()):
+        dropped = (before[path] - set(_TEST_FN.findall(body))) - allowed_to_go
+        if not dropped:
+            continue
+        kept = _function_source(current[path], dropped)
+        if not kept:
+            continue
+        proposed[path] = body.rstrip() + "\n\n\n" + "\n\n\n".join(kept) + "\n"
+        restored += sorted(dropped)
+    if restored:
+        await emit(
+            run_id,
+            f"{sid}: kept the Tester's corrections and put back "
+            + ", ".join(restored) + ", which the revision had dropped",
+            agent="governance", stage="build", level="warn", data={"restored": restored},
+        )
 
     repo.write_files(run_id, _tidy(proposed))
     sha = repo.commit(run_id, f"test({sid}): revise tests against the verified contract")
@@ -678,15 +783,10 @@ async def build(state: RunState) -> RunState:
 
         # The Tester gets the same verified imports. It was independently inventing
         # the same non-existent symbols as the Developer, so a green suite was
-        # impossible before either of them wrote a line of logic.
-        try:
-            tests = await _tests_for(run_id, sid, rnd, story, impl)
-        except ValueError as exc:
-            await emit(run_id, f"{sid}: the Tester's reply could not be parsed — {exc}",
-                       agent="tester", stage="build", level="error")
-            tests = {"files": {}, "criteria_covered": [], "criteria_not_covered": []}
-        test_files, _ = _guard(state, _tidy(tests.get("files", {})))
-        repo.write_files(run_id, test_files)
+        # impossible before either of them wrote a line of logic. Its suite is
+        # then checked against the routes the API really serves, and revised, before
+        # the Developer is ever asked to satisfy it.
+        tests, test_files, unsound = await _sound_tests(run_id, state, sid, rnd, story, impl)
         await _mount_bare(run_id, sid)
         repo.commit(run_id, f"test: cover {story['id']}")
         own_tests = sorted(p for p in test_files if p.startswith("tests/"))
@@ -765,7 +865,11 @@ async def build(state: RunState) -> RunState:
             "repair_attempts": attempts, "tests_revised": tests_revised, "files": written,
             "tests": own_tests,
             "criteria_covered": tests.get("criteria_covered", []),
-            "criteria_not_covered": tests.get("criteria_not_covered", []),
+            # A test the platform judged impossible is a coverage gap, not evidence:
+            # the Reviewer should see it as untested rather than as a passing story.
+            "criteria_not_covered": list(tests.get("criteria_not_covered", [])) + [
+                {"criterion": "(unverified)", "why": p} for p in unsound
+            ],
             "test_output": exec_result.stdout[-3000:],
         }
         results.append(result)

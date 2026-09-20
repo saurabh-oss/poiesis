@@ -7,16 +7,33 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="bar">
-    <h1>{{project_name}}</h1>
-    <span id="status" class="status" data-state="checking">checking API…</span>
-  </header>
-  <nav id="nav" class="nav" hidden></nav>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" id="brand-mark">·</span>
+        <span>{{project_name}}</span>
+      </div>
+      <nav class="nav" id="nav" aria-label="Sections"></nav>
+      <div class="sidebar-foot">
+        <span id="status" class="status" data-state="checking">checking API…</span>
+      </div>
+    </aside>
 
-  <!-- The shell (app.js) renders the story screens from frontend/screens/ here. -->
-  <main id="app" aria-live="polite">
-    <p class="muted">Loading…</p>
-  </main>
+    <div class="content">
+      <header class="page-head">
+        <div>
+          <h1 id="page-title">{{project_name}}</h1>
+          <p id="page-subtitle" hidden></p>
+        </div>
+        <div class="page-actions" id="page-actions"></div>
+      </header>
+
+      <!-- The shell (app.js) renders the story screens from frontend/screens/ here. -->
+      <main id="app" aria-live="polite">
+        <p class="muted">Loading…</p>
+      </main>
+    </div>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>

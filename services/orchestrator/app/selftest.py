@@ -145,6 +145,57 @@ UNSEEDED_SCREEN = '''export default {
 };
 '''
 
+# The five Python mistakes that accounted for about half of every red story.
+BAD_BACKEND = '''from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from backend.app.db import get_session
+from ..models import Example
+from .. import db
+
+
+router = APIRouter()
+
+
+def get_db():
+    db = db.get_session()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@router.get("/broken-things", response_model=Example)
+def list_things(session: Session = Depends(get_db)):
+    return session.query(Example).all()
+'''
+
+# Tests that cannot pass however correct the implementation is.
+IMPOSSIBLE_TESTS = '''def test_posts_to_a_get_only_path(client):
+    response = client.post("/api/llm-overview", json={})
+    assert response.status_code == 422
+
+
+def test_expects_rows_in_an_empty_database(client):
+    body = client.get("/api/llm-overview").json()
+    assert len(body) > 0
+
+
+def test_asserts_markup(client):
+    body = client.get("/api/llm-overview").json()
+    assert "<a href=\\'#next\\'>Next</a>" in body["content"]
+
+
+def test_asserts_a_button_label(client):
+    body = client.get("/api/llm-overview").json()
+    assert "Learn More" in body["content"]
+'''
+
+SOUND_TESTS = '''def test_lists_overviews(client):
+    response = client.get("/api/llm-overview")
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+'''
+
 failures: list[str] = []
 
 
@@ -237,6 +288,36 @@ async def main() -> int:
         expect("a model column missing from init.sql's table is caught",
                any("owner_id" in i and "example" in i for i in drift))
         models_path.write_text(good_models, encoding="utf-8")
+
+        # The Developer's five recurring Python mistakes, caught by AST before
+        # pytest ever runs — each one used to cost a whole repair round.
+        repo.write_files(rid, {"backend/app/routers/broken_backend.py": BAD_BACKEND})
+        backend = checks.backend_issues(rid, {"backend/app/routers/broken_backend.py"})
+        show("backend mistakes", "\n".join(backend))
+        expect("`from backend...` is caught", any("does not exist at runtime" in i for i in backend))
+        expect("a helper shadowing its own module is caught",
+               any("UnboundLocalError" in i for i in backend))
+        expect("a SQLAlchemy model used as response_model is caught",
+               any("response_model=Example" in i for i in backend))
+        expect("another story's backend file is not reported to this one",
+               checks.backend_issues(rid, {"backend/app/routers/somebody_else.py"}) == [])
+        repo.workspace_path(rid).joinpath("backend/app/routers/broken_backend.py").unlink()
+
+        # Tests that no implementation could satisfy. The Developer may not edit
+        # tests, so these used to deadlock a story into a permanent red.
+        repo.write_files(rid, {"tests/test_impossible.py": IMPOSSIBLE_TESTS,
+                               "tests/test_sound.py": SOUND_TESTS})
+        bad = checks.test_issues(rid, ["tests/test_impossible.py"])
+        show("impossible tests", "\n".join(bad))
+        expect("a POST to a GET-only path is caught", any("only GET" in i for i in bad))
+        expect("expecting rows in an empty database is caught",
+               any("never creates the data" in i for i in bad))
+        expect("markup asserted in an API response is caught", any("asserts HTML" in i for i in bad))
+        expect("a button label asserted in a payload is caught",
+               any("Learn More" in i and "label" in i for i in bad))
+        expect("a sound test file is left alone", checks.test_issues(rid, ["tests/test_sound.py"]) == [])
+        for name in ("tests/test_impossible.py", "tests/test_sound.py"):
+            repo.workspace_path(rid).joinpath(name).unlink()
 
         # A deploy failure has no story_id of its own; attribute it to whichever
         # story most recently touched a file that could plausibly break the

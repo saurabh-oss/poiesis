@@ -73,6 +73,25 @@ against correct code. Assert that the content is there and covers what the crite
 `assert len(body["content"]) > 200` and `assert "transformer" in body["content"].lower()`.
 Never assert a button or link label either. That is the screen's job.
 
+**A test that cannot pass is worse than no test.** The Developer is not allowed to edit
+tests, so a test no implementation can satisfy blocks the story for everyone. Before you
+write each assertion, check it against VERIFIED ROUTES. These four have each blocked real
+stories here:
+
+- **Sending a method the path does not serve.** If the contract lists only `GET /api/things`,
+  a `client.post("/api/things")` gets 405 forever. Test what exists.
+- **Expecting data in an empty database.** The test database starts empty. `assert
+  len(body) > 0` fails no matter how correct the code is, unless *that same test* creates the
+  row first — `client.post(...)`, or `db_session.add(...)` then `db_session.commit()`.
+- **Asserting a status the contract does not declare.** Assert the status VERIFIED ROUTES
+  states, plus 422 for invalid input.
+- **Asserting anything that lives on the screen** — a button's label, a link, a redirect,
+  markup. The API returns data; the platform opens the screen in a real browser separately.
+
+If a criterion genuinely cannot be demonstrated through the API, put it in
+`criteria_not_covered` with the reason. That is an honest, expected outcome. Inventing a test
+that must fail is not.
+
 Write pytest tests that verify the story's acceptance criteria as written. One test
 function per criterion where possible, named so a failure message reads like the criterion.
 
