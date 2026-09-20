@@ -146,6 +146,117 @@ def _normalise(path: str) -> str:
     return path.rstrip("/") or "/api"
 
 
+_RENDER = re.compile(r"\brender\s*\(")
+_NESTED_FN = re.compile(r"(?:=>\s*|\bfunction\b\s*[\w$]*\s*\([^()]*\)\s*)\{")
+_H_ELEMENT = re.compile(r"""\bh\(\s*(['"])(table|input|select|textarea)\1\s*,\s*\{([^{}]*)\}""")
+_API_OPTIONS = re.compile(r"""\bapi\(\s*(['"`])([^'"`]*)\1\s*,\s*\{([^{}]*)\}""")
+_CLASS_ATTR = re.compile(r"""\bclass\s*:\s*(['"`])([^'"`]*)\1""")
+_OPTION_KEYS = {"method", "body", "headers"}
+_COLLECTION = re.compile(r"""['"](?:tbody|table)['"]|empty-state""")
+
+
+def _braced_body(code: str, open_at: int) -> tuple[str, int]:
+    """The text inside the brace at or after `open_at`, and the index of its match."""
+    start = code.find("{", open_at)
+    if start < 0:
+        return "", len(code)
+    depth = 0
+    for i in range(start, len(code)):
+        if code[i] == "{":
+            depth += 1
+        elif code[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return code[start + 1:i], i
+    return code[start + 1:], len(code)
+
+
+def _matching_paren(code: str, open_at: int) -> int:
+    """The index just past the `)` closing the `(` at `open_at - 1`."""
+    depth = 0
+    for i in range(open_at - 1, len(code)):
+        if code[i] == "(":
+            depth += 1
+        elif code[i] == ")":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return len(code)
+
+
+def _render_body(code: str) -> str:
+    """render()'s own body - skipping its parameter list, which is itself braced."""
+    hit = _RENDER.search(code)
+    if not hit:
+        return ""
+    return _braced_body(code, _matching_paren(code, hit.end()))[0]
+
+
+def _outside_nested_functions(body: str) -> str:
+    """`body` with every nested function body cut out, leaving render's own statements."""
+    out: list[str] = []
+    i = 0
+    while i < len(body):
+        hit = _NESTED_FN.search(body, i)
+        if not hit:
+            out.append(body[i:])
+            break
+        out.append(body[i:hit.start()])
+        i = _braced_body(body, hit.end() - 1)[1] + 1
+    return "".join(out)
+
+
+def _screen_shell_issues(rel: str, code: str) -> list[str]:
+    """Ways a screen misuses the shell that neither a test nor the browser check catches.
+
+    Every one of these came out of a real run: the page rendered, nothing threw,
+    the browser check called the screen working, and it showed the user nothing.
+    """
+    issues: list[str] = []
+
+    body = _render_body(code)
+    if body and _COLLECTION.search(body) and "await" not in _outside_nested_functions(body):
+        issues.append(
+            f"{rel}: render() never loads anything - it only calls the API from an event handler, so "
+            "the screen opens empty and stays empty until someone clicks. Load the data in render() "
+            'itself (`const rows = await api("/things")`), draw it, and have the handler reload it.'
+        )
+
+    for call in _API_OPTIONS.finditer(code):
+        keys = set()
+        for field in call.group(3).split(","):
+            name = field.split(":")[0].strip()
+            if re.fullmatch(r"[A-Za-z_$][\w$]*", name):
+                keys.add(name)
+        if keys and not (keys & _OPTION_KEYS):
+            named = ", ".join(sorted(keys))
+            issues.append(
+                f'{rel}: api("{call.group(2)}", {{{named}}}) silently drops {named} - the second '
+                "argument is the request itself (method, body, headers), not query parameters. Put "
+                "them in the path: api(`/things?search=${encodeURIComponent(term)}`)."
+            )
+
+    for tag in _H_ELEMENT.finditer(code):
+        classes = _CLASS_ATTR.search(tag.group(3))
+        if not classes:
+            continue
+        names = set(classes.group(2).split())
+        element = tag.group(2)
+        if element == "table" and "table-wrap" in names:
+            issues.append(
+                f'{rel}: puts class "table-wrap" on the <table>. It is the scrolling frame that goes '
+                'around one: h("div", {class: "table-wrap"}, h("table", {}, ...)).'
+            )
+        if element != "table" and "field" in names:
+            issues.append(
+                f'{rel}: puts class "field" on the <{element}>. It is the label-and-control wrapper '
+                f'that goes around one: h("div", {{class: "field"}}, h("label", {{}}, "Name"), '
+                f'h("{element}", {{}})).'
+            )
+
+    return issues
+
+
 def static_issues(
     run_id: str, story_id: str | None, require_screen: bool, own_files: set[str] | None = None,
 ) -> list[str]:
@@ -191,6 +302,7 @@ def static_issues(
             hit = pattern.search(code)
             if hit:
                 issues.append(f"{rel}: " + message.format(hit.group(1) if hit.groups() else ""))
+        issues += _screen_shell_issues(rel, code)
         for call in _API_CALL.finditer(code):
             method = (call.group(2) or "").upper()
             called = _normalise(call.group(4))
@@ -485,25 +597,44 @@ def backend_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
             issues.append(f"{rel}: does not parse as Python — {exc.msg} at line {exc.lineno}.")
             continue
 
-        for node in ast.walk(tree):
-            # `db = db.get_session()` — the name being assigned is the very module
-            # the call is reaching through, so the local shadows it and the lookup
-            # happens before assignment: UnboundLocalError on every request.
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Name)
-                    and isinstance(node.value, ast.Call)
-                    and isinstance(node.value.func, ast.Attribute)
-                    and isinstance(node.value.func.value, ast.Name)
-                    and node.value.func.value.id == node.targets[0].id):
-                name = node.targets[0].id
-                issues.append(
-                    f"{rel}: `{name} = {name}.{node.value.func.attr}()` shadows the module it is "
-                    f"calling — Python treats `{name}` as local for the whole function, so the "
-                    "call raises UnboundLocalError on every request. Take the session as a "
-                    "parameter instead: `def endpoint(db: Session = Depends(get_session))`, "
-                    "exactly as routers/examples.py does."
-                )
+        for func in [n for n in ast.walk(tree)
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            # `db = db.get_session()` reads a name the same statement makes local,
+            # so it raises UnboundLocalError on every call. `query = query.filter(...)`
+            # is the same shape and perfectly correct — the difference is only
+            # whether the name already holds something at that point, so the check
+            # has to walk the function in order and track what is bound.
+            bound = {a.arg for a in func.args.args + func.args.kwonlyargs}
+            if func.args.vararg:
+                bound.add(func.args.vararg.arg)
+            if func.args.kwarg:
+                bound.add(func.args.kwarg.arg)
+            for stmt in ast.walk(func):
+                if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                    bound |= {(a.asname or a.name).split(".")[0] for a in stmt.names}
+                if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+                    name = stmt.targets[0].id
+                    value = stmt.value
+                    shadows = (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                               and isinstance(value.func.value, ast.Name)
+                               and value.func.value.id == name and name not in bound)
+                    if shadows:
+                        issues.append(
+                            f"{rel}: `{name} = {name}.{value.func.attr}(...)` reads `{name}` in the "
+                            f"same statement that makes it local, so `{name}` is unbound when the "
+                            "call runs — UnboundLocalError on every request. Take what you need as "
+                            "a parameter: `def endpoint(db: Session = Depends(get_session))`, as "
+                            "routers/examples.py does."
+                        )
+                    bound.add(name)
+                elif isinstance(stmt, (ast.For, ast.comprehension)):
+                    target = getattr(stmt, "target", None)
+                    if isinstance(target, ast.Name):
+                        bound.add(target.id)
+                elif isinstance(stmt, ast.withitem) and isinstance(stmt.optional_vars, ast.Name):
+                    bound.add(stmt.optional_vars.id)
 
+        for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 for kw in node.keywords:
                     if kw.arg != "response_model":

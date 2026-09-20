@@ -647,9 +647,19 @@ async def _verify(
                                      timeout=timeout, network=True)
         checks = await platform_checks(run_id, sid, require_screen, own)
         ok = tests.ok and checks.ok
+        # Re-checked against the routes as they stand *now*, not as they stood when
+        # the tests were written: a repair that drops an endpoint the tests still
+        # call turns every one of them into a 405 the Developer cannot read as its
+        # own doing. Saying so plainly is what gets the endpoint put back.
+        drift = test_issues(run_id, story_tests) if not tests.ok else []
         return {
             "exit_code": 0 if ok else (tests.exit_code or 1),
-            "stdout": tests.stdout[-3500:] + ("" if checks.ok else checks.stdout[:2500]),
+            "stdout": tests.stdout[-3500:]
+            + ("" if checks.ok else checks.stdout[:2500])
+            + ("\n\n=== THE TESTS AND YOUR API NO LONGER AGREE ===\nThese tests were written "
+               "against endpoints that are not there now. If the story needs them, put them "
+               "back; the tests are not yours to change.\n"
+               + "\n".join(f"- {d}" for d in drift[:8]) if drift else ""),
             "stderr": tests.stderr[-1500:],
             "timed_out": tests.timed_out,
             "pytest_ok": tests.ok,

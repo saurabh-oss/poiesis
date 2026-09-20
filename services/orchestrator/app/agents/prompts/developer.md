@@ -82,7 +82,9 @@ chrome ends up with two headings and looks broken.
   `api("/leave-requests", { method: "POST", body: { reason: "Holiday" } })` sends JSON. It
   throws an Error carrying the status and detail when a request fails. Call only paths in
   VERIFIED ROUTES or paths your own router declares in this reply, and use only the fields
-  those responses contain.
+  those responses contain. The second argument is the *request* — `method`, `body`,
+  `headers` — and nothing else. Query parameters belong in the path, or they are dropped
+  without a word: ``api(`/leave-requests?search=${encodeURIComponent(term)}`)``.
 - `h(tag, props, ...children)` builds an element:
   `h("button", { onclick: save, class: "secondary" }, "Save")`. Children can be strings,
   elements or arrays. Event handlers go in props as `onclick`, `onsubmit`, `oninput`.
@@ -203,6 +205,23 @@ a story that passes and a story that burns its repairs.
 5. **Read a row's fields before the session closes, or re-`refresh` it.** Touching an
    attribute on a committed, detached instance raises SQLAlchemy's `DetachedInstanceError`.
    `db.refresh(row)` after `db.commit()` — as routers/examples.py does — avoids it.
+
+## And three that make a screen look finished while showing nothing
+
+These are worse than a traceback, because nothing goes red. The page renders, no error
+appears, the browser check opens it and calls it working — and the user sees an empty box.
+
+6. **`render()` must load the data itself.** A screen whose only `api()` call sits inside a
+   click handler opens empty and stays empty; nobody knows there was anything to see. Fetch
+   and draw in `render()` first — `const rows = await api("/staff")` — then let the button,
+   the search box or the form *reload* it. If the list can be empty for real, say which it
+   is: "No staff yet" is a different sentence from "No staff match that search."
+7. **`table-wrap` goes around the table, not on it.** It is the scrolling, bordered frame:
+   `h("div", { class: "table-wrap" }, h("table", {}, ...))`. On the `<table>` itself it
+   collapses the borders and the table sits unframed on the page.
+8. **`field` goes around the control, not on it.** It stacks a label above an input:
+   `h("div", { class: "field" }, h("label", {}, "Name"), h("input", {}))`. On the `<input>`
+   it makes the input a flex container and the control comes out the wrong size.
 
 ## Hard rules
 

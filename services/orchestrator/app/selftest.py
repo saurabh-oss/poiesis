@@ -145,6 +145,29 @@ UNSEEDED_SCREEN = '''export default {
 };
 '''
 
+# A screen that renders, throws nothing, passes the browser check — and shows the
+# user an empty table over an API that has three rows in it. Taken verbatim in
+# shape from run 17c61ded260a4fed, where every other check called it working.
+CLICK_ONLY_SCREEN = '''export default {
+  title: "Staff directory",
+  story: "S6",
+  async render(root, { api, h }) {
+    const search = h("input", { type: "text", class: "field" });
+    const table = h("table", { class: "table-wrap" }, h("tbody", {}));
+    const empty = h("div", { class: "empty-state" }, h("strong", {}, "No staff found"));
+
+    async function load() {
+      const rows = await api("/staff", { search: search.value });
+      table.querySelector("tbody").innerHTML = "";
+      rows.forEach((r) => table.querySelector("tbody").append(h("tr", {}, h("td", {}, r.name))));
+      empty.hidden = rows.length > 0;
+    }
+
+    root.append(search, h("button", { onclick: () => load() }, "Search"), table, empty);
+  },
+};
+'''
+
 # The five Python mistakes that accounted for about half of every red story.
 BAD_BACKEND = '''from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -188,6 +211,28 @@ def test_asserts_markup(client):
 def test_asserts_a_button_label(client):
     body = client.get("/api/llm-overview").json()
     assert "Learn More" in body["content"]
+'''
+
+# Correct, idiomatic SQLAlchemy that an earlier version of the shadowing check
+# flagged: `query = query.filter(...)` is the same shape as the bug, and only
+# differs in whether the name already holds a value. A check that sends the
+# Developer to "fix" this is worse than no check at all.
+GOOD_BACKEND = '''from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from ..db import get_session
+from ..models import Example
+from ..schemas import ExampleOut
+
+router = APIRouter()
+
+
+@router.get("/staff", response_model=list[ExampleOut])
+def list_staff(team: str | None = None, db: Session = Depends(get_session)):
+    query = db.query(Example)
+    if team:
+        query = query.filter(Example.label == team)
+    return query.order_by(Example.id).all()
 '''
 
 SOUND_TESTS = '''def test_lists_overviews(client):
@@ -303,6 +348,12 @@ async def main() -> int:
                checks.backend_issues(rid, {"backend/app/routers/somebody_else.py"}) == [])
         repo.workspace_path(rid).joinpath("backend/app/routers/broken_backend.py").unlink()
 
+        repo.write_files(rid, {"backend/app/routers/good_backend.py": GOOD_BACKEND})
+        clean = checks.backend_issues(rid, {"backend/app/routers/good_backend.py"})
+        show("correct SQLAlchemy", "\n".join(clean) or "(no findings)")
+        expect("building a query incrementally is not mistaken for shadowing", clean == [])
+        repo.workspace_path(rid).joinpath("backend/app/routers/good_backend.py").unlink()
+
         # Tests that no implementation could satisfy. The Developer may not edit
         # tests, so these used to deadlock a story into a permanent red.
         repo.write_files(rid, {"tests/test_impossible.py": IMPOSSIBLE_TESTS,
@@ -375,6 +426,24 @@ async def main() -> int:
         repo.workspace_path(rid).joinpath("backend/app/routers/unseeded.py").unlink()
         repo.workspace_path(rid).joinpath("frontend/screens/unseeded.js").unlink()
         checks.regenerate_registry(rid)
+
+        repo.write_files(rid, {"frontend/screens/staff.js": CLICK_ONLY_SCREEN})
+        checks.regenerate_registry(rid)
+        c = await checks.platform_checks(rid, "S6", True)
+        show("checks for a screen that only loads on click", c.stdout)
+        expect("a screen that never loads in render() is caught",
+               not c.ok and "never loads anything" in c.stdout)
+        expect("query parameters passed as request options are caught",
+               "silently drops search" in c.stdout)
+        expect("the wrapper classes are caught on the elements they wrap",
+               'class "table-wrap" on the <table>' in c.stdout
+               and 'class "field" on the <input>' in c.stdout)
+        repo.workspace_path(rid).joinpath("frontend/screens/staff.js").unlink()
+        checks.regenerate_registry(rid)
+
+        example = scaffold_root() / "web-app" / "frontend" / "screens" / "example.js"
+        expect("the scaffold's own example screen breaks none of those rules",
+               checks._screen_shell_issues("example.js", example.read_text(encoding="utf-8")) == [])
 
         repo.write_files(rid, {"backend/app/routers/items.py": BARE_ROUTER,
                                "frontend/screens/items.js": ITEMS})
