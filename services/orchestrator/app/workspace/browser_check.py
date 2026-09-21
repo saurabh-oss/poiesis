@@ -44,6 +44,25 @@ PLACEHOLDERS = ("Scaffold is running", "No screens yet")
 def short(url):
     return url.split(base.rstrip("/"), 1)[-1] or "/"
 
+
+def values_of(item):
+    """Strings from one API item distinctive enough to look for on the page.
+
+    Ids and timestamps are skipped: they are either absent from the rendering or
+    reformatted by it, so neither their presence nor their absence proves
+    anything about whether the screen displayed what it fetched.
+    """
+    if not isinstance(item, dict):
+        return []
+    out = []
+    for k, v in item.items():
+        if k.lower() == "id" or k.lower().endswith("_id") or k.lower().endswith("_at"):
+            continue
+        if isinstance(v, str) and 3 <= len(v) <= 120 and not v[:4].isdigit():
+            out.append(v)
+    # Longest first: a title is far better evidence than a status everything shares.
+    return sorted(out, key=len, reverse=True)[:5]
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     page = browser.new_page(viewport={"width": 1280, "height": 860})
@@ -55,6 +74,25 @@ with sync_playwright() as p:
             if "/api/" in r.url and r.status >= 400 else None)
     page.on("requestfailed", lambda r: errors.append(f"{r.method} {short(r.url)} failed")
             if "/api/" in r.url else None)
+
+    # What each screen fetched, so the check can ask the only question that
+    # matters to someone looking at the page: did what it fetched reach the screen?
+    fetched = []
+
+    def record(r):
+        if "/api/" not in r.url or r.status >= 400 or r.request.method != "GET":
+            return
+        try:
+            body = r.json()
+        except Exception:
+            return
+        if isinstance(body, list):
+            sample = values_of(body[0]) if body else []
+            fetched.append({"path": short(r.url), "count": len(body), "sample": sample})
+        elif isinstance(body, dict):
+            fetched.append({"path": short(r.url), "count": None, "sample": values_of(body)})
+
+    page.on("response", record)
 
     try:
         page.goto(base, wait_until="load", timeout=30000)
@@ -82,6 +120,7 @@ with sync_playwright() as p:
 
     for s in screens:
         start = len(errors)
+        seen_before = len(fetched)
         page.evaluate("h => { location.hash = h; }", s["hash"])
         for _ in range(60):
             cur = page.evaluate("() => window.__poiesis && window.__poiesis.current")
@@ -101,12 +140,37 @@ with sync_playwright() as p:
         for ph in PLACEHOLDERS:
             if ph in text:
                 problems.append(f"The screen still shows '{ph}'.")
+
+        calls = fetched[seen_before:]
+        controls = page.evaluate(
+            "() => document.querySelectorAll("
+            "'#app input, #app select, #app textarea, #app button, #app a[href^=\"#\"]').length")
+        # A screen that neither reads the application's data nor offers a control
+        # is inert: it renders, it passes every other check, and it is of no use.
+        if not calls and not controls:
+            problems.append(
+                "The screen never called the API and has no controls: it shows only text it "
+                "had built in. Load the story's data in render() and show it.")
+        for c in calls:
+            if c["count"] == 0 or not c["sample"]:
+                continue
+            if not any(v in text for v in c["sample"]):
+                how_many = "1 record" if c["count"] is None else f"{c['count']} item(s)"
+                problems.append(
+                    f"GET {c['path']} returned {how_many}, but none of it appears on the "
+                    f"screen (looked for {', '.join(repr(v) for v in c['sample'][:3])}). "
+                    "The data was fetched and then not displayed — this is what an empty "
+                    "table over a full database looks like.")
+                break
+
         shot = f"{s['id']}.png"
         page.screenshot(path=f"{out}/shots/{shot}", full_page=True)
         result["screens"].append({
             "id": s["id"], "title": s.get("title"), "story": s.get("story", ""),
             "example": bool(s.get("example")), "ok": not problems, "problems": problems,
             "text": text.strip()[:300], "shot": shot,
+            "fetched": [{"path": c["path"], "count": c["count"]} for c in calls],
+            "controls": controls,
         })
 
     result["ok"] = (not result["problems"] and bool(real)

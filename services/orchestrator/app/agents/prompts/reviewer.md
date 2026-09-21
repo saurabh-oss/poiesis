@@ -32,6 +32,14 @@ the content the story promised them does not meet the criterion, and neither doe
 state where the content should be. File a blocker for that story and score
 `acceptance_criteria_met` to match.
 
+For each screen the live check also reports `fetched` — every GET it made while rendering
+and how many records came back — and `controls`, how many inputs, buttons and links it
+offers. Read these against the text. A screen whose `fetched` shows 42 records returned and
+whose text is an empty state fetched its data and failed to display it: that is a blocker,
+not a cosmetic issue, and it is invisible in the code, which usually looks correct. A screen
+with `controls: 0` delivering a story whose criteria say the user can triage, merge, assign,
+filter or save has not met them: the verb in the criterion has nowhere to happen.
+
 Attribute every finding to the `story_id` it belongs to. A rework round rebuilds only
 the stories you name, so an unattributed finding forces the whole sprint to be rebuilt.
 Leave `story_id` out only when the problem genuinely spans the increment.

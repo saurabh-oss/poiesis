@@ -31,6 +31,9 @@ from .interface import (
     PACKAGE_DIR,
     REGISTRY,
     SCREENS_DIR,
+    _inserts_by_table,
+    _seed_rows,
+    _sql_statements,
     declared_routes,
     router_files,
 )
@@ -1040,70 +1043,6 @@ async def platform_checks(
 SHARED_PY = ("backend/app/models.py", "backend/app/schemas.py")
 SHARED_SQL = "db/init.sql"
 _TABLE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_]\w*)\s*\([\s\S]*?\)\s*;", re.I)
-_LEADING_NOISE = re.compile(r"\A(?:\s|--[^\n]*\n|/\*[\s\S]*?\*/)*")
-_INSERT_HEAD = re.compile(r"\AINSERT\s+INTO\s+([A-Za-z_]\w*)", re.I)
-
-
-def _sql_statements(sql: str) -> list[str]:
-    """Split on semicolons that are not inside a quoted string or a comment.
-
-    Seed rows are prose written by a model - "the charge failed; I was billed
-    twice" - so splitting on every semicolon tears statements in half. Comments
-    matter for the same reason: a model labels its seed block with a line like
-    "-- 42 tickets; every status", and an apostrophe or semicolon in there would
-    otherwise be read as SQL.
-    """
-    out, start, i, quote = [], 0, 0, ""
-    while i < len(sql):
-        ch = sql[i]
-        if quote:
-            if ch == quote:
-                if i + 1 < len(sql) and sql[i + 1] == quote:  # '' escapes a quote
-                    i += 1
-                else:
-                    quote = ""
-        elif ch in "'\"":
-            quote = ch
-        elif sql.startswith("--", i):
-            i = sql.find("\n", i)
-            if i < 0:
-                break
-        elif sql.startswith("/*", i):
-            end = sql.find("*/", i + 2)
-            i = len(sql) if end < 0 else end + 1
-        elif ch == ";":
-            statement = sql[start:i + 1].strip()
-            if statement:
-                out.append(statement)
-            start = i + 1
-        i += 1
-    tail = sql[start:].strip()
-    if tail:
-        out.append(tail)
-    return out
-
-
-def _seed_rows(statements: list[str]) -> int:
-    """Roughly how many rows a table's INSERTs carry.
-
-    One statement is not one row: models write a table's whole seed as a single
-    INSERT with a tuple per line, so counting statements would score 42 tickets
-    and 5 tickets identically.
-    """
-    return sum(len(re.findall(r"\)\s*,\s*\(", s)) + 1 for s in statements)
-
-
-def _inserts_by_table(sql: str) -> dict[str, list[str]]:
-    """Every INSERT statement in `sql`, grouped by the table it writes to."""
-    grouped: dict[str, list[str]] = {}
-    for statement in _sql_statements(sql):
-        # A statement carries the comment block the model wrote above it.
-        head = _INSERT_HEAD.match(statement[_LEADING_NOISE.match(statement).end():])
-        if head:
-            grouped.setdefault(head.group(1).lower(), []).append(statement)
-    return grouped
-
-
 def _elsewhere(root: Path, skip: str, proposed: dict[str, str]) -> str:
     """Everything in the backend and tests except one file, including proposed edits."""
     texts: list[str] = []

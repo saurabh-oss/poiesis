@@ -222,6 +222,13 @@ appears, the browser check opens it and calls it working — and the user sees a
 8. **`field` goes around the control, not on it.** It stacks a label above an input:
    `h("div", { class: "field" }, h("label", {}, "Name"), h("input", {}))`. On the `<input>`
    it makes the input a flex container and the control comes out the wrong size.
+9. **Every verb in your acceptance criteria needs somewhere to happen.** If a criterion says
+   the user can triage, merge, assign, filter, confirm or save, then the screen needs the
+   control that does it and the endpoint behind it, in this story, not a later one. A screen
+   that only displays what a criterion says the user can *change* has not delivered that
+   criterion, and the platform counts the controls on every screen to check. After the action
+   succeeds, show the new state without a page reload — re-fetch and redraw, so the user sees
+   that it worked.
 
 ## Hard rules
 

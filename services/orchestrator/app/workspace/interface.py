@@ -264,6 +264,93 @@ def route_contract(run_id: str) -> str:
     )
 
 
+_LEADING_NOISE = re.compile(r"\A(?:\s|--[^\n]*\n|/\*[\s\S]*?\*/)*")
+_INSERT_HEAD = re.compile(r"\AINSERT\s+INTO\s+([A-Za-z_]\w*)", re.I)
+
+
+def _sql_statements(sql: str) -> list[str]:
+    """Split on semicolons that are not inside a quoted string or a comment.
+
+    Seed rows are prose written by a model - "the charge failed; I was billed
+    twice" - so splitting on every semicolon tears statements in half. Comments
+    matter for the same reason: a model labels its seed block with a line like
+    "-- 42 tickets; every status", and an apostrophe or semicolon in there would
+    otherwise be read as SQL.
+    """
+    out, start, i, quote = [], 0, 0, ""
+    while i < len(sql):
+        ch = sql[i]
+        if quote:
+            if ch == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:  # '' escapes a quote
+                    i += 1
+                else:
+                    quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif sql.startswith("--", i):
+            i = sql.find("\n", i)
+            if i < 0:
+                break
+        elif sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = len(sql) if end < 0 else end + 1
+        elif ch == ";":
+            statement = sql[start:i + 1].strip()
+            if statement:
+                out.append(statement)
+            start = i + 1
+        i += 1
+    tail = sql[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def _seed_rows(statements: list[str]) -> int:
+    """Roughly how many rows a table's INSERTs carry.
+
+    One statement is not one row: models write a table's whole seed as a single
+    INSERT with a tuple per line, so counting statements would score 42 tickets
+    and 5 tickets identically.
+    """
+    return sum(len(re.findall(r"\)\s*,\s*\(", s)) + 1 for s in statements)
+
+
+def _inserts_by_table(sql: str) -> dict[str, list[str]]:
+    """Every INSERT statement in `sql`, grouped by the table it writes to."""
+    grouped: dict[str, list[str]] = {}
+    for statement in _sql_statements(sql):
+        # A statement carries the comment block the model wrote above it.
+        head = _INSERT_HEAD.match(statement[_LEADING_NOISE.match(statement).end():])
+        if head:
+            grouped.setdefault(head.group(1).lower(), []).append(statement)
+    return grouped
+
+
+def _schema_only(body: str) -> str:
+    """init.sql as the Developer needs to see it: every table, none of the rows.
+
+    A seeded demonstration database is tens of kilobytes of INSERTs. Clipped to a
+    few hundred characters and captioned "return it complete, keeping everything
+    already in it", it asked for something impossible: the model saw the schema
+    and faithfully returned the schema, dropping every seeded row, on every single
+    repair attempt. It needs the columns to write correct queries; it never needs
+    the rows. So it is shown the schema in full and told the rows are kept for it.
+    """
+    schema = [s for s in _sql_statements(body) if "INSERT INTO" not in s.upper()]
+    counts = {t: _seed_rows(v) for t, v in _inserts_by_table(body).items()}
+    held = ", ".join(f"{n} in {t}" for t, n in sorted(counts.items()) if n) or "none yet"
+    return (
+        "\n".join(schema)
+        + f"\n\n-- Seeded rows currently in this file, kept by the platform: {held}.\n"
+        "-- They are NOT shown here and you must NOT reproduce them. Return init.sql\n"
+        "-- with the table definitions only; the rows above are preserved for you.\n"
+        "-- Add INSERT statements yourself only when this story is the one that seeds\n"
+        "-- a new table, and then only for that table.\n"
+    )
+
+
 def _blocks(run_id: str, paths: list[tuple[str, int]]) -> list[str]:
     root = workspace_path(run_id)
     blocks: list[str] = []
@@ -272,6 +359,9 @@ def _blocks(run_id: str, paths: list[tuple[str, int]]) -> list[str]:
         if not target.is_file():
             continue
         body = target.read_text(encoding="utf-8", errors="replace")
+        if rel.endswith("init.sql"):
+            blocks.append(f"### {rel}\n{_schema_only(body)}")
+            continue
         clipped = body[:budget]
         if len(body) > budget:
             clipped += f"\n… ({len(body) - budget} more characters)"

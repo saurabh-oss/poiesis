@@ -24,7 +24,7 @@ from .graph.nodes.build import _verify
 from .graph.nodes.scaffold import materialise
 from .graph.nodes.ship import _attribute_to_last_writer, _sole_owned_files
 from .workspace import browser_check, checks, deployment, repo
-from .workspace.interface import import_contract, route_contract
+from .workspace.interface import excerpt, import_contract, route_contract
 from .workspace.runner import pytest_command, run_in_sandbox
 
 ROUTER = '''from fastapi import APIRouter
@@ -99,6 +99,24 @@ ITEMS = '''export default {
     const rows = await api("/items");
     root.append(h("section", { class: "panel stack" }, h("h2", {}, "Items"),
       h("ul", { class: "list" }, rows.map((r) => h("li", {}, r.name)))));
+  },
+};
+'''
+
+# The failure that passed every check and shipped: fetches its data, renders an
+# empty state anyway. Nothing throws, the shell is fine, there is plenty of text.
+HOLLOW = '''export default {
+  title: "Hollow",
+  story: "S4",
+  async render(root, { api, h }) {
+    const rows = await api("/items");
+    const body = h("tbody", {});
+    root.append(h("section", { class: "panel stack" },
+      h("h2", {}, "Everything we hold"),
+      h("div", { class: "table-wrap" }, h("table", {}, body)),
+      h("div", { class: "empty-state" },
+        h("strong", {}, "Nothing to show yet"),
+        "Records will appear here once they have been added to the system.")));
   },
 };
 '''
@@ -476,6 +494,19 @@ async def main() -> int:
                kept["db/init.sql"].count("('Gold')") == 0
                and any("thinned the seed data for crews (1 left of 4)" in n for n in notes))
 
+        # Why the rows kept being dropped in the first place: the Developer was shown
+        # init.sql clipped to 900 characters and told to return it complete.
+        repo.write_files(rid, {"db/init.sql": seeded})
+
+        block = excerpt(rid, [("db/init.sql", 900)])
+        show("what the Developer is shown of a seeded init.sql", block)
+        expect("the Developer sees every table definition",
+               "CREATE TABLE crews" in block)
+        expect("the Developer is shown no seed rows to copy",
+               "('Gold')" not in block and "('Blue')" not in block)
+        expect("and is told the rows are held for it",
+               "4 in crews" in block and "must NOT reproduce them" in block)
+
         repo.write_files(rid, {"backend/app/routers/items.py": BARE_ROUTER,
                                "frontend/screens/items.js": ITEMS})
         notes = checks.mount_bare_routers(rid)
@@ -486,7 +517,8 @@ async def main() -> int:
         c = await checks.platform_checks(rid, "S4", True)
         expect("the moved router satisfies its screen's checks", c.ok)
 
-        repo.write_files(rid, {"frontend/screens/model_count.js": BAD_RUNTIME})
+        repo.write_files(rid, {"frontend/screens/model_count.js": BAD_RUNTIME,
+                               "frontend/screens/hollow.js": HOLLOW})
         checks.regenerate_registry(rid)
         repo.commit(rid, "stories")
         out = await deployment.deploy(rid)
@@ -500,6 +532,13 @@ async def main() -> int:
             expect("the working screen is reported working", by_id.get("llm_overview", {}).get("ok") is True)
             expect("the throwing screen is reported broken", by_id.get("model_count", {}).get("ok") is False)
             expect("the moved router's screen works in the browser", by_id.get("items", {}).get("ok") is True)
+            hollow = by_id.get("hollow", {})
+            show("the hollow screen's verdict", json.dumps(hollow, indent=1))
+            expect("a screen that fetches its data and shows an empty state is reported broken",
+                   hollow.get("ok") is False
+                   and any("fetched and then not displayed" in p for p in hollow.get("problems", [])))
+            expect("the working screen's fetches are recorded for the Reviewer",
+                   any(f.get("count") == 2 for f in by_id.get("items", {}).get("fetched", [])))
     finally:
         subprocess.run(["docker", "compose", "-p", deployment.project_name(rid), "down", "-v",
                         "--remove-orphans"], capture_output=True)

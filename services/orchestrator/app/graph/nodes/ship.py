@@ -20,6 +20,17 @@ from ...workspace import checks as platform_checks_mod
 from ...workspace import deployment as runtime
 from ...workspace.interface import EXAMPLE_ROUTER, EXAMPLE_SCREEN
 from ..gates import raise_gate
+
+
+def _seeded_row_count(run_id: str) -> int:
+    """How many rows the shipped database starts with, ignoring the worked example."""
+    path = repo.workspace_path(run_id) / "db" / "init.sql"
+    if not path.is_file():
+        return 0
+    grouped = platform_checks_mod._inserts_by_table(
+        path.read_text(encoding="utf-8", errors="replace"))
+    return sum(platform_checks_mod._seed_rows(v)
+               for t, v in grouped.items() if t != "example")
 from ..state import RunState
 from ..store import save_artifact, set_stage
 
@@ -165,11 +176,35 @@ def live_check(state: RunState) -> dict[str, Any]:
     screens = [s for s in v.get("screens", []) if not s.get("example")]
     rows = [{"id": s.get("id"), "title": s.get("title"), "story": s.get("story"),
              "ok": bool(s.get("ok")), "problems": s.get("problems", []),
-             "text": str(s.get("text") or "")[:300]} for s in screens]
+             "text": str(s.get("text") or "")[:300],
+             # What the screen actually pulled from the database and what a user
+             # can do on it: "it opened without errors" was never enough to tell
+             # a working application from a set of empty pages.
+             "fetched": s.get("fetched", []), "controls": s.get("controls", 0)}
+            for s in screens]
+    shown = sum(f.get("count") or 0 for s in rows for f in s["fetched"])
+    seeded = _seeded_row_count(state["run_id"])
+    if v.get("ok") and seeded and not shown:
+        # Every screen opened, nothing threw, and not one record reached any of
+        # them. An endpoint answering [] over a full table looks identical to a
+        # healthy app until you count what the user can actually see.
+        return {"working": False, "screens": rows, "findings": [{
+            "severity": "blocker", "file": "backend/app/routers/",
+            "story_id": "", "finding":
+                f"The database ships with {seeded} seeded row(s), but across every screen the "
+                "application displayed none of them. The screens open and the API answers, so "
+                "the endpoints are returning empty results over a populated database — check "
+                "the queries and the filters behind each screen.",
+            "required_fix": "Make each screen's endpoint return the seeded rows, and show them.",
+        }], "summary": f"Every screen opened, but not one of the {seeded} seeded record(s) "
+                       "reached the interface."}
     if v.get("ok"):
+        inert = [s["id"] for s in rows if not s["controls"]]
         return {"working": True, "findings": [], "screens": rows,
                 "summary": f"All {len(screens)} screen(s) opened in a real browser against "
-                           "the running API without errors."}
+                           f"the running API without errors, showing {shown} record(s) between "
+                           f"them. Screens with no controls at all: "
+                           f"{', '.join(inert) if inert else 'none'}."}
 
     findings: list[dict[str, Any]] = [{
         "severity": "blocker", "file": "frontend/screens/",
