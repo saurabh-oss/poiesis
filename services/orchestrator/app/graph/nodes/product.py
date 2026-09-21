@@ -4,6 +4,7 @@ from __future__ import annotations
 from ...agents.base import PRODUCT_OWNER
 from ...config import pack
 from ...events import emit
+from ...integrations import tracker
 from ..gates import raise_gate
 from ..memo import remember
 from ..state import RunState
@@ -96,6 +97,7 @@ async def backlog(state: RunState) -> RunState:
             ],
         )
         if response.get("decision") != "revise" or attempt == MAX_REVISIONS:
+            await tracker.on_backlog(run_id, state, doc)
             return {"backlog": doc}
         feedback = f"\n\nSTAKEHOLDER REVISION REQUEST:\n{response.get('notes', '')}"
 

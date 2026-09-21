@@ -20,6 +20,7 @@ from typing import Any
 from ...agents.base import DEVELOPER, TESTER
 from ...config import pack
 from ...events import emit
+from ...integrations import tracker
 from ...llm import ReplyTruncated, UnparseableReply
 from ...reuse.retriever import render_for_prompt
 from ...workspace import repo
@@ -754,6 +755,7 @@ async def build(state: RunState) -> RunState:
         story = _story(state, entry["id"])
         await emit(run_id, f"Starting {story['id']}: {story.get('title','')}",
                    agent="developer", stage="build", data={"story": story})
+        await tracker.on_story_started(run_id, story["id"])
 
         sid = story["id"]
         impl = await _implement_with_recovery(run_id, state, story, rnd)
@@ -784,6 +786,7 @@ async def build(state: RunState) -> RunState:
                 result["reason"] = decision.get("notes") or "Dropped by the stakeholder."
                 await emit(run_id, f"{sid}: dropped from the sprint — {result['reason']}",
                            agent="governance", stage="build", level="warn")
+            await tracker.on_story_result(run_id, result, rnd)
             if decision.get("decision") == "abort":
                 break
             continue
@@ -916,8 +919,9 @@ async def build(state: RunState) -> RunState:
                 result["reason"] = decision.get("notes") or "Dropped by the stakeholder."
                 await emit(run_id, f"{sid}: dropped from the sprint — {result['reason']}",
                            agent="governance", stage="build", level="warn")
-            if decision.get("decision") == "abort":
-                break
+        await tracker.on_story_result(run_id, result, rnd)
+        if not exec_result.ok and decision.get("decision") == "abort":
+            break
 
     await _regressions(run_id, rnd, timeout, results)
     regenerate_registry(run_id)

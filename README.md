@@ -95,6 +95,35 @@ generated app runs with no internet access. Stories compose it (`panel`, `card`,
 `empty-state`, `spinner`, …) rather than writing their own CSS, so every generated app looks
 like a finished product on day one, not a wireframe.
 
+## Jira
+
+Set `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` and `JIRA_PROJECT_KEY` in `.env`
+(see `.env.example`) and every run is mirrored into that Jira Cloud project as it happens:
+
+| Poiesis | Jira |
+|---|---|
+| The run (product vision, scope, metrics) | **Initiative** |
+| Backlog epic | **Epic**, under the initiative |
+| Backlog story (acceptance criteria, estimate) | **Story**, under its epic, with story points |
+| Sprint one | A **Sprint** on the project's scrum board, started, holding exactly its stories |
+| Story being built / green / red | **In Progress** / **Done** with what was verified / stays open, labelled `poiesis-red`, with the failure |
+| Release | Comment and a link to the running app on the initiative; sprint closed |
+
+Status changes follow each workflow's status *categories*, so a project whose "Done" is
+called "Closed" still works. Initiatives need Jira Premium with the hierarchy configured;
+without them epics are created with no parent and the run's log says so. Jira is a mirror,
+never a dependency: an outage, a revoked token or a refused field costs a warning, not the
+run. Nothing is duplicated when a gate replays a stage.
+
+```bash
+docker compose exec orchestrator python -m app.integrations.jira check          # verify the project
+docker compose exec orchestrator python -m app.integrations.tracker backfill <run_id>   # mirror a past run
+docker compose exec orchestrator python -m app.integrations.selftest            # no Jira needed
+```
+
+`GET /api/runs/{id}/tracker` returns a run's Jira keys and links;
+`POST /api/runs/{id}/tracker/sync` mirrors a past run. Neither makes a model call.
+
 ## Repository layout
 
 ```

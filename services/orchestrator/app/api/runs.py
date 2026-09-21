@@ -7,6 +7,7 @@ from ..db import Artifact, Deployment, Event, Evidence, Run, session
 from ..graph import engine
 from ..graph.graph import STAGE_DETAIL, STAGES
 from ..ingest.pipeline import ingest_sources
+from ..integrations import tracker
 from ..workspace import deployment as runtime
 from ..workspace import repo
 from .schemas import RunCreate
@@ -151,6 +152,27 @@ async def run_evidence(run_id: str):
              "locator": e.locator, "content": e.content[:1500]}
             for e in rows
         ]
+
+
+@router.get("/{run_id}/tracker")
+async def run_tracker(run_id: str):
+    """Where this run lives in Jira: initiative, epics, stories and sprint, with links."""
+    with session() as s:
+        if s.get(Run, run_id) is None:
+            raise HTTPException(404, "run not found")
+    return tracker.mapping(run_id)
+
+
+@router.post("/{run_id}/tracker/sync")
+async def sync_tracker(run_id: str):
+    """Mirror a run into Jira after the fact. No model calls; safe to repeat."""
+    with session() as s:
+        if s.get(Run, run_id) is None:
+            raise HTTPException(404, "run not found")
+    if not tracker.configured():
+        raise HTTPException(409, "Jira is not configured on this orchestrator")
+    await tracker.backfill(run_id)
+    return tracker.mapping(run_id)
 
 
 @router.get("/{run_id}/file")

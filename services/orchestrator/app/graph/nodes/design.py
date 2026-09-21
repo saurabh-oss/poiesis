@@ -4,6 +4,7 @@ from __future__ import annotations
 from ...agents.base import ARCHITECT, PLANNER
 from ...config import settings
 from ...events import emit
+from ...integrations import tracker
 from ...kg.client import kg
 from ...reuse.retriever import portfolio_context, render_for_prompt
 from ..gates import raise_gate
@@ -128,4 +129,5 @@ async def plan_sprint(state: RunState) -> RunState:
         sprint["stories"] = sprint.get("stories", [])[:capacity]
         await save_artifact(run_id, "sprint", "sprint", sprint)
 
+    await tracker.on_sprint(run_id, state, sprint)
     return {"sprint": sprint}

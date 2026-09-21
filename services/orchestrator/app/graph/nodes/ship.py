@@ -14,12 +14,15 @@ from typing import Any
 from ...agents.base import RELEASE, REVIEWER
 from ...config import pack
 from ...events import emit
+from ...integrations import tracker
 from ...kg.client import kg
 from ...workspace import browser_check, repo
 from ...workspace import checks as platform_checks_mod
 from ...workspace import deployment as runtime
 from ...workspace.interface import EXAMPLE_ROUTER, EXAMPLE_SCREEN
 from ..gates import raise_gate
+from ..state import RunState
+from ..store import save_artifact, set_stage
 
 
 def _seeded_row_count(run_id: str) -> int:
@@ -31,8 +34,7 @@ def _seeded_row_count(run_id: str) -> int:
         path.read_text(encoding="utf-8", errors="replace"))
     return sum(platform_checks_mod._seed_rows(v)
                for t, v in grouped.items() if t != "example")
-from ..state import RunState
-from ..store import save_artifact, set_stage
+
 
 # Files whose breakage can take the whole application down rather than one
 # screen: the database, the shared schema, and a router (an import error in one
@@ -482,6 +484,7 @@ async def release(state: RunState) -> RunState:
                                f"{', '.join(result['dropped']) or 'nothing'}, but it still is not "
                                "proven working — held instead. Try 'Send it back' or investigate directly.",
                        agent="governance", stage="release", level="warn", data=result)
+            await tracker.on_release(run_id, state, {"status": "held", "notes": notes_in})
             return {"release": {"status": "held", "notes": notes_in}, "deployment": dep}
 
         for sid in result["dropped"]:
@@ -517,6 +520,7 @@ async def release(state: RunState) -> RunState:
         await emit(run_id, f"Released {notes.get('version')} as a base app at {url} — "
                            f"{', '.join(follow_up)} left for a follow-up run",
                    agent="release", stage="release", data=notes)
+        await tracker.on_release(run_id, state, notes)
         return {"release": notes, "deployment": dep, "test_report": state["test_report"]}
 
     if decision == "rebuild" and can_rebuild:
@@ -528,6 +532,7 @@ async def release(state: RunState) -> RunState:
             findings.insert(0, {"severity": "blocker", "file": "(stakeholder)",
                                 "finding": f"The stakeholder sent this back: {notes_in}",
                                 "required_fix": notes_in})
+        await tracker.on_release(run_id, state, {"status": "rebuild", "notes": notes_in})
         return {"release": {"status": "rebuild", "notes": notes_in},
                 "human_rebuilds": rebuilds + 1,
                 "review": {**rv, "blocking_findings": findings}}
@@ -537,6 +542,7 @@ async def release(state: RunState) -> RunState:
         await emit(run_id, "Release held" + ("" if releasable else
                                              " — the app is not proven working"),
                    agent="governance", stage="release", level="warn", data=response)
+        await tracker.on_release(run_id, state, {"status": "held", "notes": notes_in})
         return {"release": {"status": "held", "notes": notes_in}}
 
     notes = await RELEASE.json(
@@ -568,6 +574,7 @@ async def release(state: RunState) -> RunState:
                        + (f"open it at {url}" if url
                           else f"run it with: {notes.get('run_command','')}"),
                agent="release", stage="release", data=notes)
+    await tracker.on_release(run_id, state, notes)
     return {"release": notes}
 
 

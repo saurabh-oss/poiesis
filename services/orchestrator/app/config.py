@@ -51,6 +51,18 @@ class Settings(BaseSettings):
     # Seconds to wait for every service to report healthy on a first build.
     poiesis_deploy_timeout: int = 600
 
+    # Jira Cloud. Off unless all four of the first block are set; a run never waits
+    # on Jira and never fails because of it (see integrations/tracker.py).
+    jira_base_url: str = ""            # https://your-site.atlassian.net
+    jira_email: str = ""               # the Atlassian account the API token belongs to
+    jira_api_token: str = ""           # id.atlassian.com > Security > API tokens
+    jira_project_key: str = ""         # every run lands in this one project
+    # A run becomes one issue of this type, parent of its epics. Needs Jira Premium
+    # with the hierarchy set up; without it epics are created with no parent.
+    jira_initiative_type: str = "Initiative"
+    jira_board_id: int = 0             # 0 = the project's first scrum board
+    jira_sprint_days: int = 14
+
     @property
     def checkpoint_dsn(self) -> str:
         """LangGraph's Postgres saver wants a raw libpq DSN, not a SQLAlchemy URL."""
