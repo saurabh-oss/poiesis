@@ -1040,6 +1040,68 @@ async def platform_checks(
 SHARED_PY = ("backend/app/models.py", "backend/app/schemas.py")
 SHARED_SQL = "db/init.sql"
 _TABLE = re.compile(r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_]\w*)\s*\([\s\S]*?\)\s*;", re.I)
+_LEADING_NOISE = re.compile(r"\A(?:\s|--[^\n]*\n|/\*[\s\S]*?\*/)*")
+_INSERT_HEAD = re.compile(r"\AINSERT\s+INTO\s+([A-Za-z_]\w*)", re.I)
+
+
+def _sql_statements(sql: str) -> list[str]:
+    """Split on semicolons that are not inside a quoted string or a comment.
+
+    Seed rows are prose written by a model - "the charge failed; I was billed
+    twice" - so splitting on every semicolon tears statements in half. Comments
+    matter for the same reason: a model labels its seed block with a line like
+    "-- 42 tickets; every status", and an apostrophe or semicolon in there would
+    otherwise be read as SQL.
+    """
+    out, start, i, quote = [], 0, 0, ""
+    while i < len(sql):
+        ch = sql[i]
+        if quote:
+            if ch == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:  # '' escapes a quote
+                    i += 1
+                else:
+                    quote = ""
+        elif ch in "'\"":
+            quote = ch
+        elif sql.startswith("--", i):
+            i = sql.find("\n", i)
+            if i < 0:
+                break
+        elif sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = len(sql) if end < 0 else end + 1
+        elif ch == ";":
+            statement = sql[start:i + 1].strip()
+            if statement:
+                out.append(statement)
+            start = i + 1
+        i += 1
+    tail = sql[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def _seed_rows(statements: list[str]) -> int:
+    """Roughly how many rows a table's INSERTs carry.
+
+    One statement is not one row: models write a table's whole seed as a single
+    INSERT with a tuple per line, so counting statements would score 42 tickets
+    and 5 tickets identically.
+    """
+    return sum(len(re.findall(r"\)\s*,\s*\(", s)) + 1 for s in statements)
+
+
+def _inserts_by_table(sql: str) -> dict[str, list[str]]:
+    """Every INSERT statement in `sql`, grouped by the table it writes to."""
+    grouped: dict[str, list[str]] = {}
+    for statement in _sql_statements(sql):
+        # A statement carries the comment block the model wrote above it.
+        head = _INSERT_HEAD.match(statement[_LEADING_NOISE.match(statement).end():])
+        if head:
+            grouped.setdefault(head.group(1).lower(), []).append(statement)
+    return grouped
 
 
 def _elsewhere(root: Path, skip: str, proposed: dict[str, str]) -> str:
@@ -1106,7 +1168,26 @@ def preserve_shared(run_id: str, files: dict[str, str]) -> tuple[dict[str, str],
         kept_tables = {m.group(1).lower() for m in _TABLE.finditer(new_sql)}
         lost_tables = [m for m in _TABLE.finditer(old_sql) if m.group(1).lower() not in kept_tables]
         if lost_tables:
-            out[SHARED_SQL] = (new_sql.rstrip() + "\n\n"
-                               + "\n\n".join(m.group(0) for m in lost_tables) + "\n")
+            new_sql = (new_sql.rstrip() + "\n\n"
+                       + "\n\n".join(m.group(0) for m in lost_tables) + "\n")
             restored += [f"{SHARED_SQL}: {m.group(1)}" for m in lost_tables]
+
+        # Restoring the table but not its rows loses the data the application was
+        # meant to open with, and nothing goes red: every screen still renders,
+        # against an empty database. Only the all-or-nothing case is put back,
+        # because a story that rewrote some of a table's rows may mean it.
+        was = _inserts_by_table(old_sql)
+        now = _inserts_by_table(new_sql)
+        readded = [t for t in sorted(was) if was[t] and not now.get(t)]
+        if readded:
+            new_sql = (new_sql.rstrip() + "\n\n"
+                       + "\n\n".join("\n".join(was[t]) for t in readded) + "\n")
+            restored += [f"{SHARED_SQL}: {_seed_rows(was[t])} seed row(s) for {t}"
+                         for t in readded]
+        thinned = [f"{t} ({_seed_rows(now[t])} left of {_seed_rows(was[t])})" for t in sorted(was)
+                   if now.get(t) and _seed_rows(now[t]) * 2 < _seed_rows(was[t])]
+        if thinned:
+            restored.append(f"{SHARED_SQL}: NOT restored, check this - the rewrite thinned the "
+                            f"seed data for {', '.join(thinned)}")
+        out[SHARED_SQL] = new_sql
     return out, restored

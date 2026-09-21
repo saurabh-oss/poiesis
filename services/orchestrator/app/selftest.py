@@ -445,6 +445,37 @@ async def main() -> int:
         expect("the scaffold's own example screen breaks none of those rules",
                checks._screen_shell_issues("example.js", example.read_text(encoding="utf-8")) == [])
 
+        # A later story rewriting init.sql keeps the tables and drops the rows: the
+        # app still deploys, every screen still opens, and the demonstration data
+        # the stakeholder asked for is gone with nothing going red.
+        # One INSERT with a tuple per line, under a comment: the shape a model
+        # actually writes, and the shape that defeated the first version of this.
+        schema = "CREATE TABLE crews (id SERIAL PRIMARY KEY, name TEXT);\n"
+        seeded = schema + (
+            "-- Seed data: 4 crews; every one of them named\n"
+            "INSERT INTO crews (name) VALUES\n"
+            "    ('Blue'),\n"
+            "    ('Red; the second one'),\n"
+            "    ('Green'),\n"
+            "    ('Gold');\n")
+        repo.write_files(rid, {"db/init.sql": seeded})
+        expect("a seed block under a comment is still found, and counted by row",
+               checks._seed_rows(checks._inserts_by_table(seeded)["crews"]) == 4)
+
+        kept, notes = checks.preserve_shared(rid, {"db/init.sql": schema})
+        show("init.sql after a rewrite that dropped every seed row", kept["db/init.sql"])
+        expect("seed rows dropped wholesale are put back",
+               "'Gold'" in kept["db/init.sql"]
+               and any("4 seed row(s) for crews" in n for n in notes))
+        expect("a semicolon inside a seeded string does not split the statement",
+               "'Red; the second one'" in kept["db/init.sql"])
+
+        kept, notes = checks.preserve_shared(rid, {"db/init.sql": schema + (
+            "INSERT INTO crews (name) VALUES\n    ('Blue');\n")})
+        expect("seed rows the story rewrote are left alone, and reported by row count",
+               kept["db/init.sql"].count("('Gold')") == 0
+               and any("thinned the seed data for crews (1 left of 4)" in n for n in notes))
+
         repo.write_files(rid, {"backend/app/routers/items.py": BARE_ROUTER,
                                "frontend/screens/items.js": ITEMS})
         notes = checks.mount_bare_routers(rid)
