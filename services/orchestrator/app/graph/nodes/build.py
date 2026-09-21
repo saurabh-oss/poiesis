@@ -20,7 +20,7 @@ from typing import Any
 from ...agents.base import DEVELOPER, TESTER
 from ...config import pack
 from ...events import emit
-from ...llm import UnparseableReply
+from ...llm import ReplyTruncated, UnparseableReply
 from ...reuse.retriever import render_for_prompt
 from ...workspace import repo
 from ...workspace.checks import (
@@ -415,8 +415,31 @@ async def _implement_with_recovery(
             run_id, f"impl:{sid}:r{rnd}",
             lambda: DEVELOPER.json(_context(state, story), max_tokens=5500),
         )
+    except ReplyTruncated as exc:
+        # Nothing came back at all: the reply was too long, not malformed. Telling
+        # this one to escape its quotes would waste the retry on the wrong repair.
+        advice = (
+            f"\n\nYOUR PREVIOUS REPLY WAS CUT OFF: it used its entire {exc.budget}-token "
+            "budget and returned nothing at all. It was too long, not malformed. Write "
+            "less, not differently. Return only the files this story actually needs to "
+            "change. If a file holds a large amount of seed data, keep the rows compact — "
+            "one INSERT with a tuple per line, one short sentence per description, no "
+            "commentary between statements. Drop `reasoning` to a single short sentence."
+        )
+        await emit(
+            run_id, f"{sid}: the Developer's reply was cut off by the {exc.budget}-token "
+                    "budget — asking again for a shorter one",
+            agent="developer", stage="build", level="warn", data={"budget": exc.budget},
+        )
     except UnparseableReply as exc:
-        preview = exc.raw[-1200:]
+        advice = (
+            "\n\nYOUR PREVIOUS REPLY COULD NOT BE READ AS JSON. It broke off around:\n"
+            f"…{exc.raw[-1200:]}\n\n"
+            "The likely cause is an unescaped double-quote inside a file's content — "
+            "JS string literals and HTML attributes need \\\" inside a JSON string, not "
+            "a bare \". Prefer single quotes in JavaScript. Put `files` first in the "
+            "object. Keep `reasoning` to one short sentence this time."
+        )
         await emit(
             run_id, f"{sid}: the Developer's reply could not be parsed as JSON — asking once more",
             agent="developer", stage="build", level="warn",
@@ -426,16 +449,7 @@ async def _implement_with_recovery(
     try:
         return await remember(
             run_id, f"impl:{sid}:r{rnd}:retry",
-            lambda: DEVELOPER.json(
-                _context(state, story)
-                + "\n\nYOUR PREVIOUS REPLY COULD NOT BE READ AS JSON. It broke off around:\n"
-                f"…{preview}\n\n"
-                "The likely cause is an unescaped double-quote inside a file's content — "
-                "JS string literals and HTML attributes need \\\" inside a JSON string, not "
-                "a bare \". Prefer single quotes in JavaScript. Put `files` first in the "
-                "object. Keep `reasoning` to one short sentence this time.",
-                max_tokens=5500,
-            ),
+            lambda: DEVELOPER.json(_context(state, story) + advice, max_tokens=5500),
         )
     except UnparseableReply as exc:
         await emit(

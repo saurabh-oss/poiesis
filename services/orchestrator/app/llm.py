@@ -10,7 +10,12 @@ import re
 from typing import Any
 
 import litellm
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from .config import settings
 
@@ -68,7 +73,13 @@ def _kwargs() -> dict[str, Any]:
 # completely empty even at that ceiling. Confirmed accepted by the API with no
 # special headers up to 64000; there is no cost to setting the ceiling higher
 # than needed; only to setting it too low.
-_CLOUD_MIN_TOKENS = 32000
+# 32000 was not enough either: the story that seeds a demonstration dataset
+# writes tens of rows of prose and came back empty twice, ten minutes a time,
+# reported as unparseable JSON because an exhausted reply is indistinguishable
+# from a malformed one until you look at finish_reason. Hence both halves of
+# this: the ceiling goes to the confirmed maximum, and running into it is now
+# an error that says so.
+_CLOUD_MIN_TOKENS = 64000
 
 
 def _effective_max_tokens(max_tokens: int) -> int:
@@ -86,7 +97,41 @@ def _effective_max_tokens(max_tokens: int) -> int:
 _NO_TEMPERATURE: set[str] = set()
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20))
+class UnparseableReply(ValueError):
+    """The model's reply could not be read as JSON, even with recovery.
+
+    A plain ValueError only carries a 400-character preview, which is enough to
+    log but not enough to act on. Subclassing ValueError means every existing
+    `except ValueError` still catches this without change; a caller that wants
+    the full text — to show the model what it did wrong, or to log more than a
+    preview — catches UnparseableReply and reads `.raw`.
+    """
+
+    def __init__(self, raw: str):
+        self.raw = raw
+        super().__init__(f"model did not return usable JSON: {raw[:400]}")
+
+
+class ReplyTruncated(UnparseableReply):
+    """The model used its whole output budget and returned nothing.
+
+    A subclass of UnparseableReply so that every caller already handling an
+    unreadable reply keeps working unchanged — but one that can say what really
+    happened, because "write less" and "write valid JSON" are different repairs
+    and only one of them is any use here.
+    """
+
+    def __init__(self, budget: int):
+        self.budget = budget
+        super().__init__("")
+        self.args = (f"the reply used its entire {budget}-token budget and came back empty; "
+                     "it is too long, not malformed",)
+
+
+# Retrying a reply that exhausted its budget just spends the same minutes again
+# for the same empty answer: that one is for the caller to handle, not to repeat.
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20),
+       retry=retry_if_not_exception_type(ReplyTruncated))
 async def complete(
     *,
     role: Role,
@@ -111,7 +156,14 @@ async def complete(
         _NO_TEMPERATURE.add(model)
         kwargs.pop("temperature", None)
         resp = await litellm.acompletion(model=model, messages=messages, **kwargs)
-    return resp.choices[0].message.content or ""
+    choice = resp.choices[0]
+    content = choice.message.content or ""
+    # A reply that ran out of budget comes back with content set to None, not to
+    # the partial text, so every recovery path downstream sees an empty string
+    # and calls it malformed JSON. Only finish_reason tells the truth.
+    if not content.strip() and getattr(choice, "finish_reason", "") == "length":
+        raise ReplyTruncated(kwargs["max_tokens"])
+    return content
 
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
@@ -158,21 +210,6 @@ def _close_truncated(text: str) -> str:
     for opener in reversed(stack):
         out += "}" if opener == "{" else "]"
     return out
-
-
-class UnparseableReply(ValueError):
-    """The model's reply could not be read as JSON, even with recovery.
-
-    A plain ValueError only carries a 400-character preview, which is enough to
-    log but not enough to act on. Subclassing ValueError means every existing
-    `except ValueError` still catches this without change; a caller that wants
-    the full text — to show the model what it did wrong, or to log more than a
-    preview — catches UnparseableReply and reads `.raw`.
-    """
-
-    def __init__(self, raw: str):
-        self.raw = raw
-        super().__init__(f"model did not return usable JSON: {raw[:400]}")
 
 
 def _parse_json(raw: str) -> Any:
