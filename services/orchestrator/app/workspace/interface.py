@@ -328,6 +328,114 @@ def _inserts_by_table(sql: str) -> dict[str, list[str]]:
     return grouped
 
 
+_TABLE_DEF = re.compile(
+    r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_]\w*)\s*\((.*?)\)\s*;", re.I | re.S)
+_INSERT_COLS = re.compile(r"INSERT\s+INTO\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*VALUES\s*", re.I)
+_CONSTRAINT = {"PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT", "CHECK"}
+
+
+def _top_level(text: str, sep: str = ",") -> list[str]:
+    """Split on `sep` outside parentheses and quoted strings."""
+    parts, cur, depth, quote = [], [], 0, ""
+    for ch in text:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "'\"":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if ch == sep and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    parts.append("".join(cur))
+    return parts
+
+
+def _table_columns(sql: str) -> dict[str, dict[str, bool]]:
+    """table -> {column: whether an INSERT must supply it}, from every CREATE TABLE."""
+    out: dict[str, dict[str, bool]] = {}
+    for m in _TABLE_DEF.finditer(sql):
+        cols: dict[str, bool] = {}
+        for part in _top_level(m.group(2)):
+            words = part.split()
+            if not words or words[0].upper() in _CONSTRAINT:
+                continue
+            upper = part.upper()
+            generated = "SERIAL" in upper or "IDENTITY" in upper or "PRIMARY KEY" in upper
+            cols[words[0].strip('"').lower()] = ("NOT NULL" in upper and "DEFAULT" not in upper
+                                                  and not generated)
+        out[m.group(1).lower()] = cols
+    return out
+
+
+def _value_tuples(rest: str) -> tuple[list[str], str]:
+    """The `(...)` tuples at the start of `rest`, and whatever follows them (ON CONFLICT ...)."""
+    tuples, i, n = [], 0, len(rest)
+    while i < n:
+        while i < n and rest[i] in " \t\r\n,":
+            i += 1
+        if i >= n or rest[i] != "(":
+            break
+        depth, quote, j = 0, "", i
+        while j < n:
+            ch = rest[j]
+            if quote:
+                quote = "" if ch == quote else quote
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        tuples.append(rest[i + 1:j])
+        i = j + 1
+    return tuples, rest[i:].strip()
+
+
+def _adapt_insert(statement: str, columns: dict[str, bool]) -> tuple[str | None, list[str], list[str]]:
+    """Fit an INSERT written for an older version of its table to the table as it is now.
+
+    Returns (the adapted statement, columns dropped, required columns it cannot
+    fill). Values for columns the table no longer has are removed; a column the
+    table now requires and the rows never had cannot be invented, so the
+    statement is refused (None) rather than restored into a file that would then
+    fail when Postgres runs it.
+    """
+    head = _INSERT_COLS.search(statement)
+    if not head:
+        return statement, [], []  # no column list: nothing to line up, keep it as written
+    names = [c.strip().strip('"') for c in head.group(2).split(",")]
+    lowered = [c.lower() for c in names]
+    missing = [c for c, required in columns.items() if required and c not in lowered]
+    if missing:
+        return None, [], missing
+    keep = [i for i, c in enumerate(lowered) if c in columns]
+    dropped = [names[i] for i in range(len(names)) if i not in keep]
+    if not dropped:
+        return statement, [], []
+    tuples, tail = _value_tuples(statement[head.end():])
+    rows = []
+    for t in tuples:
+        values = _top_level(t)
+        if len(values) != len(names):
+            return None, [], ["(a row whose values do not line up with its column list)"]
+        rows.append("(" + ", ".join(values[i].strip() for i in keep) + ")")
+    prefix = statement[:head.start()]
+    rebuilt = (f"{prefix}INSERT INTO {head.group(1)} ({', '.join(names[i] for i in keep)}) VALUES\n    "
+               + ",\n    ".join(rows) + ("\n" + tail if tail and tail != ";" else ""))
+    return rebuilt.rstrip().rstrip(";") + ";", dropped, []
+
+
 def _schema_only(body: str) -> str:
     """init.sql as the Developer needs to see it: every table, none of the rows.
 
@@ -341,13 +449,18 @@ def _schema_only(body: str) -> str:
     schema = [s for s in _sql_statements(body) if "INSERT INTO" not in s.upper()]
     counts = {t: _seed_rows(v) for t, v in _inserts_by_table(body).items()}
     held = ", ".join(f"{n} in {t}" for t, n in sorted(counts.items()) if n) or "none yet"
+    empty = sorted(t for t in _table_columns(body) if not counts.get(t) and t != "example")
     return (
         "\n".join(schema)
         + f"\n\n-- Seeded rows currently in this file, kept by the platform: {held}.\n"
         "-- They are NOT shown here and you must NOT reproduce them. Return init.sql\n"
-        "-- with the table definitions only; the rows above are preserved for you.\n"
-        "-- Add INSERT statements yourself only when this story is the one that seeds\n"
-        "-- a new table, and then only for that table.\n"
+        "-- with the table definitions only; the rows above are preserved for you,\n"
+        "-- fitted to your table definitions if you change them.\n"
+        + (f"-- These tables have NO rows: {', '.join(empty)}. If your story's screens\n"
+           "-- read one of them, seed it here with INSERT statements for that table only.\n"
+           if empty else "")
+        + "-- If you add a NOT NULL column to a seeded table, give it a DEFAULT, or its\n"
+        "-- existing rows cannot be kept.\n"
     )
 
 

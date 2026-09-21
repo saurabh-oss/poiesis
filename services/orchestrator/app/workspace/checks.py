@@ -31,9 +31,11 @@ from .interface import (
     PACKAGE_DIR,
     REGISTRY,
     SCREENS_DIR,
+    _adapt_insert,
     _inserts_by_table,
     _seed_rows,
     _sql_statements,
+    _table_columns,
     declared_routes,
     router_files,
 )
@@ -968,8 +970,13 @@ async def validate_init_sql(run_id: str) -> ExecResult:
         if code != 0:
             return ExecResult(0, "", "", False)  # docker itself unavailable; not this check's job
         started = True
-        for _ in range(30):
-            code, _ = await _proc("docker", "exec", name, "pg_isready", "-U", "postgres", timeout=10)
+        # Over TCP, not the socket: the image's entrypoint first runs a temporary
+        # socket-only server for its own init, then restarts. pg_isready on the
+        # socket can answer from that temporary server, and psql then lands in the
+        # restart and fails - reported as a broken init.sql that is perfectly fine.
+        for _ in range(60):
+            code, _ = await _proc("docker", "exec", name, "pg_isready", "-h", "127.0.0.1",
+                                  "-U", "postgres", timeout=10)
             if code == 0:
                 break
             await asyncio.sleep(0.5)
@@ -977,7 +984,8 @@ async def validate_init_sql(run_id: str) -> ExecResult:
             return ExecResult(0, "", "", False)  # never came up; a real deploy will surface why
 
         code, out = await _proc(
-            "docker", "exec", name, "psql", "-U", "postgres", "-d", "poiesis",
+            "docker", "exec", "-e", "PGPASSWORD=poiesis", name,
+            "psql", "-h", "127.0.0.1", "-U", "postgres", "-d", "poiesis",
             "-v", "ON_ERROR_STOP=1", "-f", "/tmp/init.sql", timeout=30,
         )
     finally:
@@ -1117,12 +1125,36 @@ def preserve_shared(run_id: str, files: dict[str, str]) -> tuple[dict[str, str],
         # because a story that rewrote some of a table's rows may mean it.
         was = _inserts_by_table(old_sql)
         now = _inserts_by_table(new_sql)
-        readded = [t for t in sorted(was) if was[t] and not now.get(t)]
-        if readded:
-            new_sql = (new_sql.rstrip() + "\n\n"
-                       + "\n\n".join("\n".join(was[t]) for t in readded) + "\n")
-            restored += [f"{SHARED_SQL}: {_seed_rows(was[t])} seed row(s) for {t}"
-                         for t in readded]
+        # Rows go back against the table as it is *now*. Restoring them as written
+        # onto a rewritten table - one that dropped a column the rows still name -
+        # produced an init.sql Postgres rejects, so the database would crash-loop
+        # and the story could not be repaired: the Developer was told the rows were
+        # kept for it, and never shown them to fix.
+        tables = _table_columns(new_sql)
+        for t in sorted(was):
+            if not was[t] or now.get(t):
+                continue
+            adapted: list[str] = []
+            dropped_cols: set[str] = set()
+            missing: list[str] = []
+            for statement in was[t]:
+                fixed, gone, needed = _adapt_insert(statement, tables.get(t, {}))
+                if fixed is None:
+                    missing = needed
+                    break
+                adapted.append(fixed)
+                dropped_cols |= set(gone)
+            if missing:
+                restored.append(
+                    f"{SHARED_SQL}: NOT restored, reseed it - the rewrite gave {t} required "
+                    f"column(s) {', '.join(missing)} that its {_seed_rows(was[t])} seeded "
+                    "row(s) never had")
+                continue
+            new_sql = new_sql.rstrip() + "\n\n" + "\n".join(adapted) + "\n"
+            restored.append(
+                f"{SHARED_SQL}: {_seed_rows(was[t])} seed row(s) for {t}"
+                + (f" (without {', '.join(sorted(dropped_cols))}, which the rewrite removed)"
+                   if dropped_cols else ""))
         thinned = [f"{t} ({_seed_rows(now[t])} left of {_seed_rows(was[t])})" for t in sorted(was)
                    if now.get(t) and _seed_rows(now[t]) * 2 < _seed_rows(was[t])]
         if thinned:

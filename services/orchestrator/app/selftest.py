@@ -494,6 +494,37 @@ async def main() -> int:
                kept["db/init.sql"].count("('Gold')") == 0
                and any("thinned the seed data for crews (1 left of 4)" in n for n in notes))
 
+        # A rewrite that also changes the table: rows restored as written named a
+        # column that no longer existed, so Postgres rejected the whole file and the
+        # database would have crash-looped (run 464c02c3c94c4c73, S10).
+        v1 = ("CREATE TABLE crews (id SERIAL PRIMARY KEY, name TEXT NOT NULL, colour TEXT);\n"
+              "INSERT INTO crews (name, colour) VALUES\n    ('Blue', 'blue'),\n"
+              "    ('Red; the second one', 'red');\n")
+        repo.write_files(rid, {"db/init.sql": v1})
+        kept, notes = checks.preserve_shared(rid, {"db/init.sql":
+            "CREATE TABLE crews (id SERIAL PRIMARY KEY, name TEXT NOT NULL);\n"})
+        rows = "".join(checks._inserts_by_table(kept["db/init.sql"]).get("crews", []))
+        show("rows fitted to a table that lost a column", rows + "\n" + "\n".join(notes))
+        expect("rows are fitted to a table that lost a column",
+               "'Red; the second one'" in rows and "colour" not in rows and "'blue'" not in rows
+               and any("without colour" in n for n in notes))
+        repo.write_files(rid, {"db/init.sql": kept["db/init.sql"]})
+        fitted = await checks.validate_init_sql(rid)
+        show("Postgres on the fitted file", fitted.stdout or "(ran cleanly)")
+        expect("and the fitted file really runs in Postgres", fitted.ok)
+
+        repo.write_files(rid, {"db/init.sql": v1})
+        kept, notes = checks.preserve_shared(rid, {"db/init.sql":
+            "CREATE TABLE crews (id SERIAL PRIMARY KEY, name TEXT NOT NULL, code TEXT NOT NULL);\n"})
+        expect("rows that cannot fill a new required column are not restored, and it says so",
+               "INSERT INTO" not in kept["db/init.sql"]
+               and any("NOT restored, reseed it" in n and "code" in n for n in notes))
+        repo.write_files(rid, {"db/init.sql": kept["db/init.sql"]})
+        block = excerpt(rid, [("db/init.sql", 900)])
+        show("the Developer's view after an unrestorable rewrite", block[-400:])
+        expect("and the Developer is told that table now needs seeding",
+               "These tables have NO rows: crews" in block)
+
         # Why the rows kept being dropped in the first place: the Developer was shown
         # init.sql clipped to 900 characters and told to return it complete.
         repo.write_files(rid, {"db/init.sql": seeded})
