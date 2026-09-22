@@ -27,6 +27,7 @@ from ...reuse.retriever import render_for_prompt, render_lessons
 from ...workspace import failures, repo
 from ...workspace.checks import (
     heal_init_sql,
+    heal_screens,
     mount_bare_routers,
     screen_syntax_errors,
     validate_init_sql,
@@ -835,6 +836,10 @@ async def build(state: RunState) -> RunState:
     if healed:
         repo.commit(run_id, "chore(platform): restore the last db/init.sql that executes")
         await emit(run_id, healed, agent="governance", stage="build", level="warn")
+    for note in await heal_screens(run_id):
+        await emit(run_id, note, agent="governance", stage="build", level="warn")
+    if repo.commit(run_id, "chore(platform): restore the last screens that parse"):
+        regenerate_registry(run_id)
 
     max_repairs = pack().get("build", {}).get("max_repair_attempts", 3)
     timeout = sandbox_timeout()

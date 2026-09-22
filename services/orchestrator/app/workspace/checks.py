@@ -1266,6 +1266,36 @@ async def screen_syntax_errors(run_id: str, rels: list[str]) -> dict[str, str]:
     return errors
 
 
+async def heal_screens(run_id: str) -> list[str]:
+    """Restore, from history, every story screen that no longer parses.
+
+    The write-time guard keeps a broken rewrite off disk from now on; this
+    covers screens broken before it existed, and any other way a file can end
+    up unparseable. Returns a note per screen restored.
+    """
+    root = workspace_path(run_id)
+    rels = [f"frontend/screens/{p.name}" for p in story_screens(run_id)]
+    if not rels:
+        return []
+    broken = await screen_syntax_errors(run_id, rels)
+    notes: list[str] = []
+    for rel, err in broken.items():
+        path = root / rel
+        current = path.read_text(encoding="utf-8", errors="replace")
+        for sha in history(run_id, rel):
+            candidate = show(run_id, sha, rel)
+            if not candidate or candidate == current:
+                continue
+            path.write_text(candidate, encoding="utf-8", newline="\n")
+            if not await screen_syntax_errors(run_id, [rel]):
+                notes.append(f"{rel} did not parse ({err[:120]}); restored the last version that does, "
+                             f"from commit {sha[:10]}")
+                break
+        else:
+            path.write_text(current, encoding="utf-8", newline="\n")
+    return notes
+
+
 async def heal_init_sql(run_id: str) -> str:
     """If db/init.sql does not execute, put back the newest version that does.
 
