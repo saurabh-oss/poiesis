@@ -118,6 +118,17 @@ def refresh_platform_files(run_id: str, state: RunState) -> list[str]:
         if source.is_file() and not dest.exists() and dest.parent.is_dir():
             shutil.copyfile(source, dest)
             added.append(rel)
+    # The scaffold's requirements are a floor. A workspace whose file lost the
+    # database driver to an earlier rewrite gets it back before this round deploys.
+    req = root / "backend" / "requirements.txt"
+    base = template_dir / "backend" / "requirements.txt"
+    if req.is_file() and base.is_file():
+        from ...workspace.checks import merge_requirements
+        merged, lost = merge_requirements(base.read_text(encoding="utf-8"),
+                                          req.read_text(encoding="utf-8", errors="replace"))
+        if lost:
+            req.write_text(merged, encoding="utf-8", newline="\n")
+            added.append("backend/requirements.txt (restored: " + ", ".join(lost) + ")")
     values = template_values(state, run_id)
     for rel in PLATFORM_SHELL:
         source, dest = template_dir / rel, root / rel
