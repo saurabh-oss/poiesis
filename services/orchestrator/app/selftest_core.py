@@ -562,6 +562,25 @@ async def test_failures() -> None:
         expect("the screen registry loads each screen on its own and records a failure instead of raising",
                'import("./things.js")' in reg and "catch (err)" in reg and "import s0" not in reg
                and "example.js" not in reg)
+        (root / "backend" / "app" / "models.py").write_text(
+            "from sqlalchemy import Integer, String\nfrom sqlalchemy.orm import Mapped, mapped_column\n\n"
+            "class Ticket:\n    id: Mapped[int] = mapped_column(Integer, primary_key=True)\n"
+            "    title: Mapped[str] = mapped_column(String(200))\n"
+            "    product_area: Mapped[str] = mapped_column(String(40))\n"
+            "    status: Mapped[str] = mapped_column(String(20), default='Open')\n"
+            "    note: Mapped[str | None] = mapped_column(String(200), nullable=True)\n", encoding="utf-8")
+        (root / "tests" / "test_seed.py").write_text(
+            "from app.models import Ticket\n\n\ndef test_d(client, db_session):\n"
+            "    db_session.add(Ticket(title='x', status='Open'))\n    db_session.commit()\n\n\n"
+            "def test_e(client, db_session):\n    db_session.add(Ticket(title='x', product_area='Billing'))\n"
+            "    db_session.commit()\n", encoding="utf-8")
+        req = checks.required_columns(rid)
+        expect("required columns are read from the models (no defaults, not nullable, not the key)",
+               req.get("Ticket") == {"title", "product_area"}, str(req))
+        seeds = checks.test_issues(rid, ["tests/test_seed.py"])
+        expect("a test seeding a row without a required column is caught",
+               any("test_seed.py::test_d" in i and "`product_area`" in i for i in seeds), str(seeds)[:300])
+        expect("a complete seed passes", not any("test_e" in i for i in seeds), str(seeds)[:300])
         found = checks.test_issues(rid, ["tests/test_q.py"])
         expect("an invented import inside a test function is caught and attributed to the test",
                any("test_q.py::test_a" in i and "SessionLocal" in i and "get_session" in i for i in found), str(found)[:300])

@@ -746,6 +746,88 @@ _ENGINE_IMPORT = re.compile(r"^\s*from\s+app\.db\s+import\s+[^\n]*\bengine\b", r
 _OWN_FIXTURE = re.compile(r"^\s*def\s+(client|db_session)\s*\(", re.M)
 
 
+def required_columns(run_id: str) -> dict[str, set[str]]:
+    """{model class: columns a constructor must be given} from backend/app/models.py.
+
+    A column is required when it is mapped without nullable=True, without a
+    default or server_default, is not the primary key, and is not annotated as
+    optional (`Mapped[str | None]`). Relationships are not columns.
+    """
+    path = workspace_path(run_id) / "backend" / "app" / "models.py"
+    if not path.is_file():
+        return {}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return {}
+    out: dict[str, set[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        required: set[str] = set()
+        for stmt in node.body:
+            if not isinstance(stmt, ast.AnnAssign) or not isinstance(stmt.target, ast.Name):
+                continue
+            call = stmt.value
+            if not isinstance(call, ast.Call) or getattr(call.func, "id", getattr(call.func, "attr", "")) != "mapped_column":
+                continue
+            ann = ast.unparse(stmt.annotation)
+            if "None" in ann or "Optional" in ann:
+                continue
+            kws = {k.arg: k.value for k in call.keywords}
+            if "default" in kws or "server_default" in kws or "default_factory" in kws:
+                continue
+            if isinstance(kws.get("primary_key"), ast.Constant) and kws["primary_key"].value:
+                continue
+            if isinstance(kws.get("nullable"), ast.Constant) and kws["nullable"].value:
+                continue
+            if isinstance(kws.get("autoincrement"), ast.Constant) and kws["autoincrement"].value:
+                continue
+            required.add(stmt.target.id)
+        if required:
+            out[node.name] = required
+    return out
+
+
+def _model_seed_issues(run_id: str, rel: str, src: str) -> list[str]:
+    """Tests that build a model row without every column the table requires.
+
+    `Ticket(title=..., status=...)` with no `product_area` raises IntegrityError
+    inside the test's own seeding, and no implementation can change that.
+    """
+    required = required_columns(run_id)
+    if not required:
+        return []
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    owner: dict[int, str] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+            for line in range(node.lineno, (node.end_lineno or node.lineno) + 1):
+                owner[line] = node.name
+    issues: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = getattr(node.func, "id", getattr(node.func, "attr", ""))
+        if name not in required:
+            continue
+        if any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
+            continue  # **kwargs: cannot tell
+        given = {k.arg for k in node.keywords}
+        missing = sorted(required[name] - given)
+        if missing:
+            where = f"{rel}::{owner[node.lineno]}" if node.lineno in owner else rel
+            issues.append(
+                f"{where} builds `{name}(...)` without `{', '.join(missing)}`, which the table requires "
+                f"(NOT NULL, no default). The insert fails with IntegrityError inside the test's own "
+                f"seeding, whatever the implementation does. Give every required column a value."
+            )
+    return list(dict.fromkeys(issues))
+
+
 def _fixture_issues(rel: str, src: str) -> list[str]:
     """Tests that reach for something the fixtures do not provide.
 
@@ -817,6 +899,7 @@ def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
         src = target.read_text(encoding="utf-8", errors="replace")
         issues.extend(_import_issues(root, rel, src))
         issues.extend(_fixture_issues(rel, src))
+        issues.extend(_model_seed_issues(run_id, rel, src))
         for block in re.split(r"^(?=\s*(?:async\s+)?def\s+test_)", src, flags=re.M):
             name_match = re.search(r"def\s+(test_\w+)", block)
             if not name_match:
