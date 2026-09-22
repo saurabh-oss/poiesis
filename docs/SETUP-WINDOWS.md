@@ -166,6 +166,19 @@ python scriptsetch-model.py qwen3.6 35b-a3b-coding 6
 `POIESIS_MODEL_VISION` on whatever vision model is already present. The coding variant
 reasons and plans well; the general variant is a refinement, not a requirement.
 
+**The machine bugchecks (VIDEO_TDR_FAILURE, 0x116) or WSL dies during a long build.** Windows
+kills a GPU kernel that runs longer than 2 seconds; a throttling laptop GPU can push one
+prompt batch past that. The platform already sends small batches
+(`POIESIS_LOCAL_NUM_BATCH=128`). Raise the timeout as well, once, from an elevated
+PowerShell, then reboot:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass; .\scriptsaise-gpu-timeout.ps1
+```
+
+On a Legion, also set Lenovo Vantage / Legion Space to Performance mode while a run is
+going (Balanced throttles the GPU under sustained load), and keep the NVIDIA driver current.
+
 **Something is slow and you want to know what.** The run page's "Model traces" timeline
 shows every stage, model call, sandbox run and deploy with its duration; the Observability
 page shows where the time goes across runs; Jaeger has the same as a trace tree.
