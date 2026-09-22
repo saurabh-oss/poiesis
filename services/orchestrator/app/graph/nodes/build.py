@@ -26,7 +26,9 @@ from ...llm import ReplyTruncated, UnparseableReply, scaled
 from ...reuse.retriever import render_for_prompt, render_lessons
 from ...workspace import failures, repo
 from ...workspace.checks import (
+    heal_init_sql,
     mount_bare_routers,
+    validate_init_sql,
     platform_checks,
     preserve_shared,
     regenerate_registry,
@@ -256,11 +258,20 @@ def _guard(
 def _refused_note(refused: list[str]) -> str:
     if not refused:
         return ""
-    return (
-        f"\nYOUR EDITS TO {', '.join(refused)} WERE REFUSED: those files are read-only "
-        "scaffold and were left as they are. Put the code in your story's own files — "
-        "backend/app/routers/<resource>.py and frontend/screens/<resource>.js.\n"
-    )
+    rejected = [r for r in refused if "REJECTED" in r]
+    readonly = [r for r in refused if "REJECTED" not in r]
+    note = ""
+    if readonly:
+        note += (
+            f"\nYOUR EDITS TO {', '.join(readonly)} WERE REFUSED: those files are read-only "
+            "scaffold and were left as they are. Put the code in your story's own files — "
+            "backend/app/routers/<resource>.py and frontend/screens/<resource>.js.\n"
+        )
+    for r in rejected:
+        note += (f"\nYOUR {r}. The previous db/init.sql was kept. Return the whole file again, "
+                 "complete and valid: every INSERT closed with a semicolon, every string quoted, "
+                 "no statement cut off.\n")
+    return note
 
 
 async def _mount_bare(run_id: str, sid: str) -> None:
@@ -302,7 +313,19 @@ async def _apply(
     if removed:
         await emit(run_id, f"{sid}: removed {', '.join(removed)}",
                    agent="developer", stage="build", data={"removed": removed})
+    previous_sql = repo.read(run_id, "db/init.sql", 400000) if "db/init.sql" in proposed else ""
     written = repo.write_files(run_id, proposed)
+    if "db/init.sql" in proposed and previous_sql:
+        sql = await validate_init_sql(run_id)
+        if not sql.ok:
+            # Keep the version every other story's checks still pass on; the
+            # error goes back to this story alone, as the refusal of its edit.
+            repo.write_files(run_id, {"db/init.sql": previous_sql})
+            reason = sql.stdout.strip().splitlines()[-1][:200] if sql.stdout.strip() else "it did not execute"
+            refused.append(f"db/init.sql — REJECTED, it does not run in Postgres: {reason}")
+            await emit(run_id, f"{sid}: its db/init.sql does not execute ({reason}); kept the previous "
+                               "version so other stories are not broken by it",
+                       agent="governance", stage="build", level="warn")
     await _mount_bare(run_id, sid)
     # ES modules cannot list a directory, so the shell reads a generated registry.
     # Rebuilt after every write so a new screen is live on the next check.
@@ -789,6 +812,10 @@ async def build(state: RunState) -> RunState:
         repo.commit(run_id, "chore(platform): add the platform's own checks")
         await emit(run_id, "Added the platform's own checks to this workspace: " + ", ".join(added),
                    agent="scaffold", stage="build", data={"files": added})
+    healed = await heal_init_sql(run_id)
+    if healed:
+        repo.commit(run_id, "chore(platform): restore the last db/init.sql that executes")
+        await emit(run_id, healed, agent="governance", stage="build", level="warn")
 
     max_repairs = pack().get("build", {}).get("max_repair_attempts", 3)
     timeout = sandbox_timeout()

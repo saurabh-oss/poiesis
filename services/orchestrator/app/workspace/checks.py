@@ -39,7 +39,7 @@ from .interface import (
     declared_routes,
     router_files,
 )
-from .repo import workspace_path
+from .repo import history, show, workspace_path
 from .runner import ExecResult, mount_source, run_in_sandbox
 
 NODE_IMAGE = "node:20-alpine"
@@ -1161,6 +1161,34 @@ def criteria_seed_issues(run_id: str, story: dict | None) -> list[str]:
                     f"has to call. Write the rows out; a compact tuple per line is fine."
                 )
     return list(dict.fromkeys(issues))
+
+
+async def heal_init_sql(run_id: str) -> str:
+    """If db/init.sql does not execute, put back the newest version that does.
+
+    One story's cut-off reply once left init.sql ending inside a row. Its own
+    checks caught it, but the file stayed on disk and every later story's checks
+    failed on the same line — three stories spent every repair on a file none
+    of them had written. Returns a note on what was done, or "".
+    """
+    root = workspace_path(run_id)
+    path = root / SHARED_SQL
+    if not path.is_file():
+        return ""
+    current = await validate_init_sql(run_id)
+    if current.ok:
+        return ""
+    broken = path.read_text(encoding="utf-8", errors="replace")
+    for sha in history(run_id, SHARED_SQL):
+        candidate = show(run_id, sha, SHARED_SQL)
+        if not candidate or candidate == broken:
+            continue
+        path.write_text(candidate, encoding="utf-8", newline="\n")
+        if (await validate_init_sql(run_id)).ok:
+            return (f"db/init.sql did not execute ({current.stdout.strip().splitlines()[-1][:160]}); "
+                    f"restored the last version that does, from commit {sha[:10]}")
+    path.write_text(broken, encoding="utf-8", newline="\n")
+    return ""
 
 
 async def platform_checks(

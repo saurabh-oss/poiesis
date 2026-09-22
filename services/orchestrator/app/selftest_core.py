@@ -558,6 +558,7 @@ async def test_failures() -> None:
         (root / "frontend" / "screens" / "things.js").write_text("export default {title:'t', story:'S1', render(){}}", encoding="utf-8")
         checks.regenerate_registry(rid)
         reg = (root / "frontend" / "screens" / "index.js").read_text(encoding="utf-8")
+        expect("git history of a file is readable", isinstance(repo.history(rid, "db/init.sql"), list))
         expect("the screen registry loads each screen on its own and records a failure instead of raising",
                'import("./things.js")' in reg and "catch (err)" in reg and "import s0" not in reg
                and "example.js" not in reg)

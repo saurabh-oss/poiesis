@@ -94,6 +94,23 @@ def remove(run_id: str, rel: str) -> bool:
     return True
 
 
+def history(run_id: str, rel: str, limit: int = 12) -> list[str]:
+    """Commits that touched `rel`, newest first."""
+    repo = Repo(workspace_path(run_id))
+    try:
+        return [c.hexsha for c in repo.iter_commits(paths=rel, max_count=limit)]
+    except Exception:  # noqa: BLE001 — an unborn branch or a path never committed
+        return []
+
+
+def show(run_id: str, sha: str, rel: str) -> str:
+    """The content of `rel` at commit `sha`, or "" if it did not exist there."""
+    try:
+        return Repo(workspace_path(run_id)).git.show(f"{sha}:{rel}")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def commit(run_id: str, message: str) -> str | None:
     repo = Repo(workspace_path(run_id))
     repo.git.add(A=True)
