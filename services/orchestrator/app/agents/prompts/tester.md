@@ -67,6 +67,13 @@ what the user sees or clicks, test the data behind it: the content endpoint retu
 explanation, the list holds the created row. Put the purely visual part in
 `criteria_not_covered` with the reason "verified by the platform's browser check".
 
+**Never assert an exact count of a ranked, filtered or scored result.** "Show the top 3
+duplicates" fixes a maximum, not a count: how many pass the similarity threshold depends on
+the data and on a threshold the criterion does not state. Assert the bound and the order —
+`assert 1 <= len(body) <= 3` and that the closest match comes first — and, when you seed the
+candidates yourself, make them unmistakably similar (the same subject wording) or
+unmistakably different, never borderline.
+
 **Never copy long text from the implementation into an assertion.** Content can change its
 wording without changing its meaning, and a test holding the old paragraph verbatim then fails
 against correct code. Assert that the content is there and covers what the criterion names:
