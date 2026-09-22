@@ -173,7 +173,7 @@ prompt batch past that. The platform already sends small batches
 PowerShell, then reboot:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass; .\scriptsaise-gpu-timeout.ps1
+Set-ExecutionPolicy -Scope Process Bypass; .\scripts\raise-gpu-timeout.ps1
 ```
 
 On a Legion, also set Lenovo Vantage / Legion Space to Performance mode while a run is
