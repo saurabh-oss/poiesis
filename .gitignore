@@ -33,3 +33,6 @@ data/
 Thumbs.db
 
 *.log
+
+# Partial model downloads from scripts/fetch-model.py
+scripts/blobs/

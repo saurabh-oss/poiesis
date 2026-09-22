@@ -152,6 +152,20 @@ call marked `truncated`, the reply hit its budget (`POIESIS_LOCAL_MIN_TOKENS` ra
 **A run says "Queued for a slot".** Another run is using the models. One run drives at a
 time by default (`POIESIS_MAX_CONCURRENT_RUNS`); the queued one starts on its own.
 
+**`ollama pull` sits at the same percentage for minutes, or crawls after a resume.**
+Ollama's downloader hangs on a dropped connection and does not always recover when the
+client is restarted (the CLI only re-attaches to the server's transfer). Fetch the model
+from the registry directly instead; it resumes, retries and verifies:
+
+```powershell
+python scriptsetch-model.py qwen3.6 35b-a3b-coding 6
+```
+
+**On a slow link, one model is enough.** Set all three `POIESIS_MODEL_*` roles to
+`ollama/qwen3.6:35b-a3b-coding` (23 GB once, and no model swaps between stages) and leave
+`POIESIS_MODEL_VISION` on whatever vision model is already present. The coding variant
+reasons and plans well; the general variant is a refinement, not a requirement.
+
 **Something is slow and you want to know what.** The run page's "Model traces" timeline
 shows every stage, model call, sandbox run and deploy with its duration; the Observability
 page shows where the time goes across runs; Jaeger has the same as a trace tree.
