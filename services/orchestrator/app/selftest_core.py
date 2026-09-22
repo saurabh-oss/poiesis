@@ -536,6 +536,19 @@ async def test_failures() -> None:
                len(seed) == 1 and "150 tickets" in seed[0] and "2 row(s)" in seed[0], str(seed)[:300])
         expect("counts that are met, small numbers and non-data nouns are ignored",
                not any("into `customer`" in i or "into `criteria`" in i or "into `columns`" in i for i in seed))
+        merged, lost = checks.merge_requirements(
+            "fastapi==0.115.6\npsycopg[binary]==3.2.3\n", "fastapi\npsycopg2-binary\nalembic\n")
+        expect("a rewritten requirements.txt keeps the scaffold's pinned driver and the story's additions",
+               lost == ["psycopg"] and "psycopg[binary]==3.2.3" in merged and "alembic" in merged
+               and "psycopg2-binary" in merged and merged.count("fastapi") == 1, merged)
+        (root / "frontend" / "screens").mkdir(parents=True)
+        (root / "frontend" / "screens" / "example.js").write_text("export default {title:'x', render(){}}", encoding="utf-8")
+        (root / "frontend" / "screens" / "things.js").write_text("export default {title:'t', story:'S1', render(){}}", encoding="utf-8")
+        checks.regenerate_registry(rid)
+        reg = (root / "frontend" / "screens" / "index.js").read_text(encoding="utf-8")
+        expect("the screen registry loads each screen on its own and records a failure instead of raising",
+               'import("./things.js")' in reg and "catch (err)" in reg and "import s0" not in reg
+               and "example.js" not in reg)
         found = checks.test_issues(rid, ["tests/test_q.py"])
         expect("an invented import inside a test function is caught and attributed to the test",
                any("test_q.py::test_a" in i and "SessionLocal" in i and "get_session" in i for i in found), str(found)[:300])

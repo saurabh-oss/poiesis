@@ -186,15 +186,31 @@ async function start() {
     return;
   }
   screens = registry
-    .filter((r) => r && r.module && typeof r.module.render === "function")
-    .map((r) => ({
-      id: r.id,
-      example: Boolean(r.example),
-      title: r.module.title || r.id,
-      story: r.module.story || "",
-      module: r.module,
-    }));
-  state.screens = screens.map(({ id, title, story, example }) => ({ id, title, story, example, hash: `#/${id}` }));
+    .filter((r) => r && ((r.module && typeof r.module.render === "function") || r.error))
+    .map((r) => (r.error
+      ? {
+        // The file did not load (a syntax error, usually). Keep its place in the
+        // navigation with a card that says so, so the fault is visible on its own
+        // screen and every other screen still works.
+        id: r.id,
+        example: Boolean(r.example),
+        title: r.id.replace(/[_-]+/g, " "),
+        story: "",
+        broken: r.error,
+        module: {
+          title: r.id.replace(/[_-]+/g, " "),
+          render(root) { root.append(errorPanel(`The ${r.id} screen failed to load`, new Error(r.error))); },
+        },
+      }
+      : {
+        id: r.id,
+        example: Boolean(r.example),
+        title: r.module.title || r.id,
+        story: r.module.story || "",
+        module: r.module,
+      }));
+  for (const s of screens) if (s.broken) state.errors.push(`screen ${s.id} failed to load: ${s.broken}`);
+  state.screens = screens.map(({ id, title, story, example, broken }) => ({ id, title, story, example, broken: broken || "", hash: `#/${id}` }));
   nav.replaceChildren(
     h("div", { class: "nav-label" }, "Sections"),
     ...screens.map((s) =>

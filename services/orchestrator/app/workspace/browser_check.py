@@ -300,6 +300,13 @@ async def verify(run_id: str) -> dict[str, Any]:
         result = json.loads(result_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return _failed("The browser check wrote an unreadable result.")
+    # A screen whose module failed to load could not name its story; the file can.
+    from .checks import stories_in
+    for screen in result.get("screens", []):
+        if not screen.get("story"):
+            path = root / "frontend" / "screens" / f"{screen.get('id')}.js"
+            if path.is_file():
+                screen["story"] = ", ".join(stories_in(path.read_text(encoding="utf-8", errors="replace")))
     if has_server_errors(result):
         result["backend_errors"] = await backend_errors(run_id)
     return result
