@@ -72,9 +72,10 @@ docker compose up -d
 .\scripts\bootstrap.ps1
 ```
 
-The bootstrap checks the Ollama bridge, pulls the base models (roughly 20 GB, once), builds
-the `poiesis-*` variants from `modelfiles/` with a 12k context window, waits for the
+The bootstrap checks the Ollama bridge, pulls the models named in `.env` (roughly 55 GB,
+once: two Qwen3.6 35B-A3B variants, gemma4 for images, nomic for embeddings), waits for the
 orchestrator, and indexes the repositories listed in `services/indexer/portfolio.yaml`.
+The context window is sent with every request now, so there are no Modelfile variants.
 
 **Fix those repo URLs before you run it.** They ship as placeholders. The indexer now names
 every entry it could not read and exits non-zero, because an empty knowledge graph disables
@@ -99,28 +100,29 @@ Other endpoints:
 | http://localhost:3000 | The control room |
 | http://localhost:8080/docs | Orchestrator API |
 | http://localhost:7474 | Neo4j browser — `neo4j` / `poiesisdev` |
+| http://localhost:3000/observability | Health of every dependency, model usage, where the time goes |
+| http://localhost:16686 | Jaeger — traces per run, stage and model call |
+| http://localhost:3030 | Grafana — `poiesis` / `poiesisdev`, the "Poiesis platform" dashboard |
+| http://localhost:9090 | Prometheus |
+| http://localhost:6333/dashboard | Qdrant — the vector index over the graph |
 | http://localhost:9001 | MinIO console — `poiesis` / `poiesisdev` (not used yet) |
-| http://localhost:6333/dashboard | Qdrant (not used yet) |
 
-## 5. Model sizing on a 16 GB GPU
+## 5. Model sizing
 
-The default 14B models fit comfortably in 16 GB VRAM at Q4. On 8 GB, point the two heavy
-roles at 7B builds — create the variants first so they keep the larger context window:
+The defaults are for a 12 GB GPU with 32 GB of system RAM: Qwen3.6 35B-A3B is a
+mixture-of-experts model whose 23 GB of weights split across the card and RAM, and because
+only 3B parameters are active per token it still generates at a usable speed. Expect a
+story (Developer, Tester, checks, repairs) to take on the order of ten minutes, and a
+sprint of ten stories a couple of hours. The quality is what the wait buys.
 
-```powershell
-"FROM qwen2.5:7b-instruct`nPARAMETER num_ctx 12288" | Out-File -Encoding ascii modelfiles\reasoning-7b
-ollama create poiesis-reasoning-7b -f modelfiles\reasoning-7b
-```
+On a 24 GB card the same models fit whole and run several times faster. On 8 GB, point all
+three roles at `gemma4:12b` (fits, 256K context, fast) and set
+`POIESIS_LOCAL_NUM_CTX=16384`. On any card, `POIESIS_LOCAL_THINK_ROLES=` (empty) turns
+thinking off everywhere and roughly halves the time of the reasoning stages at some cost to
+the Analyst's questions and the Reviewer's judgement.
 
-then in `.env`:
-
-```
-POIESIS_MODEL_REASONING=ollama/poiesis-reasoning-7b
-POIESIS_MODEL_CODING=ollama/poiesis-coding-7b
-```
-
-The Developer agent is the one that degrades most on smaller models. If build stages keep
-hitting the repair loop, that is the first thing to raise.
+`http://localhost:3000/observability` shows tokens per second per model, which is the
+number to watch when changing any of this.
 
 ## 6. Troubleshooting
 
@@ -142,9 +144,17 @@ Runs parked on a gate are left alone, because they are waiting on you rather tha
 process. Note that the compose file runs uvicorn with `--reload`, so editing orchestrator
 code mid-run triggers exactly this path.
 
-**Agents return malformed JSON on local models.** Expected occasionally with 7B models. The
-JSON parser recovers from fenced and prefixed output; if it still fails, the retry decorator
-gives it three attempts. Persistent failures mean the model is too small for that agent role.
+**Agents return malformed JSON on local models.** They no longer can: on the local profile
+every reply is decoded against the agent's JSON Schema. If a trace on the run page shows a
+call marked `truncated`, the reply hit its budget (`POIESIS_LOCAL_MIN_TOKENS` raises it);
+`error` with "ollama pull" in it means the model named in `.env` is not pulled.
+
+**A run says "Queued for a slot".** Another run is using the models. One run drives at a
+time by default (`POIESIS_MAX_CONCURRENT_RUNS`); the queued one starts on its own.
+
+**Something is slow and you want to know what.** The run page's "Model traces" timeline
+shows every stage, model call, sandbox run and deploy with its duration; the Observability
+page shows where the time goes across runs; Jaeger has the same as a trace tree.
 
 **Neo4j will not start.** Usually a stale volume. `docker compose down` then delete
 `data\neo4j`.

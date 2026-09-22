@@ -1,8 +1,11 @@
 # Agent contracts
 
 Eight agents. Each has one job, one system prompt in
-`services/orchestrator/app/agents/prompts/`, and a typed JSON output. Changing behaviour
-means editing a prompt file, not application code.
+`services/orchestrator/app/agents/prompts/`, and a typed JSON output whose shape is also a
+JSON Schema in `agents/schemas.py`. On the local profile the model's reply is decoded against
+that schema, so it cannot be malformed or miss a key. Changing behaviour means editing a
+prompt file, not application code; changing the shape of an output means editing the prompt
+and the schema together.
 
 | Agent | Model role | Reads | Produces | Refuses to |
 |---|---|---|---|---|

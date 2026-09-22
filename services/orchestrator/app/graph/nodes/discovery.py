@@ -57,7 +57,7 @@ async def analyse(state: RunState) -> RunState:
     # Memoised: the clarify gate below replays this node, and the stakeholder's
     # answers are keyed to the question ids they were actually shown.
     result = await remember(run_id, "discovery", lambda: ANALYST.json(
-        f"EVIDENCE:\n\n{state['brief'][:12000]}\n\n"
+        f"EVIDENCE:\n\n{state['brief'][:40000]}\n\n"
         "Produce your understanding, signals, contradictions and clarifying questions."
     ))
     questions = result.get("questions", [])

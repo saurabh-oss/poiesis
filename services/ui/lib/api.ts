@@ -55,7 +55,79 @@ export type Gate = {
   default: { decision: string; notes: string };
 };
 
+export type LLMCallRow = {
+  id: string; run_id: string; stage: string; step: string; agent: string; role: string;
+  model: string; profile: string; started_at: string; duration_ms: number;
+  prompt_tokens: number; completion_tokens: number; finish_reason: string; status: string;
+  error: string; attempt: number; temperature: number; max_tokens: number; think: boolean;
+  schema_used: boolean; prompt_chars: number; response_chars: number; thinking_chars: number;
+  system_prompt?: string; prompt?: string; response?: string; thinking?: string;
+};
+
+export type SpanRow = {
+  id: string; kind: string; name: string; stage: string; step: string; agent: string;
+  status: string; error: string; started_at: string; duration_ms: number;
+  attributes: Record<string, any>; trace_id: string;
+};
+
+type Bucket = { calls: number; prompt_tokens: number; completion_tokens: number; seconds: number; errors: number; truncated: number };
+
+export type Usage = {
+  calls: number; prompt_tokens: number; completion_tokens: number; model_seconds: number;
+  tokens_per_second: number; errors: number; truncated: number;
+  by_model: Record<string, Bucket>; by_agent: Record<string, Bucket>;
+  spans_by_kind: Record<string, { count: number; seconds: number; errors: number }>;
+  stages: { stage: string; seconds: number; status: string; started_at: string }[];
+};
+
+export type Summary = {
+  window_hours: number; runs_by_status: Record<string, number>;
+  engine: { active: string[]; queued: string[]; limit: number };
+  usage: Usage;
+  per_run: { run_id: string; title: string; calls: number; completion_tokens: number; model_seconds: number }[];
+  recent_errors: { run_id: string; at: string; stage: string; agent: string; message: string }[];
+  recent_runs: RunSummary[];
+  models: { profile: string; models: Record<string, string>; ok: boolean; missing?: string[]; num_ctx?: number; think_roles?: string };
+  integrations: { jira: boolean; git: boolean; otlp: boolean; vectors: boolean };
+  links: Record<string, string>;
+};
+
+export type DeepHealth = {
+  status: string;
+  checks: { name: string; ok: boolean; ms: number; detail: string }[];
+  integrations: Record<string, boolean>;
+};
+
+export type Integrations = {
+  jira: { configured?: boolean; initiative?: { key?: string; url?: string }; sprint?: { name?: string };
+          stories?: Record<string, { key?: string; url?: string }>; [k: string]: any };
+  git: { configured?: boolean; url?: string; branch?: string; created?: boolean;
+         pull_request?: { number?: number; url?: string }; release?: { tag?: string; default_branch?: string } };
+};
+
+export type KnowledgeStats = { graph: Record<string, number>; vectors: Record<string, number>; vectors_enabled: boolean };
+export type Lesson = { id: string; lesson: string; applies_to: string; run_id: string; story_id: string; project?: string };
+export type Recall = {
+  graph: any[]; components: any[];
+  stories: { run_id: string; project: string; title: string; outcome: string; score: number }[];
+  lessons: { lesson: string; score: number }[];
+  decisions: { title: string; decision: string; rationale: string; score: number }[];
+};
+
 export const api = {
+  retryRun: (id: string) => json<{ id: string }>(`/api/runs/${id}/retry`, { method: "POST" }),
+  cancelRun: (id: string) => json<{ id: string; outcome: string }>(`/api/runs/${id}/cancel`, { method: "POST" }),
+  traces: (id: string) => json<{ calls: LLMCallRow[]; spans: SpanRow[] }>(`/api/runs/${id}/traces`),
+  trace: (id: string, callId: string) => json<LLMCallRow>(`/api/runs/${id}/traces/${callId}`),
+  usage: (id: string) => json<Usage>(`/api/runs/${id}/usage`),
+  integrations: (id: string) => json<Integrations>(`/api/runs/${id}/integrations`),
+  summary: (hours: number) => json<Summary>(`/api/observability/summary?hours=${hours}`),
+  deepHealth: () => json<DeepHealth>("/health/deep"),
+  knowledgeStats: () => json<KnowledgeStats>("/api/knowledge/stats"),
+  lessons: () => json<Lesson[]>("/api/knowledge/lessons"),
+  recall: (q: string) => json<Recall>(`/api/knowledge/recall?q=${encodeURIComponent(q)}`),
+  reindex: () => json<{ status: string }>("/api/knowledge/reindex", { method: "POST" }),
+  reindexStatus: () => json<{ status: string; error?: string; vectors?: Record<string, number> }>("/api/knowledge/reindex"),
   // Older orchestrators return only key/label/description; fill the rest so
   // components can rely on the shape.
   stages: () => json<Stage[]>("/api/runs/stages").then((list) =>

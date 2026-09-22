@@ -7,7 +7,7 @@ from ..db import Artifact, Deployment, Event, Evidence, Run, session
 from ..graph import engine
 from ..graph.graph import STAGE_DETAIL, STAGES
 from ..ingest.pipeline import ingest_sources
-from ..integrations import tracker
+from ..integrations import gitremote, tracker
 from ..workspace import deployment as runtime
 from ..workspace import repo
 from .schemas import RunCreate
@@ -69,8 +69,32 @@ async def start_run(run_id: str):
         s.commit()
         title = run.title
 
-    await engine.start(run_id, title)
-    return {"id": run_id, "status": "running", "evidence_count": evidence}
+    driving = await engine.start(run_id, title)
+    return {"id": run_id, "status": "running" if driving else "scheduled",
+            "evidence_count": evidence}
+
+
+@router.post("/{run_id}/cancel")
+async def cancel_run(run_id: str):
+    """Stop a run where it is. Everything already built is kept; Retry continues it."""
+    with session() as s:
+        run = s.get(Run, run_id)
+        if run is None:
+            raise HTTPException(404, "run not found")
+        status = run.status
+    outcome = await engine.cancel(run_id)
+    if outcome == "idle":
+        raise HTTPException(409, f"the run is not being driven (it is {status})")
+    return {"id": run_id, "outcome": outcome}
+
+
+@router.get("/{run_id}/git")
+async def run_git(run_id: str):
+    """Where this run's repository lives on the Git remote, with the pull request if any."""
+    with session() as s:
+        if s.get(Run, run_id) is None:
+            raise HTTPException(404, "run not found")
+    return gitremote.mapping(run_id)
 
 
 @router.post("/{run_id}/retry")
@@ -80,8 +104,8 @@ async def retry_run(run_id: str):
         run = s.get(Run, run_id)
         if run is None:
             raise HTTPException(404, "run not found")
-        if run.status != "failed":
-            raise HTTPException(409, f"run is {run.status}; only a failed run can be retried")
+        if run.status not in ("failed", "cancelled"):
+            raise HTTPException(409, f"run is {run.status}; only a failed or cancelled run can be retried")
     if not await engine.retry(run_id):
         raise HTTPException(409, "the run is already being driven")
     return {"id": run_id, "status": "running"}

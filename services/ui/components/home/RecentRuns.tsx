@@ -13,6 +13,8 @@ const TONE: Record<string, { bar: string; pill: string; label: string }> = {
   failed: { bar: "bg-rust", pill: "border-rust/40 bg-rust/[0.06] text-rust", label: "failed" },
   held: { bar: "bg-ochre", pill: "border-ochre/50 bg-ochre/[0.07] text-ochre", label: "held" },
   queued: { bar: "bg-rule", pill: "border-rule text-graphite", label: "not started" },
+  scheduled: { bar: "bg-signal/40", pill: "border-signal/30 text-signal", label: "queued" },
+  cancelled: { bar: "bg-rule", pill: "border-rule text-graphite", label: "stopped" },
 };
 
 export default function RecentRuns({

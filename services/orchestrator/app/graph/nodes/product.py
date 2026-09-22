@@ -1,6 +1,7 @@
 """Stage 3-4: Product Vision, then Product Backlog. Both gated."""
 from __future__ import annotations
 
+from ...agents import schemas
 from ...agents.base import PRODUCT_OWNER
 from ...config import pack
 from ...events import emit
@@ -25,7 +26,8 @@ async def vision(state: RunState) -> RunState:
         # Keyed by attempt: replaying the approval gate must return the draft the
         # stakeholder read, while a genuine revision round writes a new one.
         doc = await remember(run_id, f"vision:{attempt}", lambda: PRODUCT_OWNER.json(
-            f"Produce the VISION.\n\nEVIDENCE:\n{state['brief'][:12000]}\n{feedback}"
+            f"Produce the VISION.\n\nEVIDENCE:\n{state['brief'][:40000]}\n{feedback}",
+            schema=schemas.VISION,
         ))
         await save_artifact(run_id, "vision", "vision", doc)
         await emit(run_id, f"Vision drafted: {doc.get('product_name', 'untitled')}",
@@ -64,8 +66,8 @@ async def backlog(state: RunState) -> RunState:
             + ("DEFINITION OF READY - every story must satisfy all of these:\n"
                + "\n".join(f"- {d}" for d in dor) + "\n\n" if dor else "")
             + f"APPROVED VISION:\n{state['vision']}\n\n"
-            f"EVIDENCE:\n{state['brief'][:8000]}\n{feedback}",
-            max_tokens=4000,
+            f"EVIDENCE:\n{state['brief'][:30000]}\n{feedback}",
+            max_tokens=6000, schema=schemas.BACKLOG,
         ))
         stories = doc.get("stories", [])
         thin = [s["id"] for s in stories if len(s.get("acceptance_criteria", [])) < 2]

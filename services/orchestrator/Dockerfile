@@ -9,7 +9,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl build-essential ca-certificates ffmpeg docker-cli docker-compose \
     && rm -rf /var/lib/apt/lists/* \
     && docker --version \
-    && docker compose version
+    && docker compose version \
+    && git config --system user.name "Poiesis Agents" \
+    && git config --system user.email "agents@poiesis.local" \
+    && git config --system init.defaultBranch main \
+    && git config --system safe.directory '*'
 
 WORKDIR /app
 COPY requirements.txt .

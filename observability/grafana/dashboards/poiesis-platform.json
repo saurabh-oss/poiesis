@@ -1,0 +1,80 @@
+{
+  "uid": "poiesis-platform",
+  "title": "Poiesis platform",
+  "tags": ["poiesis"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Runs by status",
+      "gridPos": { "h": 5, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "poiesis_runs", "legendFormat": "{{status}}", "instant": true }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Drivers active / queued",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [
+        { "expr": "poiesis_active_drivers", "legendFormat": "active", "instant": true },
+        { "expr": "poiesis_queued_runs", "legendFormat": "queued", "instant": true }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "none" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Output tokens / min (5m)",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "sum(rate(poiesis_llm_tokens_total{direction=\"out\"}[5m])) * 60", "instant": true }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "area" },
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } }
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Model calls per minute, by model and status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "sum by (model, status) (rate(poiesis_llm_calls_total[5m])) * 60", "legendFormat": "{{model}} {{status}}" }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Tokens per second, in and out",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "sum by (direction) (rate(poiesis_llm_tokens_total[5m]))", "legendFormat": "{{direction}}" }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Model call duration p50 / p95 (s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum by (le) (rate(poiesis_llm_seconds_bucket[15m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(poiesis_llm_seconds_bucket[15m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Time spent per span kind (s per 5m)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "sum by (kind) (increase(poiesis_span_seconds_sum[5m]))", "legendFormat": "{{kind}}" }],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 8, "type": "bargauge", "title": "Gate decisions",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "sum by (kind, decision) (poiesis_gates_total)", "legendFormat": "{{kind}}: {{decision}}", "instant": true }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "displayMode": "gradient", "orientation": "horizontal" }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Errors per span kind (per 5m)",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "poiesis-prometheus" },
+      "targets": [{ "expr": "sum by (kind) (increase(poiesis_span_seconds_count{status=\"error\"}[5m]))", "legendFormat": "{{kind}}" }]
+    }
+  ]
+}

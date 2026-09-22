@@ -10,6 +10,7 @@ release at all.
 """
 from __future__ import annotations
 
+from ... import telemetry
 from ...events import emit
 from ...workspace import browser_check
 from ...workspace import deployment as runtime
@@ -28,7 +29,11 @@ async def deploy_increment(state: RunState) -> RunState:
     # fresh=True: this is an automated deploy inside the build/review loop, not a
     # stakeholder restarting a released app, so a stale schema from an earlier
     # round in this same run must never survive to shadow the current one.
-    outcome = await runtime.deploy(run_id, fresh=True)
+    async with telemetry.span("deploy", "compose up", fresh=True) as sp:
+        outcome = await runtime.deploy(run_id, fresh=True)
+        sp.set(status=outcome.status, port=outcome.port)
+        if outcome.status == "failed":
+            sp.fail(outcome.detail[:500])
     record = {**outcome.as_dict(), "run_id": run_id}
 
     if outcome.status == "running":
@@ -36,7 +41,12 @@ async def deploy_increment(state: RunState) -> RunState:
         await emit(run_id, f"Running at {outcome.url} — now opening every screen in a real browser",
                    agent="release", stage="deploy", data=outcome.as_dict())
         if (state.get("scaffold") or {}).get("entrypoint") == "frontend":
-            verification = await browser_check.verify(run_id)
+            async with telemetry.span("browser", "open every screen") as sp:
+                verification = await browser_check.verify(run_id)
+                sp.set(ok=bool(verification.get("ok")),
+                       screens=len(verification.get("screens") or []))
+                if not verification.get("ok"):
+                    sp.fail("; ".join(verification.get("problems") or [])[:500] or "screens failed")
         else:
             verification = {"ok": True, "skipped": True, "problems": [], "screens": []}
         record["verification"] = verification

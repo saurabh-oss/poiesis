@@ -71,13 +71,13 @@ export function stageStates(
     keys.forEach((k) => { out[k] = "done"; });
     return out;
   }
-  if (run.status === "queued") {
+  if (run.status === "queued" || (run.status === "scheduled" && !Object.values(spans).some((s) => s.count))) {
     keys.forEach((k, i) => { out[k] = i === 0 ? "next" : "ahead"; });
     return out;
   }
 
   let current = keys.indexOf(run.stage);
-  if (current < 0 || run.status === "failed") {
+  if (current < 0 || run.status === "failed" || run.status === "cancelled") {
     let furthest = 0;
     keys.forEach((k, i) => { if (spans[k]?.count) furthest = i; });
     current = Math.max(current, furthest);
@@ -87,7 +87,7 @@ export function stageStates(
     if (i < current) out[k] = "done";
     else if (i > current) out[k] = i === current + 1 ? "next" : "ahead";
     else if (run.status === "failed") out[k] = "failed";
-    else if (run.status === "held") out[k] = "held";
+    else if (run.status === "held" || run.status === "cancelled") out[k] = "held";
     else if (gateStage === k || run.status === "waiting") out[k] = "gate";
     else out[k] = "active";
   });

@@ -4,7 +4,7 @@ import datetime as dt
 import uuid
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from .config import settings
@@ -142,6 +142,73 @@ class Deployment(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=now, onupdate=now
     )
+
+
+class Span(Base):
+    """One timed piece of work: a stage, a model call, a sandbox run, a deploy.
+
+    The Postgres copy of what is also exported over OpenTelemetry when an
+    exporter is configured. Stored so the control room can show a run's timeline
+    without a tracing backend, and so a run's cost can be added up after the fact.
+    """
+
+    __tablename__ = "spans"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    kind: Mapped[str] = mapped_column(String(24), index=True)   # stage|llm|sandbox|deploy|browser|jira|git|kg|run
+    name: Mapped[str] = mapped_column(String(200))
+    stage: Mapped[str] = mapped_column(String(48), default="")
+    step: Mapped[str] = mapped_column(String(160), default="")
+    agent: Mapped[str] = mapped_column(String(48), default="")
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok|error
+    error: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    trace_id: Mapped[str] = mapped_column(String(32), default="")
+    span_id: Mapped[str] = mapped_column(String(16), default="")
+
+
+class LLMCall(Base):
+    """Every model call the platform makes, with what went in and what came back.
+
+    This is the LLM trace: prompt, reply, tokens, duration, which agent asked and
+    for which memo step. It is what makes a bad artifact explainable — you can
+    read exactly what the Developer was shown when it wrote the wrong file.
+    """
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), index=True, nullable=True
+    )
+    stage: Mapped[str] = mapped_column(String(48), default="")
+    step: Mapped[str] = mapped_column(String(160), default="")
+    agent: Mapped[str] = mapped_column(String(48), default="")
+    role: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str] = mapped_column(String(120))
+    profile: Mapped[str] = mapped_column(String(16))
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=now)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    finish_reason: Mapped[str] = mapped_column(String(24), default="")
+    status: Mapped[str] = mapped_column(String(16), default="ok")  # ok|truncated|unparseable|error
+    error: Mapped[str] = mapped_column(Text, default="")
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    temperature: Mapped[float] = mapped_column(Float, default=0.0)
+    max_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    think: Mapped[bool] = mapped_column(Boolean, default=False)
+    schema_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    response: Mapped[str] = mapped_column(Text, default="")
+    thinking: Mapped[str] = mapped_column(Text, default="")
+    span_id: Mapped[str] = mapped_column(String(16), default="")
 
 
 def init_db() -> None:

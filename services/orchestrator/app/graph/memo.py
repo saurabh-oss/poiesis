@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Awaitable, Callable
 
+from .. import telemetry
 from ..db import NodeCache, session
 
 # Cached values are stored as JSON, so a bare list or string is wrapped rather
@@ -47,7 +48,13 @@ async def remember(run_id: str, key: str, producer: Callable[[], Awaitable[Any]]
     cached = await asyncio.to_thread(_get, run_id, key)
     if cached is not None:
         return cached.get(_WRAPPER)
-    value = await producer()
+    # The step is what a trace is attributed to: "impl:S3:r0" tells you which
+    # model call produced which file, which a stage name alone never could.
+    token = telemetry.current_step.set(key)
+    try:
+        value = await producer()
+    finally:
+        telemetry.current_step.reset(token)
     await asyncio.to_thread(_put, run_id, key, value)
     return value
 

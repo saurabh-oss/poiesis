@@ -15,6 +15,8 @@ const PILL: Record<string, string> = {
   failed: "border-rust/40 bg-rust/[0.08] text-rust",
   held: "border-ochre/50 bg-ochre/[0.08] text-ochre",
   queued: "border-rule bg-mist text-graphite",
+  scheduled: "border-signal/30 bg-signal/[0.05] text-signal",
+  cancelled: "border-rule bg-mist text-graphite",
 };
 
 const LABEL: Record<string, string> = {
@@ -25,6 +27,8 @@ const LABEL: Record<string, string> = {
   failed: "Failed",
   held: "Release held",
   queued: "Not started",
+  scheduled: "Queued for a slot",
+  cancelled: "Stopped",
 };
 
 const RING: Record<string, string> = {
@@ -144,6 +148,20 @@ function NowStrip({
       </div>
     );
   }
+  if (status === "scheduled") {
+    return (
+      <div className="flex items-center gap-3 rounded border border-signal/25 bg-signal/[0.04] px-4 py-3 text-[14px]">
+        <Icon name="clock" size={18} className="text-signal" /> Waiting for another run to finish with the models. It starts on its own.
+      </div>
+    );
+  }
+  if (status === "cancelled") {
+    return (
+      <div className="flex items-center gap-3 rounded border border-rule bg-mist/60 px-4 py-3 text-[14px] text-graphite">
+        <Icon name="pause" size={16} strokeWidth={2.6} /> Stopped where it was. Everything finished so far is kept.
+      </div>
+    );
+  }
 
   const who = latest?.agent ?? "system";
   const a = agent(who);
@@ -186,7 +204,7 @@ export default function RunHeader({
   const firstAt = events.find((e) => e.at)?.at;
   let lastAt: string | undefined;
   for (let i = events.length - 1; i >= 0; i--) if (events[i].at) { lastAt = events[i].at; break; }
-  const finished = status === "complete" || status === "failed" || status === "held";
+  const finished = status === "complete" || status === "failed" || status === "held" || status === "cancelled";
   const total = firstAt ? (finished && lastAt ? Date.parse(lastAt) : now) - Date.parse(firstAt) : null;
 
   return (

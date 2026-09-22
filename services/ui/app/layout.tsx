@@ -37,6 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/knowledge" className="rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
                 Portfolio
               </Link>
+              <Link href="/observability" className="rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
+                Observability
+              </Link>
             </nav>
           </div>
         </header>

@@ -11,16 +11,20 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ...agents import schemas
 from ...agents.base import RELEASE, REVIEWER
+from ...kg import vectors
+from ...llm import complete_json
 from ...config import pack
 from ...events import emit
-from ...integrations import tracker
+from ...integrations import gitremote, tracker
 from ...kg.client import kg
 from ...workspace import browser_check, repo
 from ...workspace import checks as platform_checks_mod
 from ...workspace import deployment as runtime
 from ...workspace.interface import EXAMPLE_ROUTER, EXAMPLE_SCREEN
 from ..gates import raise_gate
+from ..memo import remember
 from ..state import RunState
 from ..store import save_artifact, set_stage
 
@@ -521,6 +525,7 @@ async def release(state: RunState) -> RunState:
                            f"{', '.join(follow_up)} left for a follow-up run",
                    agent="release", stage="release", data=notes)
         await tracker.on_release(run_id, state, notes)
+        await gitremote.on_release(run_id, state, notes)
         return {"release": notes, "deployment": dep, "test_report": state["test_report"]}
 
     if decision == "rebuild" and can_rebuild:
@@ -575,6 +580,7 @@ async def release(state: RunState) -> RunState:
                           else f"run it with: {notes.get('run_command','')}"),
                agent="release", stage="release", data=notes)
     await tracker.on_release(run_id, state, notes)
+    await gitremote.on_release(run_id, state, notes)
     return {"release": notes}
 
 
@@ -613,7 +619,78 @@ async def harvest(state: RunState) -> RunState:
                 tech=cap["technology"], project=project,
             )
 
-    await emit(run_id, "Knowledge graph updated: this run is now reusable context",
-               agent="governance", stage="harvest", data={"project": project})
+    # Outcomes: what shipped, what did not, and what it scored.
+    report = state.get("test_report") or {}
+    rv = state.get("review") or {}
+    rel = state.get("release") or {}
+    await kg().record_outcome(run_id, project, {
+        "score": rv.get("weighted_score"), "verdict": rv.get("computed_verdict"),
+        "released": rel.get("status") == "released",
+        "green": report.get("green"), "total": report.get("total"),
+    })
+    stories_by_id = {s.get("id"): s for s in state["backlog"].get("stories", [])}
+    story_items = []
+    for r in report.get("stories", []):
+        sid = str(r.get("story_id"))
+        await kg().record_story_outcome(run_id, sid, r.get("status", ""), r.get("repair_attempts", 0))
+        story = stories_by_id.get(sid)
+        if story:
+            outcome = f"{r.get('status')} after {r.get('repair_attempts', 0)} repair(s)"
+            story_items.append(vectors.story_item(run_id, project, story, outcome))
+    await vectors.upsert("stories", story_items)
+    await vectors.upsert("decisions", [vectors.decision_item(run_id, project, d)
+                                       for d in state["architecture"].get("decisions", [])])
+
+    # Lessons: one sentence per story that needed repairs or stayed red, so the
+    # next run's Developer is told before it makes the same mistake.
+    lessons = await remember(run_id, "harvest:lessons", lambda: _lessons(run_id, state, stories_by_id))
+    for item in lessons:
+        await kg().record_lesson(run_id, item["story_id"], item["lesson"], item["applies_to"], project)
+    await vectors.upsert("lessons", [vectors.lesson_item(run_id, l["story_id"], l["lesson"], l["applies_to"])
+                                     for l in lessons])
+
+    await emit(run_id, "Knowledge graph updated: this run is now reusable context"
+                       + (f"; {len(lessons)} lesson(s) recorded for future runs" if lessons else ""),
+               agent="governance", stage="harvest",
+               data={"project": project, "lessons": lessons})
     await set_stage(run_id, "done", status="complete")
     return {}
+
+
+_LESSON_SYSTEM = """You distil one actionable lesson from a story that failed or needed repairs
+on an autonomous engineering platform. The reader is the Developer agent on a future run,
+building a similar story. Write one sentence in the imperative that would have prevented the
+failure — concrete, about the code or the data, never about process or "be careful".
+Examples: "Seed every table a screen reads in db/init.sql, or the screen shows an empty
+state." "Mount a router with a prefix that matches the path its screen calls."
+If the failure was a platform or environment problem and no lesson applies, return an empty
+lesson."""
+
+
+async def _lessons(run_id: str, state: RunState, stories: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    rv = state.get("review") or {}
+    findings = rv.get("blocking_findings") or []
+    for r in (state.get("test_report") or {}).get("stories", []):
+        sid = str(r.get("story_id"))
+        troubled = r.get("status") not in ("green",) or int(r.get("repair_attempts") or 0) > 0
+        if not troubled:
+            continue
+        story = stories.get(sid) or {}
+        mine = [f.get("finding") for f in findings if str(f.get("story_id")) == sid]
+        try:
+            reply = await complete_json(
+                role="fast", system=_LESSON_SYSTEM, schema=schemas.LESSON, max_tokens=400,
+                user=(f"STORY {sid}: {story.get('title', '')}\n{story.get('narrative', '')}\n"
+                      f"OUTCOME: {r.get('status')} after {r.get('repair_attempts', 0)} repair(s)\n"
+                      f"REASON: {r.get('reason', '')}\n"
+                      f"REVIEWER FINDINGS: {mine[:4]}\n"
+                      f"LAST TEST OUTPUT:\n{str(r.get('test_output') or '')[-2500:]}"),
+            )
+        except Exception:  # noqa: BLE001 — a lesson is a bonus, never a blocker
+            continue
+        lesson = str((reply or {}).get("lesson") or "").strip()
+        if len(lesson) > 20:
+            out.append({"story_id": sid, "lesson": lesson[:400],
+                        "applies_to": str((reply or {}).get("applies_to") or story.get("title") or "")[:200]})
+    return out

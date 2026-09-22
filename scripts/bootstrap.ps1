@@ -34,27 +34,22 @@ if ($profileName -eq "local") {
   }
 
   # ---- 2. Base models -------------------------------------------------------
-  Write-Host "Pulling base models (~20 GB the first time)..." -ForegroundColor Cyan
-  foreach ($m in @("qwen2.5:14b-instruct", "qwen2.5-coder:14b", "qwen2.5:7b-instruct",
-                   "nomic-embed-text", "llama3.2-vision:11b")) {
+  # The models named in .env, plus the embedding model the knowledge graph uses.
+  # Qwen3.6 35B-A3B is ~23 GB per variant; the first pull takes a while.
+  Write-Host "Pulling the models named in .env (~55 GB the first time)..." -ForegroundColor Cyan
+  $wanted = @()
+  foreach ($key in @("POIESIS_MODEL_REASONING", "POIESIS_MODEL_CODING", "POIESIS_MODEL_FAST",
+                     "POIESIS_MODEL_EMBED", "POIESIS_MODEL_VISION")) {
+    $m = (Get-EnvValue $key) -replace "^ollama/", ""
+    if ($m -and ($wanted -notcontains $m)) { $wanted += $m }
+  }
+  if (-not $wanted) { $wanted = @("qwen3.6:35b-a3b", "qwen3.6:35b-a3b-coding", "nomic-embed-text", "gemma4:12b") }
+  foreach ($m in $wanted) {
     Write-Host "  pulling $m"
     ollama pull $m
   }
-
-  # ---- 3. poiesis-* variants ------------------------------------------------
-  # The agent prompts carry a portfolio context block and whole file contents;
-  # Ollama's 2k default truncates them silently, which reads as a stupid model.
-  Write-Host "Building the poiesis-* variants with a larger context window..." -ForegroundColor Cyan
-  $variants = @{
-    "poiesis-reasoning" = "reasoning"
-    "poiesis-coding"    = "coding"
-    "poiesis-fast"      = "fast"
-  }
-  foreach ($name in $variants.Keys) {
-    $modelfile = Join-Path $repoRoot "modelfiles\$($variants[$name])"
-    Write-Host "  creating $name from $modelfile"
-    ollama create $name -f $modelfile
-  }
+  # The context window is sent with every request (POIESIS_LOCAL_NUM_CTX), so no
+  # Modelfile variants are needed any more.
 }
 
 # ---- 4. Orchestrator --------------------------------------------------------

@@ -104,7 +104,7 @@ async def describe_image(path: Path) -> list[Chunk]:
 
     s = settings()
     b64 = base64.b64encode(path.read_bytes()).decode()
-    model = "ollama/llama3.2-vision:11b" if s.poiesis_llm_profile == "local" else "anthropic/claude-sonnet-4-6"
+    model = s.poiesis_model_vision if s.poiesis_llm_profile == "local" else "anthropic/claude-sonnet-5"
     kwargs = {"api_base": s.ollama_base_url} if s.poiesis_llm_profile == "local" else {"api_key": s.anthropic_api_key}
     resp = await litellm.acompletion(
         model=model,

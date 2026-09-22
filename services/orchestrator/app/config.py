@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     poiesis_model_coding: str = "ollama/qwen2.5-coder:14b"
     poiesis_model_fast: str = "ollama/qwen2.5:7b-instruct"
     poiesis_model_embed: str = "ollama/nomic-embed-text"
+    poiesis_model_vision: str = "ollama/gemma4:12b"
 
     groq_api_key: str = ""
     anthropic_api_key: str = ""
@@ -62,6 +63,48 @@ class Settings(BaseSettings):
     jira_initiative_type: str = "Initiative"
     jira_board_id: int = 0             # 0 = the project's first scrum board
     jira_sprint_days: int = 14
+
+    # Local models. The native Ollama client (llm.py) uses these; the hosted
+    # profiles ignore them. num_ctx is sent with every request, so the Modelfile
+    # variants are no longer needed to get a usable context window.
+    poiesis_local_num_ctx: int = 32768
+    poiesis_local_keep_alive: str = "30m"
+    poiesis_local_idle_timeout: int = 900      # seconds with no token before a call is abandoned
+    poiesis_local_min_tokens: int = 8000       # floor on the reply budget for local models
+    # Roles allowed to "think" before answering (Qwen3 / gpt-oss style reasoning).
+    # Thinking improves the Analyst, Architect and Reviewer; the Developer writes
+    # files, where it mostly spends the budget.
+    poiesis_local_think_roles: str = "reasoning"
+    poiesis_local_think_budget: int = 6000     # extra reply tokens allowed when thinking is on
+
+    # Engine. One run at a time on a single GPU; more only makes both slower.
+    poiesis_max_concurrent_runs: int = 1
+    poiesis_restart_deployments_on_boot: bool = True
+
+    # Observability. Spans and model calls are always stored in Postgres; set an
+    # OTLP endpoint (Jaeger in compose: http://jaeger:4318) to export them too.
+    otel_exporter_otlp_endpoint: str = ""
+    poiesis_log_format: str = "text"           # text | json
+    poiesis_trace_prompt_chars: int = 120000   # how much of each prompt/reply the trace keeps
+
+    # Git remote. Every run's workspace is pushed to a remote as the build goes,
+    # and released on the default branch with a tag. Off unless a template is set.
+    #   https://github.com/acme/poiesis-{slug}.git   (token used over HTTPS)
+    #   git@github.com:acme/poiesis-{slug}.git       (needs the container's SSH key)
+    git_remote_template: str = ""
+    git_token: str = ""
+    git_username: str = "poiesis"
+    git_default_branch: str = "main"
+    git_push_each_story: bool = True
+    # GitHub only: create the repository under this user or organisation when the
+    # remote does not exist yet, and open a pull request at release.
+    github_owner: str = ""
+    github_api: str = "https://api.github.com"
+    github_private: bool = True
+    git_open_pull_request: bool = True
+
+    # Vector recall over the portfolio and past runs (Qdrant). Off if unreachable.
+    poiesis_vectors: bool = True
 
     @property
     def checkpoint_dsn(self) -> str:

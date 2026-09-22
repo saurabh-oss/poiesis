@@ -2,13 +2,37 @@
 
 Three roles, not three vendors. A role maps to a model per profile, so the whole
 platform can move from laptop GPU to hosted inference with one env var.
+
+The local profile talks to Ollama directly over its own API rather than through
+LiteLLM, for four things a generic adapter cannot give:
+
+* **Constrained JSON.** Ollama's `format` takes a JSON Schema and constrains
+  decoding to it. A local model's reply can then not be malformed, which used
+  to cost whole stories.
+* **Thinking control.** Qwen3 and gpt-oss reason before they answer. That is
+  worth its tokens for the Analyst and the Reviewer, and a waste for the
+  Developer, whose reply is files. `think` is set per role.
+* **Streaming with an idle timeout.** A long reply from a model split across GPU
+  and RAM can take many minutes. A fixed request timeout kills it; an idle
+  timeout only kills a call that has actually stalled.
+* **A real context window.** `num_ctx` is sent with every request, so the
+  agents' prompts are no longer cut to fit a 12k default.
+
+Every call, on every profile, is traced: prompt, reply, tokens, duration, which
+agent and which memo step asked (`llm_calls`), plus a span in `spans`.
 """
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
 import json
+import logging
 import re
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 import litellm
 from tenacity import (
     retry,
@@ -17,10 +41,12 @@ from tenacity import (
     wait_exponential,
 )
 
+from . import telemetry
 from .config import settings
 
 litellm.drop_params = True
 litellm.suppress_debug_info = True
+log = logging.getLogger("poiesis.llm")
 
 Role = str  # "reasoning" | "coding" | "fast"
 
@@ -32,14 +58,15 @@ _PROFILES: dict[str, dict[Role, str]] = {
         "fast": "groq/llama-3.1-8b-instant",
     },
     "cloud": {
-        # The Developer's reply is the largest and most instruction-heavy the
-        # platform asks for (whole files, exact contracts, "never do X" rules a
-        # 14B local model routinely ignores) — worth the stronger model both roles.
         "reasoning": "anthropic/claude-sonnet-5",
         "coding": "anthropic/claude-sonnet-5",
         "fast": "anthropic/claude-haiku-4-5-20251001",
     },
 }
+
+
+def is_local() -> bool:
+    return settings().poiesis_llm_profile == "local"
 
 
 def model_for(role: Role) -> str:
@@ -53,59 +80,42 @@ def model_for(role: Role) -> str:
     return _PROFILES[s.poiesis_llm_profile][role]
 
 
+def local_name(model: str) -> str:
+    """`ollama/qwen3.6:35b-a3b` -> `qwen3.6:35b-a3b`."""
+    return model.split("/", 1)[1] if model.startswith(("ollama/", "ollama_chat/")) else model
+
+
 def _kwargs() -> dict[str, Any]:
     s = settings()
-    if s.poiesis_llm_profile == "local":
-        return {"api_base": s.ollama_base_url}
     if s.poiesis_llm_profile == "groq":
         return {"api_key": s.groq_api_key}
     return {"api_key": s.anthropic_api_key}
 
 
-# Call sites pick max_tokens to fit the local models' tight 12288-token total
-# context. A hosted "5"-family model reasons before it writes, can spend a real
-# slice of that same ceiling on reasoning nobody sees, and — unlike a truncated
-# reply — returns a completely empty one if it runs out mid-thought, with no
-# error to catch. Raised here, in one place, rather than at every call site: it
-# only sets a ceiling, so it costs nothing unless the model actually uses it.
-# 16000 was not always enough: a story requiring careful multi-file reasoning
-# (a self-referencing foreign key, in the one observed case) still came back
-# completely empty even at that ceiling. Confirmed accepted by the API with no
-# special headers up to 64000; there is no cost to setting the ceiling higher
-# than needed; only to setting it too low.
-# 32000 was not enough either: the story that seeds a demonstration dataset
-# writes tens of rows of prose and came back empty twice, ten minutes a time,
-# reported as unparseable JSON because an exhausted reply is indistinguishable
-# from a malformed one until you look at finish_reason. Hence both halves of
-# this: the ceiling goes to the confirmed maximum, and running into it is now
-# an error that says so.
+# A hosted "5"-family model reasons before it writes, spends a real slice of the
+# ceiling on reasoning nobody sees, and returns an empty reply when it runs out.
+# The ceiling costs nothing unless used, so it sits at the confirmed maximum.
 _CLOUD_MIN_TOKENS = 64000
 
 
 def _effective_max_tokens(max_tokens: int) -> int:
-    if settings().poiesis_llm_profile == "local":
-        return max_tokens
+    s = settings()
+    if s.poiesis_llm_profile == "local":
+        return max(max_tokens, s.poiesis_local_min_tokens)
     return max(max_tokens, _CLOUD_MIN_TOKENS)
 
 
-# Models newer than litellm's own compatibility table reject `temperature`
-# outright rather than ignoring it — `litellm.drop_params` only strips params a
-# provider's *schema* omits, not ones the API actively refuses, so a plain
-# BadRequestError ("`temperature` is deprecated for this model") is how Claude's
-# 5-family models say this. Remembered per model so it costs one failed call,
-# not one per request, and self-heals if a future model adds it back.
+def _thinks(role: Role) -> bool:
+    roles = {r.strip() for r in settings().poiesis_local_think_roles.split(",") if r.strip()}
+    return role in roles
+
+
+# Models newer than litellm's compatibility table reject `temperature` outright.
 _NO_TEMPERATURE: set[str] = set()
 
 
 class UnparseableReply(ValueError):
-    """The model's reply could not be read as JSON, even with recovery.
-
-    A plain ValueError only carries a 400-character preview, which is enough to
-    log but not enough to act on. Subclassing ValueError means every existing
-    `except ValueError` still catches this without change; a caller that wants
-    the full text — to show the model what it did wrong, or to log more than a
-    preview — catches UnparseableReply and reads `.raw`.
-    """
+    """The model's reply could not be read as JSON, even with recovery."""
 
     def __init__(self, raw: str):
         self.raw = raw
@@ -113,13 +123,7 @@ class UnparseableReply(ValueError):
 
 
 class ReplyTruncated(UnparseableReply):
-    """The model used its whole output budget and returned nothing.
-
-    A subclass of UnparseableReply so that every caller already handling an
-    unreadable reply keeps working unchanged — but one that can say what really
-    happened, because "write less" and "write valid JSON" are different repairs
-    and only one of them is any use here.
-    """
+    """The model used its whole output budget and returned nothing usable."""
 
     def __init__(self, budget: int):
         self.budget = budget
@@ -128,24 +132,115 @@ class ReplyTruncated(UnparseableReply):
                      "it is too long, not malformed",)
 
 
-# Retrying a reply that exhausted its budget just spends the same minutes again
-# for the same empty answer: that one is for the caller to handle, not to repeat.
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20),
-       retry=retry_if_not_exception_type(ReplyTruncated))
-async def complete(
-    *,
-    role: Role,
-    system: str,
-    user: str,
-    temperature: float = 0.2,
-    max_tokens: int = 4096,
-) -> str:
-    model = model_for(role)
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-    kwargs: dict[str, Any] = {"max_tokens": _effective_max_tokens(max_tokens), **_kwargs()}
+class ModelUnavailable(RuntimeError):
+    """Ollama is down, or the configured model is not pulled. Retrying will not help."""
+
+
+@dataclass
+class Reply:
+    content: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    finish_reason: str = "stop"     # stop | length | error
+    thinking: str = ""
+    model: str = ""
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+# ---- the native Ollama client ----------------------------------------------------
+
+# Tests swap in a mock transport; production talks to the configured base URL.
+_transport: httpx.AsyncBaseTransport | None = None
+
+
+def use_transport(transport: httpx.AsyncBaseTransport | None) -> None:
+    global _transport
+    _transport = transport
+
+
+def _client(read_timeout: float) -> httpx.AsyncClient:
+    timeout = httpx.Timeout(connect=30.0, read=read_timeout, write=120.0, pool=30.0)
+    return httpx.AsyncClient(timeout=timeout, transport=_transport)
+
+
+def _explain(status: int, text: str, model: str) -> str:
+    low = text.lower()
+    if status == 404 or "not found" in low:
+        return (f"Ollama does not have the model '{model}'. Pull it on the host with "
+                f"`ollama pull {model}`, or point POIESIS_MODEL_* at one it has.")
+    return f"Ollama answered {status}: {text[:300]}"
+
+
+_THINK_TAGS = re.compile(r"<think>.*?</think>\s*", re.S)
+
+
+async def _ollama(model: str, messages: list[dict[str, str]], *, max_tokens: int,
+                  temperature: float, fmt: Any = None, think: bool | None = None) -> Reply:
+    s = settings()
+    body: dict[str, Any] = {
+        "model": model, "messages": messages, "stream": True,
+        "keep_alive": s.poiesis_local_keep_alive,
+        "options": {"num_predict": max_tokens, "temperature": temperature,
+                    "num_ctx": s.poiesis_local_num_ctx},
+    }
+    if fmt:
+        body["format"] = fmt
+    if think is not None:
+        body["think"] = think
+    url = s.ollama_base_url.rstrip("/") + "/api/chat"
+    content: list[str] = []
+    thinking: list[str] = []
+    stats: dict[str, Any] = {}
+    try:
+        async with _client(float(s.poiesis_local_idle_timeout)) as client:
+            async with client.stream("POST", url, json=body) as resp:
+                if resp.status_code >= 400:
+                    text = (await resp.aread()).decode(errors="replace")
+                    raise ModelUnavailable(_explain(resp.status_code, text, model))
+                async for line in resp.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if chunk.get("error"):
+                        raise ModelUnavailable(_explain(500, str(chunk["error"]), model))
+                    msg = chunk.get("message") or {}
+                    if msg.get("content"):
+                        content.append(msg["content"])
+                    if msg.get("thinking"):
+                        thinking.append(msg["thinking"])
+                    if chunk.get("done"):
+                        stats = chunk
+                        break
+    except httpx.ConnectError as exc:
+        raise ModelUnavailable(
+            f"Ollama is not reachable at {s.ollama_base_url} ({exc}). On Windows, run it with "
+            "OLLAMA_HOST=0.0.0.0:11434 so the container can reach it.") from exc
+    except httpx.ReadTimeout as exc:
+        raise TimeoutError(
+            f"{model} produced no token for {s.poiesis_local_idle_timeout}s; the call was abandoned"
+        ) from exc
+    text = "".join(content)
+    # A model without native thinking support may still write <think> blocks.
+    stripped = _THINK_TAGS.sub("", text) if "<think>" in text else text
+    return Reply(
+        content=stripped,
+        prompt_tokens=int(stats.get("prompt_eval_count") or 0),
+        completion_tokens=int(stats.get("eval_count") or 0),
+        finish_reason=str(stats.get("done_reason") or "stop"),
+        thinking="".join(thinking) or (text[:len(text) - len(stripped)] if stripped != text else ""),
+        model=model,
+        extra={"load_ms": int((stats.get("load_duration") or 0) / 1e6),
+               "prompt_ms": int((stats.get("prompt_eval_duration") or 0) / 1e6),
+               "eval_ms": int((stats.get("eval_duration") or 0) / 1e6)},
+    )
+
+
+async def _hosted(model: str, messages: list[dict[str, str]], *, max_tokens: int,
+                  temperature: float) -> Reply:
+    kwargs: dict[str, Any] = {"max_tokens": max_tokens, **_kwargs()}
     if model not in _NO_TEMPERATURE:
         kwargs["temperature"] = temperature
     try:
@@ -157,26 +252,114 @@ async def complete(
         kwargs.pop("temperature", None)
         resp = await litellm.acompletion(model=model, messages=messages, **kwargs)
     choice = resp.choices[0]
-    content = choice.message.content or ""
-    # A reply that ran out of budget comes back with content set to None, not to
-    # the partial text, so every recovery path downstream sees an empty string
-    # and calls it malformed JSON. Only finish_reason tells the truth.
-    if not content.strip() and getattr(choice, "finish_reason", "") == "length":
-        raise ReplyTruncated(kwargs["max_tokens"])
-    return content
+    usage = getattr(resp, "usage", None)
+    return Reply(
+        content=choice.message.content or "",
+        prompt_tokens=int(getattr(usage, "prompt_tokens", 0) or 0),
+        completion_tokens=int(getattr(usage, "completion_tokens", 0) or 0),
+        finish_reason=str(getattr(choice, "finish_reason", "") or "stop"),
+        model=model,
+    )
+
+
+# ---- tracing ---------------------------------------------------------------------
+
+def _store_call(row: dict[str, Any]) -> None:
+    from .db import LLMCall, session
+    with session() as s:
+        s.add(LLMCall(**row))
+        s.commit()
+
+
+async def _trace(row: dict[str, Any]) -> None:
+    try:
+        await asyncio.to_thread(_store_call, row)
+    except Exception as exc:  # noqa: BLE001 — a trace is never worth a run
+        log.debug("llm call not traced: %s", exc)
+
+
+# ---- the public calls ------------------------------------------------------------
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20),
+       retry=retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)))
+async def complete(
+    *,
+    role: Role,
+    system: str,
+    user: str,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+    schema: dict[str, Any] | None = None,
+    json_mode: bool = False,
+    attempt: int = 1,
+) -> str:
+    """One model call, traced. Raises ReplyTruncated when the budget ran out."""
+    s = settings()
+    model = model_for(role)
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    budget = _effective_max_tokens(max_tokens)
+    think = is_local() and _thinks(role)
+    ctx = telemetry.context()
+    started = dt.datetime.now(dt.timezone.utc)
+    t0 = time.perf_counter()
+    status, error, reply = "ok", "", Reply("")
+    async with telemetry.span("llm", f"{role}:{local_name(model)}", role=role, model=model,
+                              max_tokens=budget, think=think, attempt=attempt) as sp:
+        try:
+            if is_local():
+                name = local_name(model)
+                fmt = schema if schema else ("json" if json_mode else None)
+                reply = await _ollama(name, messages, temperature=temperature, fmt=fmt,
+                                      think=think,
+                                      max_tokens=budget + (s.poiesis_local_think_budget if think else 0))
+                if think and not reply.content.strip() and reply.finish_reason == "length":
+                    # It thought the whole budget away. Ask again without thinking
+                    # rather than report the story unbuildable.
+                    log.warning("%s spent its budget thinking; retrying with thinking off", name)
+                    sp.set(rethought=True)
+                    reply = await _ollama(name, messages, temperature=temperature, fmt=fmt,
+                                          think=False, max_tokens=budget)
+            else:
+                reply = await _hosted(model, messages, temperature=temperature, max_tokens=budget)
+            if not reply.content.strip() and reply.finish_reason == "length":
+                status = "truncated"
+                raise ReplyTruncated(budget)
+            if reply.finish_reason == "length":
+                status = "truncated"   # partial content: the caller's recovery may still parse it
+            sp.set(prompt_tokens=reply.prompt_tokens, completion_tokens=reply.completion_tokens,
+                   finish_reason=reply.finish_reason, **reply.extra)
+            return reply.content
+        except Exception as exc:
+            if status == "ok":
+                status = "error"
+            error = f"{type(exc).__name__}: {exc}"[:4000]
+            sp.fail(error)
+            raise
+        finally:
+            seconds = time.perf_counter() - t0
+            telemetry.record_llm(role, local_name(model), status, seconds,
+                                 reply.prompt_tokens, reply.completion_tokens)
+            cap = s.poiesis_trace_prompt_chars
+            await _trace({
+                "run_id": ctx["run_id"] or None, "stage": ctx["stage"], "step": ctx["step"][:160],
+                "agent": ctx["agent"][:48], "role": role, "model": local_name(model),
+                "profile": s.poiesis_llm_profile, "started_at": started,
+                "duration_ms": int(seconds * 1000),
+                "prompt_tokens": reply.prompt_tokens, "completion_tokens": reply.completion_tokens,
+                "finish_reason": reply.finish_reason, "status": status, "error": error,
+                "attempt": attempt, "temperature": temperature, "max_tokens": budget,
+                "think": think, "schema_used": bool(schema),
+                "system_prompt": system[:cap], "prompt": user[:cap],
+                "response": reply.content[:cap], "thinking": reply.thinking[:cap // 4],
+                "span_id": sp.span_id,
+            })
 
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 
 def _close_truncated(text: str) -> str:
-    """Close a JSON value that stopped mid-flight.
-
-    The Developer returns whole source files, so its replies are the longest the
-    platform asks for and the ones that get cut off. A reply truncated inside a
-    string is unrecoverable as written but usually recoverable in substance: shut
-    the open string and the open brackets and the earlier files still parse.
-    """
+    """Close a JSON value that stopped mid-flight, so the earlier files still parse."""
     stack: list[str] = []
     in_string = escaped = False
     for ch in text:
@@ -197,11 +380,9 @@ def _close_truncated(text: str) -> str:
     out = text[:-1] if escaped else text
     if in_string:
         out += '"'
-    # A trailing comma or a key with no value is invalid however we close it.
     out = out.rstrip()
     while out and out[-1] in ",:":
         out = out[:-1].rstrip()
-    # If the cut landed on a key whose value never arrived, that key has to go too.
     if out.endswith('"'):
         opening = out.rfind('"', 0, len(out) - 1)
         before = out[:opening].rstrip()
@@ -229,14 +410,20 @@ def _parse_json(raw: str) -> Any:
 
     for candidate in candidates:
         for strict in (True, False):
-            # strict=False permits the literal newlines that models leave inside
-            # string values when the value is source code — by far the most common
-            # malformation, and harmless to accept.
             try:
                 return json.loads(candidate, strict=strict)
             except json.JSONDecodeError:
                 continue
     raise UnparseableReply(raw)
+
+
+_JSON_RULES = (
+    "\n\nRespond with a single valid JSON value and nothing else. "
+    "No prose, no explanation, no markdown fences. Inside every JSON string, escape "
+    "every newline as \\n and every double-quote as \\\" — this matters most in file "
+    "content that itself contains quotes, such as HTML attributes or JS string "
+    "literals: `<div class=\\\"card\\\">`, never `<div class=\"card\">` unescaped."
+)
 
 
 async def complete_json(
@@ -247,25 +434,18 @@ async def complete_json(
     temperature: float = 0.1,
     max_tokens: int = 4096,
     attempts: int = 2,
+    schema: dict[str, Any] | None = None,
 ) -> Any:
-    """Ask for JSON, tolerate the ways small local models wrap it."""
-    system = system + (
-        "\n\nRespond with a single valid JSON value and nothing else. "
-        "No prose, no explanation, no markdown fences. Inside every JSON string, escape "
-        "every newline as \\n and every double-quote as \\\" — this matters most in file "
-        "content that itself contains quotes, such as HTML attributes or JS string "
-        "literals: `<div class=\\\"card\\\">`, never `<div class=\"card\">` unescaped."
-    )
+    """Ask for JSON. Constrained to `schema` on the local profile; tolerant everywhere."""
+    system = system + _JSON_RULES
     last: Exception | None = None
     for attempt in range(attempts):
         raw = await complete(
-            role=role,
-            system=system,
-            user=user,
+            role=role, system=system, user=user,
             # A second pass at the same temperature reproduces the same mangled
             # reply; nudging it is what makes the retry worth spending.
             temperature=temperature if attempt == 0 else min(temperature + 0.2, 0.8),
-            max_tokens=max_tokens,
+            max_tokens=max_tokens, schema=schema, json_mode=True, attempt=attempt + 1,
         )
         try:
             return _parse_json(raw)
@@ -276,7 +456,41 @@ async def complete_json(
 
 async def embed(texts: list[str]) -> list[list[float]]:
     s = settings()
-    model = s.poiesis_model_embed if s.poiesis_llm_profile == "local" else "text-embedding-3-small"
-    kwargs = {"api_base": s.ollama_base_url} if s.poiesis_llm_profile == "local" else {}
-    resp = await litellm.aembedding(model=model, input=texts, **kwargs)
+    if not texts:
+        return []
+    if is_local():
+        url = s.ollama_base_url.rstrip("/") + "/api/embed"
+        async with _client(300.0) as client:
+            resp = await client.post(url, json={"model": local_name(s.poiesis_model_embed),
+                                                "input": texts, "keep_alive": s.poiesis_local_keep_alive})
+            if resp.status_code >= 400:
+                raise ModelUnavailable(_explain(resp.status_code, resp.text, s.poiesis_model_embed))
+            return [list(map(float, v)) for v in resp.json().get("embeddings", [])]
+    resp = await litellm.aembedding(model="text-embedding-3-small", input=texts, **_kwargs())
     return [d["embedding"] for d in resp.data]
+
+
+async def local_models() -> list[str]:
+    """What the host Ollama has pulled; [] when it is unreachable."""
+    s = settings()
+    try:
+        async with _client(10.0) as client:
+            resp = await client.get(s.ollama_base_url.rstrip("/") + "/api/tags")
+            resp.raise_for_status()
+            return [m.get("name", "") for m in resp.json().get("models", [])]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+async def health() -> dict[str, Any]:
+    """The model layer as /health reports it: profile, models, and what is missing."""
+    s = settings()
+    roles = {r: model_for(r) for r in ("reasoning", "coding", "fast")}
+    if not is_local():
+        return {"profile": s.poiesis_llm_profile, "models": roles, "ok": True, "missing": []}
+    have = await local_models()
+    wanted = {local_name(m) for m in roles.values()} | {local_name(s.poiesis_model_embed)}
+    missing = sorted(w for w in wanted if w not in have and f"{w}:latest" not in have)
+    return {"profile": "local", "models": roles, "ollama": s.ollama_base_url,
+            "reachable": bool(have), "missing": missing, "ok": bool(have) and not missing,
+            "num_ctx": s.poiesis_local_num_ctx, "think_roles": s.poiesis_local_think_roles}

@@ -1,2 +1,0 @@
-FROM qwen2.5:14b-instruct
-PARAMETER num_ctx 12288

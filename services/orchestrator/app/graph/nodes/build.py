@@ -19,10 +19,11 @@ from typing import Any
 
 from ...agents.base import DEVELOPER, TESTER
 from ...config import pack
+from ... import telemetry
 from ...events import emit
-from ...integrations import tracker
+from ...integrations import gitremote, tracker
 from ...llm import ReplyTruncated, UnparseableReply
-from ...reuse.retriever import render_for_prompt
+from ...reuse.retriever import render_for_prompt, render_lessons
 from ...workspace import repo
 from ...workspace.checks import (
     mount_bare_routers,
@@ -145,8 +146,21 @@ def _context(state: RunState, story: dict[str, Any], *, first: bool = True) -> s
         + examples
         + excerpt(run_id, EDITABLE)
         + own
+        + render_lessons(state.get("lessons_by_story", {}).get(story["id"], []))
         + _findings_for(state, story["id"])
     )
+
+
+async def _recall_lessons(state: RunState, scope: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    from ...reuse.retriever import lessons_for
+    out: dict[str, list[dict[str, Any]]] = {}
+    for entry in scope:
+        story = _story(state, entry["id"])
+        text = f"{story.get('title', '')} {story.get('narrative', '')} " + " ".join(story.get("acceptance_criteria") or [])
+        hits = await lessons_for(text, limit=4)
+        out[story["id"]] = [{"lesson": h.get("lesson"), "score": h.get("score")} for h in hits
+                            if (h.get("score") or 0) >= 0.45]
+    return out
 
 
 def _rework_scope(state: RunState) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -658,9 +672,16 @@ async def _verify(
     scope = [p for p in (*story_tests, *PLATFORM_TESTS) if (root / p).is_file()]
 
     async def _run() -> dict[str, Any]:
-        tests = await run_in_sandbox(run_id, pytest_command(" ".join(scope)),
-                                     timeout=timeout, network=True)
-        checks = await platform_checks(run_id, sid, require_screen, own)
+        async with telemetry.span("sandbox", f"pytest {sid}", story=sid, files=len(scope)) as sp:
+            tests = await run_in_sandbox(run_id, pytest_command(" ".join(scope)),
+                                         timeout=timeout, network=True)
+            sp.set(exit_code=tests.exit_code, timed_out=tests.timed_out)
+            if not tests.ok:
+                sp.fail(f"pytest exited {tests.exit_code}")
+        async with telemetry.span("checks", f"platform checks {sid}", story=sid) as sp:
+            checks = await platform_checks(run_id, sid, require_screen, own)
+            if not checks.ok:
+                sp.fail("platform checks found problems")
         ok = tests.ok and checks.ok
         # Re-checked against the routes as they stand *now*, not as they stood when
         # the tests were written: a repair that drops an endpoint the tests still
@@ -751,6 +772,15 @@ async def build(state: RunState) -> RunState:
                   "carried": [r["story_id"] for r in results]},
         )
 
+    # What past runs learned, matched to each story by meaning. One vector search
+    # per story; memoised because this node replays on every failed_story gate.
+    lessons_by_story = await remember(run_id, f"lessons:r{rnd}", lambda: _recall_lessons(state, scope))
+    state = {**state, "lessons_by_story": lessons_by_story}
+    if any(lessons_by_story.values()):
+        await emit(run_id, f"Recalled lessons from past runs for "
+                           f"{sum(1 for v in lessons_by_story.values() if v)} story(ies)",
+                   agent="governance", stage="build", data={"lessons": lessons_by_story})
+
     for entry in scope:
         story = _story(state, entry["id"])
         await emit(run_id, f"Starting {story['id']}: {story.get('title','')}",
@@ -787,6 +817,7 @@ async def build(state: RunState) -> RunState:
                 await emit(run_id, f"{sid}: dropped from the sprint — {result['reason']}",
                            agent="governance", stage="build", level="warn")
             await tracker.on_story_result(run_id, result, rnd)
+            await gitremote.on_story_result(run_id, state, result)
             if decision.get("decision") == "abort":
                 break
             continue
@@ -920,6 +951,7 @@ async def build(state: RunState) -> RunState:
                 await emit(run_id, f"{sid}: dropped from the sprint — {result['reason']}",
                            agent="governance", stage="build", level="warn")
         await tracker.on_story_result(run_id, result, rnd)
+        await gitremote.on_story_result(run_id, state, result)
         if not exec_result.ok and decision.get("decision") == "abort":
             break
 

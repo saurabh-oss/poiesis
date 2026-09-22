@@ -9,9 +9,12 @@ import ActivityFeed from "@/components/ActivityFeed";
 import DeploymentCard from "@/components/DeploymentCard";
 import GatePanel from "@/components/GatePanel";
 import Icon from "@/components/Icon";
+import IntegrationsCard from "@/components/IntegrationsCard";
+import RunControls from "@/components/RunControls";
 import RunHeader from "@/components/RunHeader";
 import StagePanel from "@/components/StagePanel";
 import StageRail from "@/components/StageRail";
+import TracePanel from "@/components/TracePanel";
 
 /** History from the API plus anything that arrived live meanwhile, without duplicates. */
 function merge(base: PoiesisEvent[], extra: PoiesisEvent[]): PoiesisEvent[] {
@@ -129,7 +132,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
     };
   }, [runId, refresh, loadHistory]);
 
-  const active = run?.status === "running" || run?.status === "waiting";
+  const active = run?.status === "running" || run?.status === "waiting" || run?.status === "scheduled";
   const now = useNow(1000, active);
   const spans = useMemo(() => timeline(stages, events), [stages, events]);
   const states = useMemo(() => (run ? stageStates(stages, run, gate?.stage, spans) : {}), [stages, run, gate, spans]);
@@ -206,9 +209,13 @@ export default function RunPage({ params }: { params: { id: string } }) {
           {/* A release decision arrives with the app one click away; any other
               decision comes first, because it is what the run is waiting on. */}
           {gate?.kind === "approve_release" ? <>{deployCard}{gatePanel}</> : <>{gatePanel}{deployCard}</>}
+          <RunControls run={run} onChange={refresh} />
+          <IntegrationsCard runId={runId} active={active} />
           {run.files.length > 0 && <Workspace files={run.files} />}
         </aside>
       </div>
+
+      <TracePanel runId={runId} active={active} />
 
       <ActivityFeed events={events} stageKey={stage.key} stageLabel={stage.label} connected={connected} />
     </div>

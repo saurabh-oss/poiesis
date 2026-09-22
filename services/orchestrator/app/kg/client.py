@@ -30,6 +30,8 @@ CREATE FULLTEXT INDEX componentSearch IF NOT EXISTS
   FOR (c:Component) ON EACH [c.name, c.purpose, c.signature];
 CREATE FULLTEXT INDEX capabilitySearch IF NOT EXISTS
   FOR (c:Capability) ON EACH [c.name, c.description];
+CREATE CONSTRAINT lesson_id IF NOT EXISTS
+  FOR (l:Lesson) REQUIRE l.id IS UNIQUE;
 """
 
 
@@ -157,6 +159,106 @@ class KnowledgeGraph:
             project=project,
             ids=component_ids,
         )
+
+
+    # ---- what the platform learns, and how a run is remembered --------------
+
+    async def all_components(self) -> list[dict[str, Any]]:
+        """Every indexed component, for the vector index to embed."""
+        return await self.run(
+            """
+            MATCH (p:Project)-[:CONTAINS]->(c:Component)
+            RETURN p.name AS project, c.id AS component_id, c.name AS component,
+                   c.kind AS kind, c.path AS path, c.purpose AS purpose, c.signature AS signature
+            """
+        )
+
+    async def record_outcome(self, run_id: str, project: str, outcome: dict[str, Any]) -> None:
+        """Score, verdict and what shipped, on the run's Project node."""
+        await self.run(
+            """
+            MERGE (p:Project {name: $project})
+            SET p.run_id = $run_id, p.score = $score, p.verdict = $verdict,
+                p.released = $released, p.stories_green = $green, p.stories_total = $total,
+                p.finished_at = timestamp()
+            """,
+            project=project, run_id=run_id, score=outcome.get("score"),
+            verdict=outcome.get("verdict", ""), released=bool(outcome.get("released")),
+            green=int(outcome.get("green") or 0), total=int(outcome.get("total") or 0),
+        )
+
+    async def record_story_outcome(self, run_id: str, story_id: str, status: str,
+                                   repairs: int) -> None:
+        await self.run(
+            """
+            MERGE (s:Story {id: $sid}) SET s.status = $status, s.repairs = $repairs
+            """,
+            sid=f"{run_id}:{story_id}", status=status, repairs=int(repairs or 0),
+        )
+
+    async def record_lesson(self, run_id: str, story_id: str, lesson: str,
+                            applies_to: str, project: str) -> str:
+        lid = f"{run_id}:{story_id}:{abs(hash(lesson)) % 10**8}"
+        await self.run(
+            """
+            MERGE (l:Lesson {id: $id})
+            SET l.text = $text, l.applies_to = $applies_to, l.run_id = $run_id,
+                l.story_id = $story_id, l.created_at = timestamp()
+            WITH l
+            MERGE (s:Story {id: $sid}) MERGE (l)-[:LEARNED_FROM]->(s)
+            WITH l
+            MERGE (p:Project {name: $project}) MERGE (l)-[:LEARNED_IN]->(p)
+            """,
+            id=lid, text=lesson, applies_to=applies_to, run_id=run_id, story_id=story_id,
+            sid=f"{run_id}:{story_id}", project=project,
+        )
+        return lid
+
+    async def lessons(self, limit: int = 100) -> list[dict[str, Any]]:
+        return await self.run(
+            """
+            MATCH (l:Lesson)
+            OPTIONAL MATCH (l)-[:LEARNED_IN]->(p:Project)
+            RETURN l.id AS id, l.text AS lesson, l.applies_to AS applies_to,
+                   l.run_id AS run_id, l.story_id AS story_id, p.name AS project,
+                   l.created_at AS created_at
+            ORDER BY l.created_at DESC LIMIT $limit
+            """,
+            limit=limit,
+        )
+
+    async def run_lineage(self, run_id: str) -> list[dict[str, Any]]:
+        """Everything a run put in the graph, as edges the control room can draw."""
+        return await self.run(
+            """
+            MATCH (p:Project {run_id: $run_id})
+            OPTIONAL MATCH (p)-[r]->(x)
+            WITH p, collect({rel: type(r), to_type: labels(x)[0],
+                             to_name: coalesce(x.name, x.title, x.id)}) AS out
+            OPTIONAL MATCH (l:Lesson)-[:LEARNED_IN]->(p)
+            RETURN p.name AS project, p.score AS score, p.verdict AS verdict,
+                   p.released AS released, out AS edges,
+                   collect(DISTINCT l.text) AS lessons
+            """,
+            run_id=run_id,
+        )
+
+    async def stats(self) -> dict[str, int]:
+        rows = await self.run(
+            """
+            CALL { MATCH (p:Project) RETURN count(p) AS projects }
+            CALL { MATCH (c:Component) RETURN count(c) AS components }
+            CALL { MATCH (c:Capability) RETURN count(c) AS capabilities }
+            CALL { MATCH (t:Technology) RETURN count(t) AS technologies }
+            CALL { MATCH (d:Decision) RETURN count(d) AS decisions }
+            CALL { MATCH (s:Story) RETURN count(s) AS stories }
+            CALL { MATCH (l:Lesson) RETURN count(l) AS lessons }
+            CALL { MATCH ()-[r:REUSES]->() RETURN count(r) AS reuse_edges }
+            RETURN projects, components, capabilities, technologies, decisions, stories,
+                   lessons, reuse_edges
+            """
+        )
+        return {k: int(v or 0) for k, v in (rows[0] if rows else {}).items()}
 
 
 _kg: KnowledgeGraph | None = None

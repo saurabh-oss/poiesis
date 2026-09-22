@@ -41,6 +41,19 @@ the Reviewer's findings attached to the Developer's prompt, and rebuilds only th
 that pytest or the Reviewer actually faulted — the rest are carried forward. A rework round
 that re-sends the original prompt is just a retry, and produces the same code.
 
+**A local model's reply is constrained, not hoped for.** On the local profile every
+agent reply is decoded against its JSON Schema (`agents/schemas.py`), so "the model returned
+malformed JSON" stops being a failure mode at all. Thinking is per role: on for the agents
+that judge (Analyst, Architect, Reviewer), off for the ones that write files. A reply that
+spends its whole budget thinking is retried without, and one that runs out of budget is
+reported as too long rather than as malformed, because those need different repairs.
+
+**Everything is traced without the nodes knowing.** The engine sets the run in a context
+variable before the graph moves; `remember()` sets the memo step; `Agent.json()` sets the
+agent; `set_stage()` opens and closes stage spans. A model call deep inside a repair loop is
+stored with all four attached, so a bad file is explainable from what the Developer was
+shown, and a run's cost is a query.
+
 **Nothing generated runs in the orchestrator.** Every execution is a throwaway container
 with no network by default, a memory and CPU cap, a pid limit and a hard timeout. Because
 those containers are siblings launched through the Docker socket rather than children, the
@@ -63,8 +76,11 @@ isn't ready," or "hold."
 
 | Component | Responsibility | Technology |
 |---|---|---|
-| Orchestrator | The value stream graph, gates, agent invocation, event emission | FastAPI, LangGraph, Postgres checkpointer |
-| Model router | Role-to-model mapping; one env var moves the platform between local and hosted | LiteLLM |
+| Orchestrator | The value stream graph, gates, agent invocation, event emission, one driver per run and a queue for the rest | FastAPI, LangGraph, Postgres checkpointer |
+| Model layer | Role-to-model mapping; on `local`, a native Ollama client with schema-constrained decoding, per-role thinking, streaming with an idle timeout; LiteLLM for hosted profiles | `llm.py`, Ollama, LiteLLM |
+| Telemetry | Every model call and every stage, sandbox run, deploy and integration call as a stored span; Prometheus metrics; OTLP export | `telemetry.py`, Postgres, Jaeger, Prometheus, Grafana |
+| Vector index | Components, past stories, decisions and lessons, recalled by meaning alongside the graph's word match | Qdrant, `nomic-embed-text` |
+| Integrations | Jira mirror of the plan and progress; Git remote with branch per run, tag and pull request at release | `integrations/` |
 | Intake | Documents, images, audio, URLs and text into cited evidence fragments | pypdf, python-docx, faster-whisper, vision model |
 | Portfolio graph | Projects, components, capabilities, technologies, decisions, reuse edges | Neo4j |
 | Indexer | Repository → component-level graph nodes | tree-sitter, GitPython |
@@ -125,10 +141,23 @@ nothing runnable.
 
 ## The closing loop
 
-`harvest` writes the run's capabilities, technologies, stories and architecture decisions
-back into the knowledge graph. The next run's Architect queries a graph that now contains
-this one. Reuse quality compounds with usage, and that compounding is the part a competitor
-cannot copy by writing better prompts.
+`harvest` writes the run's capabilities, technologies, stories, architecture decisions and
+outcome (score, verdict, which stories shipped) back into the knowledge graph, embeds the
+stories and decisions into the vector index, and distils one **lesson** per story that
+failed or needed repairs: a sentence in the imperative that would have prevented it. The
+next run's Architect queries a graph that now contains this one, by word and by meaning,
+and its Developer is shown the lessons that apply to each story before writing it. Reuse
+quality and build quality both compound with usage, and that compounding is the part a
+competitor cannot copy by writing better prompts.
+
+## Where the work is tracked
+
+The plan and its progress are mirrored where the organisation already looks: Jira
+(initiative, epics, stories with acceptance criteria and points, a started sprint, stories
+moving to Done as they go green) and a Git remote (branch `run/<id>` pushed after the
+scaffold and every story, tag at release, pull request on GitHub). Both follow the same
+two rules: never stop a run — an outage is a warning in the log — and never duplicate,
+however many times a gate replays a node.
 
 ## Where existing projects plug in
 
@@ -152,7 +181,7 @@ cannot copy by writing better prompts.
   decision (compose project `poiesis-run-<id>`, a port from 8100-8199, bound to 127.0.0.1) and
   a proven-working app is a ship blocker, but nothing is reachable from other machines or
   authenticated (Phase 5), and there is no remote hosting.
-- Vector recall over past runs. Qdrant is wired into the stack and unused; the graph is
-  carrying retrieval on its own until there is enough run history to justify embeddings.
+- Authentication on the orchestrator API and the control room. Local first; put it behind
+  a reverse proxy with SSO before exposing it beyond one machine.
 - Object storage for artifacts. MinIO is in the compose file and unused; artifacts are JSON
   columns in Postgres, which is the right answer until something binary needs storing.

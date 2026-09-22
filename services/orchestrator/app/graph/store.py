@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from .. import telemetry
 from ..db import Artifact, Run, session
 
 
@@ -63,3 +64,7 @@ def _stage(run_id: str, stage: str, status: str | None = None,
 async def set_stage(run_id: str, stage: str, status: str | None = None,
                     summary: dict[str, Any] | None = None) -> None:
     await asyncio.to_thread(_stage, run_id, stage, status, summary)
+    try:
+        await telemetry.stage_changed(run_id, stage, status)
+    except Exception:  # noqa: BLE001 — a stage span is never worth a run
+        pass

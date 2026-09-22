@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: poiesis-orchestrator
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["orchestrator:8080"]
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

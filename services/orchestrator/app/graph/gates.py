@@ -15,6 +15,7 @@ from typing import Any
 
 from langgraph.types import interrupt
 
+from .. import telemetry
 from ..config import pack
 from ..db import Gate, now, session
 from ..events import emit
@@ -65,6 +66,10 @@ def _close_gate(gate_id: str, response: dict[str, Any], status: str = "resolved"
         gate.resolved_at = now()
         gate.resolved_by = response.get("actor", "stakeholder")
         s.commit()
+        waited = None
+        if status == "resolved" and gate.opened_at:
+            waited = (gate.resolved_at - gate.opened_at).total_seconds()
+        telemetry.record_gate(gate.kind, str(response.get("decision", "")), waited)
 
 
 async def raise_gate(

@@ -21,6 +21,7 @@ from typing import Any
 
 from ...config import archetype, scaffold_root
 from ...events import emit
+from ...integrations import gitremote
 from ...workspace import repo
 from ...workspace.checks import regenerate_registry
 from ..state import RunState
@@ -179,4 +180,5 @@ async def bootstrap(state: RunState) -> RunState:
         "commit": sha,
     }
     await save_artifact(run_id, "scaffold", "scaffold", record)
+    await gitremote.on_workspace_ready(run_id, {**state, "scaffold": record})
     return {"scaffold": record}
