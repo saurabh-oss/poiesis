@@ -22,7 +22,7 @@ from ...config import pack
 from ... import telemetry
 from ...events import emit
 from ...integrations import gitremote, tracker
-from ...llm import ReplyTruncated, UnparseableReply
+from ...llm import ReplyTruncated, UnparseableReply, scaled
 from ...reuse.retriever import render_for_prompt, render_lessons
 from ...workspace import repo
 from ...workspace.checks import (
@@ -125,7 +125,7 @@ def _context(state: RunState, story: dict[str, Any], *, first: bool = True) -> s
     builds on and the budget cannot hold both comfortably.
     """
     run_id = state["run_id"]
-    tree = repo.tree(run_id, limit=50)
+    tree = repo.tree(run_id, limit=scaled(50))
     own = story_files(run_id, story["id"])
     examples = reference(run_id) if first and "YOUR STORY'S FILES" not in own else ""
     return (
@@ -133,9 +133,9 @@ def _context(state: RunState, story: dict[str, Any], *, first: bool = True) -> s
         f"{story.get('narrative','')}\n\n"
         "ACCEPTANCE CRITERIA:\n"
         + "\n".join(f"- {c}" for c in story.get("acceptance_criteria", []))
-        + f"\n\nARCHITECTURE:\n{str(state['architecture'].get('components', []))[:2500]}\n"
-        f"\nREUSE PLAN (binding):\n{str(state['architecture'].get('reuse_plan', []))[:1200]}\n"
-        f"\nPORTFOLIO:\n{render_for_prompt(state.get('portfolio') or {'reuse_candidates': [], 'house_stack': [], 'prior_decisions': []}, limit=3)}\n"
+        + f"\n\nARCHITECTURE:\n{str(state['architecture'].get('components', []))[:scaled(2500)]}\n"
+        f"\nREUSE PLAN (binding):\n{str(state['architecture'].get('reuse_plan', []))[:scaled(1200)]}\n"
+        f"\nPORTFOLIO:\n{render_for_prompt(state.get('portfolio') or {'reuse_candidates': [], 'house_stack': [], 'prior_decisions': []}, limit=scaled(3))}\n"
         + _skeleton(state)
         + "\nCURRENT WORKSPACE FILES:\n" + ("\n".join(tree) or "(empty)")
         # Without the contracts the Developer rewrites every file from memory and
@@ -331,7 +331,7 @@ async def _tests_for(
         + import_contract(run_id)
         + route_contract(run_id)
         + "\n\nIMPLEMENTATION FILES:\n"
-        + "\n\n".join(f"### {p}\n{c[:2500]}" for p, c in backend.items()),
+        + "\n\n".join(f"### {p}\n{c[:scaled(2500)]}" for p, c in backend.items()),
         max_tokens=4000,
     ))
 
@@ -391,7 +391,7 @@ async def _sound_tests(
                 "the routes the API actually serves, before running them:\n"
                 + "\n".join(f"- {p}" for p in problems)
                 + "\n\nCURRENT TEST FILES:\n"
-                + "\n\n".join(f"### {p}\n{repo.read(run_id, p)[:3000]}" for p in paths)
+                + "\n\n".join(f"### {p}\n{repo.read(run_id, p)[:scaled(3000)]}" for p in paths)
                 + "\n\nRewrite only what those findings name. A criterion the API genuinely "
                 "cannot demonstrate belongs in `criteria_not_covered` with the reason, not in a "
                 "test that must fail. Return the complete test files.",
@@ -490,7 +490,7 @@ async def _repair_once(
         + "\n\nYOUR PREVIOUS IMPLEMENTATION FAILED ITS CHECKS. The pytest output comes "
         "first. A 'PLATFORM CHECKS' section after it lists problems the platform found "
         "by loading your frontend. Fix those in your screen or router.\n"
-        f"{failed.stdout[-6000:]}\n{failed.stderr[-800:]}\n"
+        f"{failed.stdout[-scaled(6000):]}\n{failed.stderr[-800:]}\n"
         + extra
         + "\nReturn the corrected implementation files only, each complete. "
         "Do not modify the tests."
@@ -587,8 +587,8 @@ async def _reconcile_tests(
             + f"\n\nYOUR TESTS STILL FAIL AFTER {attempts} DEVELOPER REPAIR ATTEMPTS. The "
             "Developer is not allowed to edit tests, so if a test is itself wrong, nobody "
             "else can fix it.\n\nCURRENT TEST FILES:\n"
-            + "\n\n".join(f"### {p}\n{c[:3000]}" for p, c in current.items())
-            + f"\n\npytest output:\n{failed.stdout.split('=== PLATFORM CHECKS')[0][-3500:]}\n\n"
+            + "\n\n".join(f"### {p}\n{c[:scaled(3000)]}" for p, c in current.items())
+            + f"\n\npytest output:\n{failed.stdout.split('=== PLATFORM CHECKS')[0][-scaled(3500):]}\n\n"
             "For each failing test, decide whether the implementation is wrong or the test "
             "is wrong. A test is wrong when it contradicts VERIFIED ROUTES (path, status "
             "code, body fields or response fields), compares a whole response with ==, "
@@ -690,8 +690,8 @@ async def _verify(
         drift = test_issues(run_id, story_tests) if not tests.ok else []
         return {
             "exit_code": 0 if ok else (tests.exit_code or 1),
-            "stdout": tests.stdout[-3500:]
-            + ("" if checks.ok else checks.stdout[:2500])
+            "stdout": tests.stdout[-scaled(3500):]
+            + ("" if checks.ok else checks.stdout[:scaled(2500)])
             + ("\n\n=== THE TESTS AND YOUR API NO LONGER AGREE ===\nThese tests were written "
                "against endpoints that are not there now. If the story needs them, put them "
                "back; the tests are not yours to change.\n"

@@ -467,10 +467,12 @@ def _schema_only(body: str) -> str:
 def _blocks(run_id: str, paths: list[tuple[str, int]]) -> list[str]:
     root = workspace_path(run_id)
     blocks: list[str] = []
+    from ..llm import scaled
     for rel, budget in paths:
         target = root / rel
         if not target.is_file():
             continue
+        budget = scaled(budget)
         body = target.read_text(encoding="utf-8", errors="replace")
         if rel.endswith("init.sql"):
             blocks.append(f"### {rel}\n{_schema_only(body)}")
@@ -521,7 +523,7 @@ EDITABLE: list[tuple[str, int]] = [
 ]
 
 
-def story_files(run_id: str, story_id: str, budget: int = 2200, limit: int = 3) -> str:
+def story_files(run_id: str, story_id: str, budget: int = 2200, limit: int = 4) -> str:
     """The router and screen files this story already has, and the names others use.
 
     On a repair the Developer must see its own screen and router to build on them,

@@ -14,7 +14,7 @@ from typing import Any
 from ...agents import schemas
 from ...agents.base import RELEASE, REVIEWER
 from ...kg import vectors
-from ...llm import complete_json
+from ...llm import complete_json, scaled
 from ...config import pack
 from ...events import emit
 from ...integrations import gitremote, tracker
@@ -113,18 +113,19 @@ def _rank(path: str) -> int:
     return 9
 
 
-def _review_sample(run_id: str, budget: int = 20000) -> str:
+def _review_sample(run_id: str, budget: int | None = None) -> str:
     """The code the Reviewer judges, inside a local model's context.
 
     It used to be the first 25 files of the tree, alphabetically — mostly
     scaffold, with story code cut off — capped at 40k characters, more than the
     model's whole context.
     """
+    budget = budget or scaled(20000)
     chosen = sorted((p for p in repo.tree(run_id) if _rank(p) < 9), key=lambda p: (_rank(p), p))
     blocks: list[str] = []
     used = 0
     for path in chosen:
-        body = repo.read(run_id, path, 5000)
+        body = repo.read(run_id, path, scaled(5000))
         block = f"### {path}\n{body}"
         if used + len(block) > budget:
             blocks.append(f"### {path}\n(omitted for length)")
@@ -357,8 +358,8 @@ async def review(state: RunState) -> RunState:
         ("DEFINITION OF DONE (this organisation's, binding):\n"
          + "\n".join(f"- {d}" for d in dod) + "\n\n" if dod else "")
         + f"SPRINT GOAL: {state['sprint'].get('sprint_goal','')}\n\n"
-        f"STORIES AND CRITERIA:\n{str(state['sprint'].get('stories', []))[:3000]}\n\n"
-        f"REUSE PLAN (binding):\n{str(state['architecture'].get('reuse_plan', []))[:1200]}\n\n"
+        f"STORIES AND CRITERIA:\n{str(state['sprint'].get('stories', []))[:scaled(3000)]}\n\n"
+        f"REUSE PLAN (binding):\n{str(state['architecture'].get('reuse_plan', []))[:scaled(1200)]}\n\n"
         f"TEST REPORT:\n{_test_summary(state)}\n\n"
         f"LIVE CHECK (the platform deployed this increment and opened every screen in a "
         f"real browser):\n{live['summary']}\n{live_lines}\n\n"

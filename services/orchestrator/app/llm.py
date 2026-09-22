@@ -105,6 +105,24 @@ def _effective_max_tokens(max_tokens: int) -> int:
     return max(max_tokens, _CLOUD_MIN_TOKENS)
 
 
+def context_scale() -> float:
+    """How much more than the original 12k-token window the models can read.
+
+    Every prompt budget in the graph was sized for 12288 tokens. They are
+    multiplied by this, so a 32k local window shows the Developer whole files
+    instead of the first 900 characters of init.sql, and a hosted model with a
+    large window gets the most.
+    """
+    s = settings()
+    if s.poiesis_llm_profile != "local":
+        return 4.0
+    return min(4.0, max(1.0, s.poiesis_local_num_ctx / 12288))
+
+
+def scaled(chars: int) -> int:
+    return int(chars * context_scale())
+
+
 def _thinks(role: Role) -> bool:
     roles = {r.strip() for r in settings().poiesis_local_think_roles.split(",") if r.strip()}
     return role in roles
