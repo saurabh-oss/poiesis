@@ -339,7 +339,11 @@ async def test_engine(ids: list[str]) -> None:
     try:
         expect("the first run drives at once", await engine.start(r1, "one") is True)
         expect("the second is queued", await engine.start(r2, "two") is False and engine.queued() == [r2])
-        await asyncio.sleep(0.05)
+        for _ in range(40):   # the status flips on a worker thread; give it a moment under load
+            await asyncio.sleep(0.05)
+            with session() as s:
+                if s.get(Run, r1).status == "running" and s.get(Run, r2).status == "scheduled":
+                    break
         with session() as s:
             expect("a queued run is marked scheduled", s.get(Run, r2).status == "scheduled")
             expect("a driving run is marked running", s.get(Run, r1).status == "running")
