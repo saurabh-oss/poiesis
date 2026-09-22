@@ -102,6 +102,11 @@ _HINTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"ValidationError.*?Input should be a valid (\w+)", re.S),
      "A value has the wrong type for its schema field ({0} expected). Convert it in the "
      "endpoint or widen the schema type; dates and datetimes must be real date objects, not strings."),
+    (re.compile(r"SyntaxError: (missing \) after argument list|Unexpected token[^\n]*|Unexpected end of input|missing \} after[^\n]*|Invalid or unexpected token)"),
+     "A screen has a JavaScript syntax error: {0}. Every `h(` needs exactly one closing `)`, "
+     "every string and template literal must be closed, and the file must keep the shape of "
+     "frontend/screens/example.js. Rewrite the whole render() tree carefully rather than "
+     "patching one line."),
     (re.compile(r"render\(\) never loads anything"),
      "The screen must fetch and draw its data inside render() itself, not only inside a click "
      "handler: a visitor opening the page sees the data immediately."),
@@ -109,6 +114,25 @@ _HINTS: list[tuple[re.Pattern[str], str]] = [
      "An endpoint returned an empty list where the test expected rows it had just created: "
      "check the query's filters and that the endpoint reads the same table the POST wrote to."),
 ]
+
+
+_STATUS_DRIFT = re.compile(r"^(.*?) expects status \[(\d+)\] from (\w+) (\S+), which the route declares as \[(\d+)\]")
+
+
+def for_developer(issue: str) -> str:
+    """Rephrase a test-side finding as the change the Developer can make.
+
+    test_issues() speaks to the Tester ("assert the status the contract states");
+    shown to the Developer, who may not touch tests, that reads as a dead end.
+    The Developer's version of the same fact is "declare that status".
+    """
+    m = _STATUS_DRIFT.search(issue)
+    if m:
+        who, expected, method, path, declared = m.groups()
+        return (f"{who} expects {expected} from {method} {path}, but the route declares {declared}. "
+                f"Add `status_code={expected}` to that route's decorator — the tests are not yours "
+                f"to change, and a {method} that creates something returns 201.")
+    return issue
 
 
 def coach(output: str, limit: int = 5) -> str:

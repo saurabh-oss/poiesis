@@ -727,6 +727,34 @@ def _import_issues(root: Path, rel: str, src: str) -> list[str]:
     return issues
 
 
+_CLIENT_ATTR = re.compile(r"\bclient\.(?!(?:get|post|put|patch|delete|head|options|request|"
+                          r"headers|base_url|cookies|app|close|stream|websocket_connect)\b)(\w+)")
+_TEST_FN = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)", re.M)
+
+
+def _fixture_issues(rel: str, src: str) -> list[str]:
+    """Tests that reach for something the fixtures do not provide.
+
+    `client.session.add(agent)` was invented in three tests at once: the
+    TestClient has no session, the `db_session` fixture is the session, and the
+    Developer could do nothing about it for six repairs.
+    """
+    issues: list[str] = []
+    for block in re.split(r"^(?=\s*(?:async\s+)?def\s+test_)", src, flags=re.M):
+        name = _TEST_FN.search(block)
+        if not name:
+            continue
+        for attr in sorted({m.group(1) for m in _CLIENT_ATTR.finditer(block)}):
+            issues.append(
+                f"{rel}::{name.group(1)} uses `client.{attr}`, which the TestClient does not have — "
+                "it fails with AttributeError whatever the implementation does. `client` only "
+                "makes requests; to seed rows take the `db_session` fixture as a second test "
+                "argument (`def test_x(client, db_session):`) and use `db_session.add(...)` then "
+                "`db_session.commit()`."
+            )
+    return issues
+
+
 def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
     """Tests that cannot pass however correct the implementation is.
 
@@ -758,6 +786,7 @@ def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
             continue
         src = target.read_text(encoding="utf-8", errors="replace")
         issues.extend(_import_issues(root, rel, src))
+        issues.extend(_fixture_issues(rel, src))
         for block in re.split(r"^(?=\s*(?:async\s+)?def\s+test_)", src, flags=re.M):
             name_match = re.search(r"def\s+(test_\w+)", block)
             if not name_match:

@@ -689,7 +689,8 @@ async def _verify(
         # the tests were written: a repair that drops an endpoint the tests still
         # call turns every one of them into a 405 the Developer cannot read as its
         # own doing. Saying so plainly is what gets the endpoint put back.
-        drift = test_issues(run_id, story_tests) if not tests.ok else []
+        drift = ([failures.for_developer(d) for d in test_issues(run_id, story_tests)]
+                 if not tests.ok else [])
         return {
             "exit_code": 0 if ok else (tests.exit_code or 1),
             "stdout": failures.distill(tests.stdout, scaled(3500))

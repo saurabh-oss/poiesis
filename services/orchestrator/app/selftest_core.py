@@ -502,6 +502,13 @@ async def test_failures() -> None:
     expect("a missing response field gets a named, actionable hint", "`agent_name`" in hint and "response schema" in hint)
     expect("a NameError names the symbol", "`Depends`" in failures.coach("E   NameError: name 'Depends' is not defined"))
     expect("clean output gets no coaching", failures.coach("3 passed in 0.2s") == "")
+    reworded = failures.for_developer(
+        "tests/test_x.py::test_a expects status [201] from POST /api/tickets/import-csv, which the "
+        "route declares as [200]. Assert the status the contract states.")
+    expect("a status drift is reworded as the route change the Developer can make",
+           "status_code=201" in reworded and "Assert the status" not in reworded, reworded)
+    expect("a JavaScript syntax error gets a hint",
+           "closing `)`" in failures.coach("SyntaxError: missing ) after argument list"))
     expect("failed tests are listed by node id", failures.failed_tests(raw) == ["tests/test_s1.py::test_start_shift"])
 
     # A test importing a name the (protected) module does not define is caught wherever it sits.
@@ -514,7 +521,9 @@ async def test_failures() -> None:
         (root / "tests").mkdir()
         (root / "tests" / "test_q.py").write_text(
             "from app.db import get_session\n\n\ndef test_a(client):\n    from app.db import SessionLocal\n"
-            "    assert client.get('/health').status_code == 200\n", encoding="utf-8")
+            "    assert client.get('/health').status_code == 200\n\n\n"
+            "def test_b(client, db_session):\n    client.session.add(1)\n    db_session.commit()\n"
+            "    assert client.post('/x', json={}).status_code == 201\n", encoding="utf-8")
         (root / "db").mkdir()
         (root / "db" / "init.sql").write_text(
             "CREATE TABLE ticket (id INT, subject TEXT);\nINSERT INTO ticket (id, subject) VALUES (1, 'a'), (2, 'b');\n"
@@ -531,6 +540,9 @@ async def test_failures() -> None:
         expect("an invented import inside a test function is caught and attributed to the test",
                any("test_q.py::test_a" in i and "SessionLocal" in i and "get_session" in i for i in found), str(found)[:300])
         expect("a real import passes", not any("get_session` from" in i for i in found))
+        expect("a test reaching for client.session is caught and told about db_session",
+               any("test_q.py::test_b" in i and "client.session" in i and "db_session" in i for i in found), str(found)[:300])
+        expect("client.get and client.post are not flagged", not any("client.get" in i or "client.post" in i for i in found))
     finally:
         repo.destroy(rid)
         _drop_runs([rid])
