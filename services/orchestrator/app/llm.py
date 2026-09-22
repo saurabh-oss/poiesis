@@ -154,6 +154,11 @@ class ModelUnavailable(RuntimeError):
     """Ollama is down, or the configured model is not pulled. Retrying will not help."""
 
 
+class ModelCrashed(RuntimeError):
+    """The model server failed mid-call (a CUDA fault, a runner that died). Retrying helps:
+    Ollama reloads the runner on the next request."""
+
+
 @dataclass
 class Reply:
     content: str
@@ -187,6 +192,14 @@ def _explain(status: int, text: str, model: str) -> str:
         return (f"Ollama does not have the model '{model}'. Pull it on the host with "
                 f"`ollama pull {model}`, or point POIESIS_MODEL_* at one it has.")
     return f"Ollama answered {status}: {text[:300]}"
+
+
+def _failure(status: int, text: str, model: str) -> Exception:
+    """A missing model is final; a server-side error is a crash worth retrying."""
+    low = text.lower()
+    if status == 404 or "not found" in low or "does not support" in low:
+        return ModelUnavailable(_explain(status, text, model))
+    return ModelCrashed(_explain(status, text, model))
 
 
 _THINK_TAGS = re.compile(r"<think>.*?</think>\s*", re.S)
@@ -224,7 +237,7 @@ async def _ollama(model: str, messages: list[dict[str, str]], *, max_tokens: int
             async with client.stream("POST", url, json=body) as resp:
                 if resp.status_code >= 400:
                     text = (await resp.aread()).decode(errors="replace")
-                    raise ModelUnavailable(_explain(resp.status_code, text, model))
+                    raise _failure(resp.status_code, text, model)
                 async for line in resp.aiter_lines():
                     if not line.strip():
                         continue
@@ -233,7 +246,7 @@ async def _ollama(model: str, messages: list[dict[str, str]], *, max_tokens: int
                     except json.JSONDecodeError:
                         continue
                     if chunk.get("error"):
-                        raise ModelUnavailable(_explain(500, str(chunk["error"]), model))
+                        raise _failure(500, str(chunk["error"]), model)
                     msg = chunk.get("message") or {}
                     if msg.get("content"):
                         content.append(msg["content"])
@@ -309,8 +322,11 @@ async def _trace(row: dict[str, Any]) -> None:
 
 # ---- the public calls ------------------------------------------------------------
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=20),
-       retry=retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)))
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=5, max=90),
+       retry=retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)),
+       before_sleep=lambda rs: log.warning("model call failed (%s); retry %d in %.0fs",
+                                           rs.outcome.exception(), rs.attempt_number,
+                                           rs.next_action.sleep))
 async def complete(
     *,
     role: Role,

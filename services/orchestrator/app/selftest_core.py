@@ -246,6 +246,13 @@ async def test_llm_client(fake: FakeOllama, rid: str) -> None:
             expect("a missing model raises ModelUnavailable", "ollama pull" in str(exc))
         expect("and is not retried either", len(fake.requests) == n + 1)
 
+        fake.script = [{"status": 500, "error": "an error was encountered while running the model: CUDA error"},
+                       {"content": '{"a": 2}'}]
+        n = len(fake.requests)
+        out = await llm.complete_json(role="coding", system="s", user="u")
+        expect("a model-server crash is retried and the retry's reply is used",
+               out == {"a": 2} and len(fake.requests) == n + 2)
+
         fake.script = [{"content": "<think>hmm</think>{\"a\": 1}"}]
         out = await llm.complete_json(role="coding", system="s", user="u")
         expect("inline <think> blocks are stripped", out == {"a": 1})
