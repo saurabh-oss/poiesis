@@ -475,6 +475,39 @@ async def _implement_with_recovery(
         return None
 
 
+def _failing_test_source(run_id: str, output: str, budget: int = 6000) -> str:
+    """The source of every test that failed, verbatim, for the repair prompt.
+
+    pytest's summary shows one assertion line; the test shows the whole
+    expectation — the rows it seeded, the request it sent, the shape it wants
+    back. Without it a Developer guessed for five repairs at what "assert 1 ==
+    3" wanted. The tests stay read-only; the code is what has to move.
+    """
+    names = failures.failed_tests(output)
+    if not names:
+        return ""
+    wanted: dict[str, set[str]] = {}
+    for node in names:
+        path, _, fn = node.partition("::")
+        wanted.setdefault(path, set()).add(fn)
+    blocks: list[str] = []
+    used = 0
+    for path, fns in wanted.items():
+        src = repo.read(run_id, path)
+        if not src:
+            continue
+        for segment in _function_source(src, fns):
+            piece = f"# {path}\n{segment}"
+            if used + len(piece) > budget:
+                break
+            blocks.append(piece)
+            used += len(piece)
+    if not blocks:
+        return ""
+    return ("\n\nTHE FAILING TESTS, VERBATIM (read-only; make the code satisfy exactly what "
+            "they set up and assert):\n" + "\n\n".join(blocks) + "\n")
+
+
 async def _repair_once(
     run_id: str, state: RunState, story: dict[str, Any], failed: ExecResult,
     key: str, label: str, extra: str = "",
@@ -493,6 +526,7 @@ async def _repair_once(
         "screen or router.\n"
         f"{failures.distill(failed.stdout, scaled(6000))}\n{failed.stderr[-800:]}\n"
         + failures.coach(failed.stdout)
+        + _failing_test_source(run_id, failed.stdout, scaled(6000))
         + extra
         + "\nReturn the corrected implementation files only, each complete. "
         "Do not modify the tests."

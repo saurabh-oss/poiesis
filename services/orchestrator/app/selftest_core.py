@@ -558,6 +558,10 @@ async def test_failures() -> None:
         expect("a test reaching for client.session is caught and told about db_session",
                any("test_q.py::test_b" in i and "client.session" in i and "db_session" in i for i in found), str(found)[:300])
         expect("client.get and client.post are not flagged", not any("client.get" in i or "client.post" in i for i in found))
+        from .graph.nodes.build import _failing_test_source
+        shown = _failing_test_source(rid, "FAILED tests/test_q.py::test_b - AttributeError\n1 failed")
+        expect("a failing test's source is shown to the Developer verbatim",
+               "def test_b(client, db_session):" in shown and "def test_a" not in shown, shown[:200])
         expect("a test that builds its own Session from app.db.engine is caught",
                any("test_q.py::test_c" in i and "own database session" in i for i in found), str(found)[-300:])
         expect("...and the coach explains the resulting error",
