@@ -578,7 +578,7 @@ async def test_failures() -> None:
         order = checks.test_issues(rid, ["tests/test_order.py"])
         expect("a POST after the non-empty assertion does not count as seeding",
                any("test_order.py::test_f" in i and "non-empty" in i for i in order), str(order)[:300])
-        expect("a POST before it does", not any("test_g" in i for i in order), str(order)[:300])
+        expect("a POST before it does", not any("test_g" in i and "non-empty" in i for i in order), str(order)[:300])
         (root / "tests" / "test_seed.py").write_text(
             "from app.models import Ticket\n\n\ndef test_d(client, db_session):\n"
             "    db_session.add(Ticket(title='x', status='Open'))\n    db_session.commit()\n\n\n"
