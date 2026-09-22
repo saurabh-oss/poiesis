@@ -575,6 +575,25 @@ async def test_failures() -> None:
             "    client.post('/api/shift/start', json={'agent_id': agent_id})\n\n\n"
             "def test_g(client):\n    client.post('/api/agents', json={'name': 'a'})\n"
             "    agents = client.get('/api/agents').json()\n    assert len(agents) > 0\n", encoding="utf-8")
+        (root / "backend" / "app" / "routers").mkdir(parents=True, exist_ok=True)
+        (root / "backend" / "app" / "routers" / "imports.py").write_text(
+            "from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.post('/tickets/import-csv')\n"
+            "def import_csv():\n    return []\n", encoding="utf-8")
+        (root / "backend" / "app" / "routers" / "queue.py").write_text(
+            "from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.get('/triage-queue')\n"
+            "def queue():\n    return []\n", encoding="utf-8")
+        (root / "tests" / "test_foreign.py").write_text(
+            "def test_h(client):\n    client.post('/api/tickets/import-csv', files={'f': ('a.csv', b'x')})\n"
+            "    assert client.get('/api/triage-queue').status_code == 200\n", encoding="utf-8")
+        foreign = checks.test_issues(rid, ["tests/test_foreign.py"], {"backend/app/routers/queue.py"})
+        expect("a test that creates data through another story's endpoint is caught",
+               any("test_foreign.py::test_h" in i and "belongs to another story" in i for i in foreign), str(foreign)[:300])
+        expect("the same test passes when the route is the story's own",
+               not any("belongs to another story" in i for i in
+                       checks.test_issues(rid, ["tests/test_foreign.py"], {"backend/app/routers/imports.py"})))
+        from .workspace.interface import own_routes_note
+        note = own_routes_note(rid, {"backend/app/routers/queue.py"})
+        expect("the Tester is shown the story's own routes", "GET /api/triage-queue" in note and "import-csv" not in note, note)
         order = checks.test_issues(rid, ["tests/test_order.py"])
         expect("a POST after the non-empty assertion does not count as seeding",
                any("test_order.py::test_f" in i and "non-empty" in i for i in order), str(order)[:300])

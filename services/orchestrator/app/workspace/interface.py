@@ -237,6 +237,26 @@ def declared_routes(run_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def own_routes_note(run_id: str, own_files: set[str] | None) -> str:
+    """The routes this story's own router files serve, and the rule that goes with them.
+
+    A story's tests once created their rows through another story's import
+    endpoint; that endpoint was broken, and the story went red for a bug in
+    code it had never touched.
+    """
+    if not own_files:
+        return ""
+    mine = sorted({f"{r['method']} {r['path']}" for r in declared_routes(run_id)
+                   if r.get("file") in own_files})
+    if not mine:
+        return ("\nTHIS STORY OWNS NO ROUTES YET. Create the rows your tests need with the "
+                "`db_session` fixture, never through another story's endpoint.\n")
+    return ("\nTHIS STORY'S OWN ROUTES — create data through these or through `db_session`, "
+            "never through another story's POST/PUT: that endpoint may not exist or work yet, "
+            "and its failure would be blamed on this story:\n"
+            + "\n".join(f"  {m}" for m in mine) + "\n")
+
+
 def route_contract(run_id: str) -> str:
     """The URLs the application actually serves, read from its own decorators."""
     routes = declared_routes(run_id)

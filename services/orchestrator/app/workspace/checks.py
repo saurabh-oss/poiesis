@@ -868,7 +868,7 @@ def _fixture_issues(rel: str, src: str) -> list[str]:
     return issues
 
 
-def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
+def test_issues(run_id: str, test_paths: list[str], own_files: set[str] | None = None) -> list[str]:
     """Tests that cannot pass however correct the implementation is.
 
     The Tester writes its suite once, before a line of it has ever run, and the
@@ -887,10 +887,12 @@ def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
     served = ", ".join(sorted({f"{r['method']} {r['path']}" for r in routes})) or "none"
     by_path: dict[str, set[str]] = {}
     status_for: dict[tuple[str, str], int] = {}
+    owner_for: dict[tuple[str, str], str] = {}
     for r in routes:
         key = r["path"].rstrip("/") or "/"
         by_path.setdefault(key, set()).add(r["method"])
         status_for[(r["method"], key)] = r["status"]
+        owner_for[(r["method"], key)] = r.get("file", "")
 
     issues: list[str] = []
     for rel in test_paths:
@@ -918,6 +920,15 @@ def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
                     )
                     continue
                 allowed = set().union(*(by_path[p] for p in matches))
+                if own_files and method in ("POST", "PUT", "PATCH", "DELETE"):
+                    owners = {owner_for.get((method, p), "") for p in matches}
+                    if owners and not (owners & own_files) and all(owners):
+                        issues.append(
+                            f"{rel}::{name} creates or changes data through {method} {path}, which "
+                            f"belongs to another story ({', '.join(sorted(owners))}). That endpoint may "
+                            "not exist or work yet, and its failure lands on this story. Seed rows with "
+                            "the `db_session` fixture, or through this story's own routes."
+                        )
                 if method not in allowed:
                     issues.append(
                         f"{rel}::{name} sends {method} {path}, but that path serves only "

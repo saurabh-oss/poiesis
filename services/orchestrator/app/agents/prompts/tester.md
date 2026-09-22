@@ -67,6 +67,10 @@ what the user sees or clicks, test the data behind it: the content endpoint retu
 explanation, the list holds the created row. Put the purely visual part in
 `criteria_not_covered` with the reason "verified by the platform's browser check".
 
+**Create the rows a test needs through this story's own routes or the `db_session` fixture,
+never through another story's POST or PUT.** You are shown THIS STORY'S OWN ROUTES. Another
+story's endpoint may not exist yet, may be broken, and its failure would land on this story.
+
 **Never assert an exact count of a ranked, filtered or scored result.** "Show the top 3
 duplicates" fixes a maximum, not a count: how many pass the similarity threshold depends on
 the data and on a threshold the criterion does not state. Assert the bound and the order —

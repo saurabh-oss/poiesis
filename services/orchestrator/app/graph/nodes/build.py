@@ -40,6 +40,7 @@ from ...workspace.interface import (
     EDITABLE,
     excerpt,
     import_contract,
+    own_routes_note,
     reference,
     route_contract,
     story_files,
@@ -367,12 +368,14 @@ async def _tests_for(
     """
     backend = {p: c for p, c in (impl.get("files") or {}).items()
                if isinstance(c, str) and (p.startswith("backend/") or p.endswith(".sql"))}
+    own = {p.replace("\\", "/").lstrip("./") for p in backend}
     return await remember(run_id, f"tests:{sid}:r{rnd}", lambda: TESTER.json(
         f"STORY {sid}: {story.get('title','')}\n"
         "ACCEPTANCE CRITERIA:\n"
         + "\n".join(f"- {c}" for c in story.get("acceptance_criteria", []))
         + import_contract(run_id)
         + route_contract(run_id)
+        + own_routes_note(run_id, own)
         + "\n\nIMPLEMENTATION FILES:\n"
         + "\n\n".join(f"### {p}\n{c[:scaled(2500)]}" for p, c in backend.items()),
         max_tokens=4000,
@@ -410,11 +413,13 @@ async def _sound_tests(
 
     files: dict[str, str] = {}
     problems: list[str] = []
+    own = {p.replace("\\", "/").lstrip("./") for p in (impl.get("files") or {})
+           if p.startswith("backend/")}
     for attempt in range(revisions + 1):
         files, _ = _guard(state, _tidy(tests.get("files", {})))
         repo.write_files(run_id, files)
         paths = sorted(p for p in files if p.startswith("tests/"))
-        problems = test_issues(run_id, paths)
+        problems = test_issues(run_id, paths, own)
         if not problems or attempt == revisions:
             break
         await emit(
@@ -430,6 +435,7 @@ async def _sound_tests(
                 + "\n".join(f"- {c}" for c in story.get("acceptance_criteria", []))
                 + import_contract(run_id)
                 + route_contract(run_id)
+                + own_routes_note(run_id, own)
                 + "\n\nTHESE TESTS CANNOT PASS AS WRITTEN. The platform checked them against "
                 "the routes the API actually serves, before running them:\n"
                 + "\n".join(f"- {p}" for p in problems)
