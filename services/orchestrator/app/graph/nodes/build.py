@@ -654,7 +654,7 @@ _FAILED_FILE = re.compile(r"^(?:FAILED|ERROR) (tests/[\w./-]+?\.py)", re.M)
 
 async def _verify(
     run_id: str, key: str, timeout: int, sid: str, require_screen: bool, own: set[str],
-    story_tests: list[str],
+    story_tests: list[str], story: dict[str, Any] | None = None,
 ) -> tuple[ExecResult, bool]:
     """pytest, then the platform's frontend checks, as one result the repair loop reads.
 
@@ -681,7 +681,7 @@ async def _verify(
             if not tests.ok:
                 sp.fail(f"pytest exited {tests.exit_code}")
         async with telemetry.span("checks", f"platform checks {sid}", story=sid) as sp:
-            checks = await platform_checks(run_id, sid, require_screen, own)
+            checks = await platform_checks(run_id, sid, require_screen, own, story)
             if not checks.ok:
                 sp.fail("platform checks found problems")
         ok = tests.ok and checks.ok
@@ -861,7 +861,7 @@ async def build(state: RunState) -> RunState:
 
         own = set(written)
         exec_result, pytest_ok = await _verify(
-            run_id, f"{sid}:r{rnd}:a0", timeout, sid, require_screen, own, own_tests)
+            run_id, f"{sid}:r{rnd}:a0", timeout, sid, require_screen, own, own_tests, story)
         attempts = 0
         while not exec_result.ok and attempts < max_repairs:
             attempts += 1
@@ -880,7 +880,7 @@ async def build(state: RunState) -> RunState:
             if not ok:
                 break
             exec_result, pytest_ok = await _verify(
-                run_id, f"{sid}:r{rnd}:a{attempts}", timeout, sid, require_screen, own, own_tests)
+                run_id, f"{sid}:r{rnd}:a{attempts}", timeout, sid, require_screen, own, own_tests, story)
 
         # Repairs are spent. If the fault is in the tests, the Developer cannot fix
         # it, so the Tester gets one checked revision and the Developer one repair
@@ -894,7 +894,7 @@ async def build(state: RunState) -> RunState:
             )
             if tests_revised:
                 exec_result, pytest_ok = await _verify(
-                    run_id, f"{sid}:r{rnd}:reconciled", timeout, sid, require_screen, own, own_tests)
+                    run_id, f"{sid}:r{rnd}:reconciled", timeout, sid, require_screen, own, own_tests, story)
                 if not exec_result.ok:
                     attempts += 1
                     await emit(
@@ -909,7 +909,7 @@ async def build(state: RunState) -> RunState:
                     own |= set(fixed)
                     if ok:
                         exec_result, pytest_ok = await _verify(
-                            run_id, f"{sid}:r{rnd}:post", timeout, sid, require_screen, own, own_tests)
+                            run_id, f"{sid}:r{rnd}:post", timeout, sid, require_screen, own, own_tests, story)
 
         status = "green" if exec_result.ok else "red"
         await emit(

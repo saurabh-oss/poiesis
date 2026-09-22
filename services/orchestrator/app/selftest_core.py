@@ -515,6 +515,18 @@ async def test_failures() -> None:
         (root / "tests" / "test_q.py").write_text(
             "from app.db import get_session\n\n\ndef test_a(client):\n    from app.db import SessionLocal\n"
             "    assert client.get('/health').status_code == 200\n", encoding="utf-8")
+        (root / "db").mkdir()
+        (root / "db" / "init.sql").write_text(
+            "CREATE TABLE ticket (id INT, subject TEXT);\nINSERT INTO ticket (id, subject) VALUES (1, 'a'), (2, 'b');\n"
+            "CREATE TABLE customer (id INT);\nINSERT INTO customer VALUES (1),(2),(3),(4),(5),(6);\n", encoding="utf-8")
+        story = {"id": "S9", "acceptance_criteria": [
+            "Given I open the app, when the dashboard loads, then I see at least 150 tickets and 5 customers.",
+            "Given a story, then it has at least 2 acceptance criteria and at least 3 columns."]}
+        seed = checks.criteria_seed_issues(rid, story)
+        expect("a criterion promising at least N rows is checked against init.sql",
+               len(seed) == 1 and "150 tickets" in seed[0] and "2 row(s)" in seed[0], str(seed)[:300])
+        expect("counts that are met, small numbers and non-data nouns are ignored",
+               not any("customer" in i or "criteria" in i or "columns" in i for i in seed))
         found = checks.test_issues(rid, ["tests/test_q.py"])
         expect("an invented import inside a test function is caught and attributed to the test",
                any("test_q.py::test_a" in i and "SessionLocal" in i and "get_session" in i for i in found), str(found)[:300])
