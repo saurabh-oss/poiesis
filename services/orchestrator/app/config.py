@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     poiesis_local_keep_alive: str = "30m"
     poiesis_local_idle_timeout: int = 900      # seconds with no token before a call is abandoned
     poiesis_local_min_tokens: int = 8000       # floor on the reply budget for local models
+    # The Developer returns whole files; a story that seeds 150 rows needs room.
+    poiesis_local_coding_min_tokens: int = 16000
+    # A reply that hits its budget is asked again with double the budget, up to this.
+    poiesis_local_max_tokens: int = 28000
     # Roles allowed to "think" before answering (Qwen3 / gpt-oss style reasoning).
     # Thinking improves the Analyst, Architect and Reviewer; the Developer writes
     # files, where it mostly spends the budget.

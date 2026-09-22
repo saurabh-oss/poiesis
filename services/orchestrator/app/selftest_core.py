@@ -210,8 +210,8 @@ async def test_llm_client(fake: FakeOllama, rid: str) -> None:
         expect("the coding role does not think", req.get("think") is False)
         expect("num_ctx and keep_alive are sent with every request",
                req["options"].get("num_ctx") == s.poiesis_local_num_ctx and "keep_alive" in req)
-        expect("the local floor raises a small budget",
-               req["options"]["num_predict"] == s.poiesis_local_min_tokens)
+        expect("the local floor raises a small budget (the coding floor for the Developer)",
+               req["options"]["num_predict"] == s.poiesis_local_coding_min_tokens)
 
         fake.script = [{"content": '{"terms": ["x"]}', "thinking": "let me think"}]
         await llm.complete_json(role="reasoning", system="s", user="u", schema=schemas.TERMS)
@@ -227,6 +227,16 @@ async def test_llm_client(fake: FakeOllama, rid: str) -> None:
         expect("a budget spent thinking is retried once without thinking",
                out.get("terms") == ["recovered"] and len(fake.requests) == n + 2
                and fake.requests[-1].get("think") is False)
+
+        fake.script = [{"content": '{"files": {"db/init.sql": "INSERT INTO t VALUES (1), (2', "done_reason": "length"},
+                       {"content": '{"files": {"db/init.sql": "complete"}}'}]
+        n = len(fake.requests)
+        out = await llm.complete_json(role="coding", system="s", user="u", schema=schemas.IMPLEMENTATION)
+        expect("a reply cut off mid-file is asked again with double the budget, not patched up",
+               out["files"]["db/init.sql"] == "complete" and len(fake.requests) == n + 2
+               and fake.requests[-1]["options"]["num_predict"] == min(2 * s.poiesis_local_coding_min_tokens,
+                                                                    s.poiesis_local_max_tokens),
+               str(fake.requests[-1]["options"]))
 
         fake.script = [{"content": "", "done_reason": "length"}]
         n = len(fake.requests)

@@ -98,10 +98,11 @@ def _kwargs() -> dict[str, Any]:
 _CLOUD_MIN_TOKENS = 64000
 
 
-def _effective_max_tokens(max_tokens: int) -> int:
+def _effective_max_tokens(max_tokens: int, role: Role = "reasoning") -> int:
     s = settings()
     if s.poiesis_llm_profile == "local":
-        return max(max_tokens, s.poiesis_local_min_tokens)
+        floor = s.poiesis_local_coding_min_tokens if role == "coding" else s.poiesis_local_min_tokens
+        return max(max_tokens, floor)
     return max(max_tokens, _CLOUD_MIN_TOKENS)
 
 
@@ -323,11 +324,6 @@ async def _trace(row: dict[str, Any]) -> None:
 
 # ---- the public calls ------------------------------------------------------------
 
-@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=5, max=90),
-       retry=retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)),
-       before_sleep=lambda rs: log.warning("model call failed (%s); retry %d in %.0fs",
-                                           rs.outcome.exception(), rs.attempt_number,
-                                           rs.next_action.sleep))
 async def complete(
     *,
     role: Role,
@@ -340,10 +336,31 @@ async def complete(
     attempt: int = 1,
 ) -> str:
     """One model call, traced. Raises ReplyTruncated when the budget ran out."""
+    reply = await _call(role=role, system=system, user=user, temperature=temperature,
+                        max_tokens=max_tokens, schema=schema, json_mode=json_mode, attempt=attempt)
+    return reply.content
+
+
+@retry(stop=stop_after_attempt(5), wait=wait_exponential(min=5, max=90),
+       retry=retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)),
+       before_sleep=lambda rs: log.warning("model call failed (%s); retry %d in %.0fs",
+                                           rs.outcome.exception(), rs.attempt_number,
+                                           rs.next_action.sleep))
+async def _call(
+    *,
+    role: Role,
+    system: str,
+    user: str,
+    temperature: float = 0.2,
+    max_tokens: int = 4096,
+    schema: dict[str, Any] | None = None,
+    json_mode: bool = False,
+    attempt: int = 1,
+) -> Reply:
     s = settings()
     model = model_for(role)
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-    budget = _effective_max_tokens(max_tokens)
+    budget = _effective_max_tokens(max_tokens, role)
     think = is_local() and _thinks(role)
     ctx = telemetry.context()
     started = dt.datetime.now(dt.timezone.utc)
@@ -374,7 +391,7 @@ async def complete(
                 status = "truncated"   # partial content: the caller's recovery may still parse it
             sp.set(prompt_tokens=reply.prompt_tokens, completion_tokens=reply.completion_tokens,
                    finish_reason=reply.finish_reason, **reply.extra)
-            return reply.content
+            return reply
         except Exception as exc:
             if status == "ok":
                 status = "error"
@@ -485,16 +502,28 @@ async def complete_json(
     """Ask for JSON. Constrained to `schema` on the local profile; tolerant everywhere."""
     system = system + _JSON_RULES
     last: Exception | None = None
+    budget = max_tokens
     for attempt in range(attempts):
-        raw = await complete(
+        reply = await _call(
             role=role, system=system, user=user,
             # A second pass at the same temperature reproduces the same mangled
             # reply; nudging it is what makes the retry worth spending.
             temperature=temperature if attempt == 0 else min(temperature + 0.2, 0.8),
-            max_tokens=max_tokens, schema=schema, json_mode=True, attempt=attempt + 1,
+            max_tokens=budget, schema=schema, json_mode=True, attempt=attempt + 1,
         )
+        if is_local() and reply.finish_reason == "length":
+            # Cut off mid-file. Closing the JSON would commit half a file (a
+            # seed script that ends inside a row, say); a bigger budget is the
+            # honest repair, and it costs only the tokens actually written.
+            used = _effective_max_tokens(budget, role)
+            ceiling = settings().poiesis_local_max_tokens
+            if used < ceiling:
+                budget = min(used * 2, ceiling)
+                log.warning("%s reply hit its %d-token budget; asking again with %d", role, used, budget)
+                last = ReplyTruncated(used)
+                continue
         try:
-            return _parse_json(raw)
+            return _parse_json(reply.content)
         except ValueError as exc:
             last = exc
     raise last or ValueError("no response")
