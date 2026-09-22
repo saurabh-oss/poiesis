@@ -43,6 +43,7 @@ from ...workspace.interface import (
     own_routes_note,
     reference,
     route_contract,
+    seeded_note,
     story_files,
 )
 from ...workspace.runner import (
@@ -376,6 +377,7 @@ async def _tests_for(
         + import_contract(run_id)
         + route_contract(run_id)
         + own_routes_note(run_id, own)
+        + seeded_note(run_id)
         + "\n\nIMPLEMENTATION FILES:\n"
         + "\n\n".join(f"### {p}\n{c[:scaled(2500)]}" for p, c in backend.items()),
         max_tokens=4000,
@@ -436,6 +438,7 @@ async def _sound_tests(
                 + import_contract(run_id)
                 + route_contract(run_id)
                 + own_routes_note(run_id, own)
+                + seeded_note(run_id)
                 + "\n\nTHESE TESTS CANNOT PASS AS WRITTEN. The platform checked them against "
                 "the routes the API actually serves, before running them:\n"
                 + "\n".join(f"- {p}" for p in problems)

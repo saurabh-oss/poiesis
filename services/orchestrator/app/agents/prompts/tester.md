@@ -91,9 +91,11 @@ stories here:
 
 - **Sending a method the path does not serve.** If the contract lists only `GET /api/things`,
   a `client.post("/api/things")` gets 405 forever. Test what exists.
-- **Expecting data in an empty database.** The test database starts empty. `assert
-  len(body) > 0` fails no matter how correct the code is, unless *that same test* creates the
-  row first — `client.post(...)`, or `db_session.add(...)` then `db_session.commit()`.
+- **Expecting rows nothing seeded.** The test database starts with exactly the rows
+  db/init.sql seeds (you are shown which tables and how many). For any other table,
+  `assert len(body) > 0` fails no matter how correct the code is, unless *that same test*
+  creates the row first — `client.post(...)` to this story's own route, or
+  `db_session.add(...)` then `db_session.commit()`.
 - **Asserting a status the contract does not declare.** Assert the status VERIFIED ROUTES
   states, plus 422 for invalid input.
 - **Asserting anything that lives on the screen** — a button's label, a link, a redirect,

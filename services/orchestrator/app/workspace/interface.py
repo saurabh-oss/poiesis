@@ -237,6 +237,23 @@ def declared_routes(run_id: str) -> list[dict[str, Any]]:
     return out
 
 
+def seeded_note(run_id: str) -> str:
+    """What db/init.sql seeds, which is what the test database starts with too."""
+    path = workspace_path(run_id) / "db" / "init.sql"
+    if not path.is_file():
+        return ""
+    grouped = _inserts_by_table(path.read_text(encoding="utf-8", errors="replace"))
+    counts = {t: _seed_rows(v) for t, v in grouped.items() if t != "example"}
+    counts = {t: n for t, n in counts.items() if n}
+    if not counts:
+        return ("\nTHE TEST DATABASE STARTS EMPTY: db/init.sql seeds no rows yet. Create every row a "
+                "test reads, in that test, before reading it.\n")
+    return ("\nTHE TEST DATABASE STARTS WITH THE ROWS db/init.sql SEEDS — the same data the "
+            "deployed app opens with: "
+            + ", ".join(f"{t} ({n} rows)" for t, n in sorted(counts.items()))
+            + ". A test may rely on those rows; anything else it needs, it creates itself.\n")
+
+
 def own_routes_note(run_id: str, own_files: set[str] | None) -> str:
     """The routes this story's own router files serve, and the rule that goes with them.
 

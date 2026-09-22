@@ -868,6 +868,19 @@ def _fixture_issues(rel: str, src: str) -> list[str]:
     return issues
 
 
+def _resource_table(path: str, tables: set[str]) -> str | None:
+    """`/api/agents/3` -> `agent` when that table is seeded, else None."""
+    parts = [p for p in _normalise(path).split("/") if p and p != "api" and not p.startswith("{")]
+    for seg in parts[:2]:
+        word = seg.lower().replace("-", "_")
+        stems = {word, word.rstrip("s"), word[:-3] + "y" if word.endswith("ies") else word,
+                 word[:-2] if word.endswith("es") else word}
+        for t in tables:
+            if t in stems or t.rstrip("s") in stems:
+                return t
+    return None
+
+
 def test_issues(run_id: str, test_paths: list[str], own_files: set[str] | None = None) -> list[str]:
     """Tests that cannot pass however correct the implementation is.
 
@@ -894,6 +907,7 @@ def test_issues(run_id: str, test_paths: list[str], own_files: set[str] | None =
         status_for[(r["method"], key)] = r["status"]
         owner_for[(r["method"], key)] = r.get("file", "")
 
+    seeded = {t for t, n in _seed_counts(run_id).items() if n}
     issues: list[str] = []
     for rel in test_paths:
         target = root / rel
@@ -947,8 +961,11 @@ def test_issues(run_id: str, test_paths: list[str], own_files: set[str] | None =
                     )
             nonempty = _NONEMPTY.search(block)
             seed = _SEEDS.search(block)
-            # A POST *after* the assertion does not seed what the assertion reads.
-            if nonempty and (not seed or seed.start() > nonempty.start()):
+            # A GET of a resource db/init.sql seeds is not empty: the test database
+            # starts with those rows. A POST *after* the assertion seeds nothing.
+            reads_seeded = any(_resource_table(call.group(3), seeded) for call in _CLIENT_CALL.finditer(block)
+                               if call.group(1).upper() == "GET")
+            if nonempty and not reads_seeded and (not seed or seed.start() > nonempty.start()):
                 issues.append(
                     f"{rel}::{name} asserts a non-empty result but never creates the data it "
                     "expects — the test database starts empty, so this fails whatever the "

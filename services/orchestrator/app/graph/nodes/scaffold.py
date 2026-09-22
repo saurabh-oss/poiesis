@@ -67,7 +67,7 @@ PROTECTED = (
 PLATFORM_FILES = ("tests/test_platform_endpoints.py",)
 # Platform-owned files stories may not edit, so the platform may rewrite them when
 # the template changes: an in-flight run gets the fixed shell on its next round.
-PLATFORM_SHELL = ("frontend/app.js",)
+PLATFORM_SHELL = ("frontend/app.js", "tests/conftest.py")
 
 
 def slugify(name: str) -> str:

@@ -594,6 +594,15 @@ async def test_failures() -> None:
         from .workspace.interface import own_routes_note
         note = own_routes_note(rid, {"backend/app/routers/queue.py"})
         expect("the Tester is shown the story's own routes", "GET /api/triage-queue" in note and "import-csv" not in note, note)
+        (root / "tests" / "test_seeded.py").write_text(
+            "def test_i(client):\n    customers = client.get('/api/customers').json()\n"
+            "    assert len(customers) > 0\n", encoding="utf-8")
+        seeded_ok = checks.test_issues(rid, ["tests/test_seeded.py"])
+        expect("a non-empty assertion on a table init.sql seeds is not flagged",
+               not any("non-empty" in i for i in seeded_ok), str(seeded_ok)[:300])
+        from .workspace.interface import seeded_note
+        expect("the Tester is told what the test database starts with",
+               "customer (6 rows)" in seeded_note(rid) and "ticket (2 rows)" in seeded_note(rid), seeded_note(rid))
         order = checks.test_issues(rid, ["tests/test_order.py"])
         expect("a POST after the non-empty assertion does not count as seeding",
                any("test_order.py::test_f" in i and "non-empty" in i for i in order), str(order)[:300])
