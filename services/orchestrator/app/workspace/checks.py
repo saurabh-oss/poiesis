@@ -678,6 +678,55 @@ _LABELISH = re.compile(r"""assert\s+['"]([A-Z][A-Za-z ]{2,30})['"]\s+in\s+\w+\["
 _SEEDS = re.compile(r"client\.post\(|db_session\.add\(")
 
 
+def _import_issues(root: Path, rel: str, src: str) -> list[str]:
+    """Names a test imports from `app.*` that the workspace does not define.
+
+    `from app.db import SessionLocal` inside a test function fails only when
+    that test runs, so it slipped past the module-level checks and cost a story
+    five Developer repairs against a file the Developer may not edit. Every
+    ImportFrom in the file is checked, wherever it sits, against the module's
+    real public names.
+    """
+    from .interface import _public_names
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return []
+    owner: dict[int, str] = {}
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_"):
+            for line in range(node.lineno, (node.end_lineno or node.lineno) + 1):
+                owner[line] = node.name
+    package = root / "backend" / "app"
+    issues: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        parts = node.module.split(".")
+        if parts[0] != "app" or len(parts) < 2:
+            continue
+        module = package.joinpath(*parts[1:]).with_suffix(".py")
+        where = f"{rel}::{owner[node.lineno]}" if node.lineno in owner else rel
+        if not module.is_file():
+            pkg_init = package.joinpath(*parts[1:]) / "__init__.py"
+            if pkg_init.is_file():
+                continue
+            issues.append(f"{where} imports from `{node.module}`, a module that does not exist in "
+                          "backend/app. Import only what VERIFIED IMPORTS lists.")
+            continue
+        names = _public_names(module.read_text(encoding="utf-8", errors="replace"))
+        missing = [a.name for a in node.names if a.name != "*" and a.name not in names]
+        if missing:
+            issues.append(
+                f"{where} imports `{', '.join(missing)}` from `{node.module}`, which does not "
+                f"define it — the test fails with ImportError however correct the implementation "
+                f"is, and the Developer may not change that file. `{node.module}` defines: "
+                f"{', '.join(names[:12]) or 'nothing public'}. Use those (the `client` and "
+                "`db_session` fixtures already give you a session), or drop the import."
+            )
+    return issues
+
+
 def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
     """Tests that cannot pass however correct the implementation is.
 
@@ -708,6 +757,7 @@ def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
         if not target.is_file():
             continue
         src = target.read_text(encoding="utf-8", errors="replace")
+        issues.extend(_import_issues(root, rel, src))
         for block in re.split(r"^(?=\s*(?:async\s+)?def\s+test_)", src, flags=re.M):
             name_match = re.search(r"def\s+(test_\w+)", block)
             if not name_match:

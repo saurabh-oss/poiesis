@@ -500,6 +500,25 @@ async def test_failures() -> None:
     expect("clean output gets no coaching", failures.coach("3 passed in 0.2s") == "")
     expect("failed tests are listed by node id", failures.failed_tests(raw) == ["tests/test_s1.py::test_start_shift"])
 
+    # A test importing a name the (protected) module does not define is caught wherever it sits.
+    from .workspace import checks
+    rid = _run_row("selftest imports")
+    try:
+        root = repo.init_workspace(rid)
+        (root / "backend" / "app").mkdir(parents=True)
+        (root / "backend" / "app" / "db.py").write_text("def get_session():\n    pass\n", encoding="utf-8")
+        (root / "tests").mkdir()
+        (root / "tests" / "test_q.py").write_text(
+            "from app.db import get_session\n\n\ndef test_a(client):\n    from app.db import SessionLocal\n"
+            "    assert client.get('/health').status_code == 200\n", encoding="utf-8")
+        found = checks.test_issues(rid, ["tests/test_q.py"])
+        expect("an invented import inside a test function is caught and attributed to the test",
+               any("test_q.py::test_a" in i and "SessionLocal" in i and "get_session" in i for i in found), str(found)[:300])
+        expect("a real import passes", not any("get_session` from" in i for i in found))
+    finally:
+        repo.destroy(rid)
+        _drop_runs([rid])
+
 
 async def test_api(rid: str) -> None:
     print("\n[7] observability API")
