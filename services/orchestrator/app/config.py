@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     # files, where it mostly spends the budget.
     poiesis_local_think_roles: str = "reasoning"
     poiesis_local_think_budget: int = 6000     # extra reply tokens allowed when thinking is on
+    # Tokens per GPU batch while reading the prompt. Windows kills a GPU kernel that
+    # runs longer than its timeout (2 s by default) and takes the machine down with a
+    # VIDEO_TDR_FAILURE bugcheck; a laptop GPU that throttles can push a 512-token
+    # batch past it. 128 keeps each batch well inside the limit at a modest cost.
+    poiesis_local_num_batch: int = 128
 
     # Engine. One run at a time on a single GPU; more only makes both slower.
     poiesis_max_concurrent_runs: int = 1

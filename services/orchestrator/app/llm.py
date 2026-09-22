@@ -222,7 +222,8 @@ async def _ollama(model: str, messages: list[dict[str, str]], *, max_tokens: int
     body: dict[str, Any] = {
         "model": model, "messages": messages, "stream": True,
         "keep_alive": s.poiesis_local_keep_alive,
-        "options": {"num_predict": max_tokens, "temperature": temperature, "num_ctx": num_ctx},
+        "options": {"num_predict": max_tokens, "temperature": temperature, "num_ctx": num_ctx,
+                    "num_batch": s.poiesis_local_num_batch},
     }
     if fmt:
         body["format"] = fmt
