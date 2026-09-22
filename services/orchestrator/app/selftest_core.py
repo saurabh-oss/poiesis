@@ -569,6 +569,16 @@ async def test_failures() -> None:
             "    product_area: Mapped[str] = mapped_column(String(40))\n"
             "    status: Mapped[str] = mapped_column(String(20), default='Open')\n"
             "    note: Mapped[str | None] = mapped_column(String(200), nullable=True)\n", encoding="utf-8")
+        (root / "tests" / "test_order.py").write_text(
+            "def test_f(client):\n    agents = client.get('/api/agents').json()\n"
+            "    assert len(agents) > 0\n    agent_id = agents[0]['id']\n"
+            "    client.post('/api/shift/start', json={'agent_id': agent_id})\n\n\n"
+            "def test_g(client):\n    client.post('/api/agents', json={'name': 'a'})\n"
+            "    agents = client.get('/api/agents').json()\n    assert len(agents) > 0\n", encoding="utf-8")
+        order = checks.test_issues(rid, ["tests/test_order.py"])
+        expect("a POST after the non-empty assertion does not count as seeding",
+               any("test_order.py::test_f" in i and "non-empty" in i for i in order), str(order)[:300])
+        expect("a POST before it does", not any("test_g" in i for i in order), str(order)[:300])
         (root / "tests" / "test_seed.py").write_text(
             "from app.models import Ticket\n\n\ndef test_d(client, db_session):\n"
             "    db_session.add(Ticket(title='x', status='Open'))\n    db_session.commit()\n\n\n"

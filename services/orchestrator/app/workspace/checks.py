@@ -683,7 +683,8 @@ def backend_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
 _CLIENT_CALL = re.compile(
     r"""\bclient\.(get|post|put|patch|delete)\(\s*f?(['"])([^'"]+)\2""", re.I)
 _STATUS_ASSERT = re.compile(r"status_code\s*==\s*(\d{3})")
-_NONEMPTY = re.compile(r"len\([^)]*\)\s*>\s*0|\)\s*\[0\]|assert\s+(?:body|rows|data|result)\s*$", re.M)
+_NONEMPTY = re.compile(r"len\([^)]*\)\s*>\s*0|len\([^)]*\)\s*>=\s*1|\)\s*\[0\]|\b\w+\[0\]\s*\[|"
+                       r"assert\s+(?:body|rows|data|result|agents|items|tickets)\s*$", re.M)
 _MARKUP = re.compile(r"""assert\s+['"][^'"]*<[a-zA-Z/][^'"]*['"]""")
 _LABELISH = re.compile(r"""assert\s+['"]([A-Z][A-Za-z ]{2,30})['"]\s+in\s+\w+\[""")
 _SEEDS = re.compile(r"client\.post\(|db_session\.add\(")
@@ -933,7 +934,10 @@ def test_issues(run_id: str, test_paths: list[str]) -> list[str]:
                         f"which the route declares as {sorted(declared)}. Assert the status the "
                         "contract states."
                     )
-            if _NONEMPTY.search(block) and not _SEEDS.search(block):
+            nonempty = _NONEMPTY.search(block)
+            seed = _SEEDS.search(block)
+            # A POST *after* the assertion does not seed what the assertion reads.
+            if nonempty and (not seed or seed.start() > nonempty.start()):
                 issues.append(
                     f"{rel}::{name} asserts a non-empty result but never creates the data it "
                     "expects — the test database starts empty, so this fails whatever the "
