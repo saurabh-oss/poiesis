@@ -24,7 +24,7 @@ from ...events import emit
 from ...integrations import gitremote, tracker
 from ...llm import ReplyTruncated, UnparseableReply, scaled
 from ...reuse.retriever import render_for_prompt, render_lessons
-from ...workspace import repo
+from ...workspace import failures, repo
 from ...workspace.checks import (
     mount_bare_routers,
     platform_checks,
@@ -488,9 +488,11 @@ async def _repair_once(
     prompt = (
         _context(state, story, first=False)
         + "\n\nYOUR PREVIOUS IMPLEMENTATION FAILED ITS CHECKS. The pytest output comes "
-        "first. A 'PLATFORM CHECKS' section after it lists problems the platform found "
-        "by loading your frontend. Fix those in your screen or router.\n"
-        f"{failed.stdout[-scaled(6000):]}\n{failed.stderr[-800:]}\n"
+        "first (framework frames and pip noise removed). A 'PLATFORM CHECKS' section after "
+        "it lists problems the platform found by loading your frontend. Fix those in your "
+        "screen or router.\n"
+        f"{failures.distill(failed.stdout, scaled(6000))}\n{failed.stderr[-800:]}\n"
+        + failures.coach(failed.stdout)
         + extra
         + "\nReturn the corrected implementation files only, each complete. "
         "Do not modify the tests."
@@ -588,7 +590,7 @@ async def _reconcile_tests(
             "Developer is not allowed to edit tests, so if a test is itself wrong, nobody "
             "else can fix it.\n\nCURRENT TEST FILES:\n"
             + "\n\n".join(f"### {p}\n{c[:scaled(3000)]}" for p, c in current.items())
-            + f"\n\npytest output:\n{failed.stdout.split('=== PLATFORM CHECKS')[0][-scaled(3500):]}\n\n"
+            + f"\n\npytest output:\n{failures.distill(failed.stdout.split('=== PLATFORM CHECKS')[0], scaled(3500))}\n\n"
             "For each failing test, decide whether the implementation is wrong or the test "
             "is wrong. A test is wrong when it contradicts VERIFIED ROUTES (path, status "
             "code, body fields or response fields), compares a whole response with ==, "
@@ -690,8 +692,8 @@ async def _verify(
         drift = test_issues(run_id, story_tests) if not tests.ok else []
         return {
             "exit_code": 0 if ok else (tests.exit_code or 1),
-            "stdout": tests.stdout[-scaled(3500):]
-            + ("" if checks.ok else checks.stdout[:scaled(2500)])
+            "stdout": failures.distill(tests.stdout, scaled(3500))
+            + ("" if checks.ok else "\n" + checks.stdout[:scaled(2500)])
             + ("\n\n=== THE TESTS AND YOUR API NO LONGER AGREE ===\nThese tests were written "
                "against endpoints that are not there now. If the story needs them, put them "
                "back; the tests are not yours to change.\n"

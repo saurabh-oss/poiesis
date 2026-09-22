@@ -19,7 +19,7 @@ gates:
   approve_release:      { mode: require }   # never set this to auto in a shared environment
 
 build:
-  max_repair_attempts: 3
+  max_repair_attempts: 5
   max_rework_rounds: 2          # automatic review -> build rounds before the stakeholder decides
   sandbox_image: python:3.12-slim
   test_timeout_seconds: 900

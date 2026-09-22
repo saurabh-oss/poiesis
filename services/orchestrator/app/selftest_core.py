@@ -466,6 +466,34 @@ async def test_vectors() -> None:
         vectors.use_client(None)
 
 
+async def test_failures() -> None:
+    print("\n[6b] failure distillation and coaching")
+    from .workspace import failures
+    raw = (
+        "WARNING: Running pip as the 'root' user can result in broken permissions\n"
+        "/usr/local/lib/python3.12/site-packages/starlette/routing.py:73: in app\n"
+        "    response = await f(request)\n"
+        "backend/app/routers/shifts.py:20: in start_shift\n"
+        "    return shift\n"
+        "E   fastapi.exceptions.ResponseValidationError: 1 validation errors:\n"
+        "E     {'type': 'missing', 'loc': ('response', 'agent_name'), 'msg': 'Field required'}\n"
+        "=============================== warnings summary ===============================\n"
+        "  DeprecationWarning: The anyio.abc.BlockingPortal alias is deprecated\n"
+        "FAILED tests/test_s1.py::test_start_shift - fastapi.exceptions.ResponseValidationError\n"
+        "1 failed, 10 passed, 1 warning in 0.38s\n"
+    )
+    d = failures.distill(raw)
+    expect("framework frames and pip noise are removed", "site-packages" not in d and "pip as the 'root'" not in d
+           and "DeprecationWarning" not in d)
+    expect("the application's own frame, the E lines and the summary survive",
+           "backend/app/routers/shifts.py:20" in d and "'agent_name'" in d and "1 failed, 10 passed" in d)
+    hint = failures.coach(raw)
+    expect("a missing response field gets a named, actionable hint", "`agent_name`" in hint and "response schema" in hint)
+    expect("a NameError names the symbol", "`Depends`" in failures.coach("E   NameError: name 'Depends' is not defined"))
+    expect("clean output gets no coaching", failures.coach("3 passed in 0.2s") == "")
+    expect("failed tests are listed by node id", failures.failed_tests(raw) == ["tests/test_s1.py::test_start_shift"])
+
+
 async def test_api(rid: str) -> None:
     print("\n[7] observability API")
     from .main import app
@@ -503,6 +531,7 @@ async def main() -> int:
         await test_engine(engine_ids)
         await test_gitremote(git_id, tmp)
         await test_vectors()
+        await test_failures()
         await test_api(rid)
     finally:
         llm.use_transport(None)

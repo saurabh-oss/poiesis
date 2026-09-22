@@ -121,11 +121,11 @@ def pytest_command(extra: str = "") -> str:
     Everything else stays air-gapped."""
     return (
         "if [ -f requirements.txt ]; then "
-        "pip install --quiet --disable-pip-version-check -r requirements.txt; fi; "
-        "pip install --quiet --disable-pip-version-check pytest; "
+        "pip install --quiet --disable-pip-version-check --root-user-action=ignore -r requirements.txt; fi; "
+        "pip install --quiet --disable-pip-version-check --root-user-action=ignore pytest; "
         # --continue-on-collection-errors: one unimportable test file must not hide
         # every other result. Without it a single bad import reports as a total
         # failure, masking the scaffold's own passing smoke tests and giving the
         # repair loop a traceback instead of an assertion to work from.
-        f"python -m pytest -q --tb=short --continue-on-collection-errors {extra}".strip()
+        f"python -m pytest -q --tb=short -p no:warnings --continue-on-collection-errors {extra}".strip()
     )
