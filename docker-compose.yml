@@ -2,6 +2,7 @@ name: poiesis
 
 services:
   postgres:
+    restart: unless-stopped
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: poiesis
@@ -15,6 +16,7 @@ services:
       retries: 20
 
   redis:
+    restart: unless-stopped
     image: redis:7-alpine
     ports: [ "6379:6379" ]
     healthcheck:
@@ -23,6 +25,7 @@ services:
       retries: 20
 
   neo4j:
+    restart: unless-stopped
     image: neo4j:5-community
     environment:
       NEO4J_AUTH: neo4j/poiesisdev
@@ -37,11 +40,13 @@ services:
       retries: 30
 
   qdrant:
+    restart: unless-stopped
     image: qdrant/qdrant:latest
     volumes: [ "./data/qdrant:/qdrant/storage" ]
     ports: [ "6333:6333" ]
 
   minio:
+    restart: unless-stopped
     image: minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
@@ -53,6 +58,7 @@ services:
   # ---- observability ---------------------------------------------------------
   # Traces: every stage, model call, sandbox run and deploy, as spans.
   jaeger:
+    restart: unless-stopped
     image: jaegertracing/jaeger:2.4.0
     ports:
       - "16686:16686"   # UI
@@ -62,6 +68,7 @@ services:
 
   # Metrics: model calls, tokens, durations, gates, runs.
   prometheus:
+    restart: unless-stopped
     image: prom/prometheus:v3.2.1
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=30d"]
     volumes:
@@ -70,6 +77,7 @@ services:
     ports: [ "9090:9090" ]
 
   grafana:
+    restart: unless-stopped
     image: grafana/grafana:11.5.2
     environment:
       GF_SECURITY_ADMIN_USER: poiesis
@@ -85,6 +93,7 @@ services:
     depends_on: [ prometheus ]
 
   orchestrator:
+    restart: unless-stopped
     build: ./services/orchestrator
     env_file: .env
     environment:
@@ -117,6 +126,7 @@ services:
     profiles: [ "tools" ]
 
   ui:
+    restart: unless-stopped
     build: ./services/ui
     environment:
       NEXT_PUBLIC_API_BASE: http://localhost:8080
