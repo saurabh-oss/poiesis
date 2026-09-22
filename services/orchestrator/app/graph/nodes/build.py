@@ -28,6 +28,7 @@ from ...workspace import failures, repo
 from ...workspace.checks import (
     heal_init_sql,
     mount_bare_routers,
+    screen_syntax_errors,
     validate_init_sql,
     platform_checks,
     preserve_shared,
@@ -268,9 +269,14 @@ def _refused_note(refused: list[str]) -> str:
             "backend/app/routers/<resource>.py and frontend/screens/<resource>.js.\n"
         )
     for r in rejected:
-        note += (f"\nYOUR {r}. The previous db/init.sql was kept. Return the whole file again, "
-                 "complete and valid: every INSERT closed with a semicolon, every string quoted, "
-                 "no statement cut off.\n")
+        if r.startswith("db/init.sql"):
+            note += (f"\nYOUR {r}. The previous db/init.sql was kept. Return the whole file again, "
+                     "complete and valid: every INSERT closed with a semicolon, every string quoted, "
+                     "no statement cut off.\n")
+        else:
+            note += (f"\nYOUR {r}. The previous version was kept. Return the whole file again and "
+                     "make it parse: one closing `)` per `h(`, every string closed, the shape of "
+                     "frontend/screens/example.js.\n")
     return note
 
 
@@ -314,7 +320,20 @@ async def _apply(
         await emit(run_id, f"{sid}: removed {', '.join(removed)}",
                    agent="developer", stage="build", data={"removed": removed})
     previous_sql = repo.read(run_id, "db/init.sql", 400000) if "db/init.sql" in proposed else ""
+    # Screens that already exist are shared with the stories that wrote them: a
+    # rewrite that does not parse is refused and the previous version kept.
+    previous_screens = {rel: repo.read(run_id, rel, 400000) for rel in proposed
+                        if rel.startswith("frontend/screens/") and rel.endswith(".js")
+                        and repo.read(run_id, rel, 10)}
     written = repo.write_files(run_id, proposed)
+    if previous_screens:
+        broken = await screen_syntax_errors(run_id, list(previous_screens))
+        for rel, err in broken.items():
+            repo.write_files(run_id, {rel: previous_screens[rel]})
+            refused.append(f"{rel} — REJECTED, JavaScript syntax error: {err}")
+            await emit(run_id, f"{sid}: its rewrite of {rel} does not parse ({err}); kept the previous "
+                               "version so the screen stays reachable",
+                       agent="governance", stage="build", level="warn")
     if "db/init.sql" in proposed and previous_sql:
         sql = await validate_init_sql(run_id)
         if not sql.ok:

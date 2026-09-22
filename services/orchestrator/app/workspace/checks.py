@@ -1163,6 +1163,26 @@ def criteria_seed_issues(run_id: str, story: dict | None) -> list[str]:
     return list(dict.fromkeys(issues))
 
 
+async def screen_syntax_errors(run_id: str, rels: list[str]) -> dict[str, str]:
+    """`node --check` on each screen; {path: first error line} for the ones that fail.
+
+    A screen shared by two stories was rewritten with an unbalanced `)` and the
+    other story could not open its own screen. A file that does not parse is
+    caught here, at write time, before it lands on the story that did not write it.
+    """
+    screens = [r for r in rels if r.startswith("frontend/screens/") and r.endswith(".js")]
+    if not screens:
+        return {}
+    cmd = "; ".join(f"node --check {r} 2>&1 | head -6 | sed 's|^|{r}: |'" for r in screens)
+    out = await run_in_sandbox(run_id, cmd, image=NODE_IMAGE, shell="sh", network=False, timeout=120)
+    errors: dict[str, str] = {}
+    for line in (out.stdout + out.stderr).splitlines():
+        for r in screens:
+            if line.startswith(r + ": ") and ("SyntaxError" in line or "error" in line.lower()):
+                errors.setdefault(r, line[len(r) + 2:].strip()[:200])
+    return errors
+
+
 async def heal_init_sql(run_id: str) -> str:
     """If db/init.sql does not execute, put back the newest version that does.
 
