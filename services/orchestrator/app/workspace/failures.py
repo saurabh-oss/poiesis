@@ -107,6 +107,10 @@ _HINTS: list[tuple[re.Pattern[str], str]] = [
      "every string and template literal must be closed, and the file must keep the shape of "
      "frontend/screens/example.js. Rewrite the whole render() tree carefully rather than "
      "patching one line."),
+    (re.compile(r"'_lru_cache_wrapper' object has no attribute 'connect'"),
+     "A session was bound to `engine` itself, which is a function in app.db: it must be "
+     "called, `engine()`. In tests, this means the test built its own session instead of "
+     "taking the `db_session` fixture — a test defect the Tester has to fix, not the router."),
     (re.compile(r"render\(\) never loads anything"),
      "The screen must fetch and draw its data inside render() itself, not only inside a click "
      "handler: a visitor opening the page sees the data immediately."),

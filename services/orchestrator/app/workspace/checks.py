@@ -741,6 +741,9 @@ def _import_issues(root: Path, rel: str, src: str) -> list[str]:
 _CLIENT_ATTR = re.compile(r"\bclient\.(?!(?:get|post|put|patch|delete|head|options|request|"
                           r"headers|base_url|cookies|app|close|stream|websocket_connect)\b)(\w+)")
 _TEST_FN = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)", re.M)
+_OWN_SESSION = re.compile(r"\b(Session\s*\(|sessionmaker\s*\(|create_engine\s*\(|SessionLocal\s*\(|TestClient\s*\()")
+_ENGINE_IMPORT = re.compile(r"^\s*from\s+app\.db\s+import\s+[^\n]*\bengine\b", re.M)
+_OWN_FIXTURE = re.compile(r"^\s*def\s+(client|db_session)\s*\(", re.M)
 
 
 def _fixture_issues(rel: str, src: str) -> list[str]:
@@ -751,10 +754,26 @@ def _fixture_issues(rel: str, src: str) -> list[str]:
     Developer could do nothing about it for six repairs.
     """
     issues: list[str] = []
+    if _OWN_FIXTURE.search(src):
+        issues.append(
+            f"{rel} redefines the `client` or `db_session` fixture. Those come from tests/conftest.py "
+            "and point at the test database; a local copy points at nothing that exists while tests "
+            "run. Delete the definition and take the fixture as a test argument."
+        )
     for block in re.split(r"^(?=\s*(?:async\s+)?def\s+test_)", src, flags=re.M):
         name = _TEST_FN.search(block)
         if not name:
             continue
+        if _OWN_SESSION.search(block) or _ENGINE_IMPORT.search(block):
+            issues.append(
+                f"{rel}::{name.group(1)} builds its own database session or client (Session(...), "
+                "sessionmaker, create_engine, TestClient, or `engine` imported from app.db). That "
+                "targets the production database, which does not exist while tests run — and "
+                "app.db.engine is a function, so `Session(engine)` fails with "
+                "\"'_lru_cache_wrapper' object has no attribute 'connect'\". Take the `client` and "
+                "`db_session` fixtures as test arguments instead; they are already wired to a real, "
+                "empty test database."
+            )
         for attr in sorted({m.group(1) for m in _CLIENT_ATTR.finditer(block)}):
             issues.append(
                 f"{rel}::{name.group(1)} uses `client.{attr}`, which the TestClient does not have — "

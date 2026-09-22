@@ -523,7 +523,9 @@ async def test_failures() -> None:
             "from app.db import get_session\n\n\ndef test_a(client):\n    from app.db import SessionLocal\n"
             "    assert client.get('/health').status_code == 200\n\n\n"
             "def test_b(client, db_session):\n    client.session.add(1)\n    db_session.commit()\n"
-            "    assert client.post('/x', json={}).status_code == 201\n", encoding="utf-8")
+            "    assert client.post('/x', json={}).status_code == 201\n\n\n"
+            "def test_c(client):\n    from app.db import Base, engine\n    with Session(engine) as s:\n"
+            "        s.commit()\n", encoding="utf-8")
         (root / "db").mkdir()
         (root / "db" / "init.sql").write_text(
             "CREATE TABLE ticket (id INT, subject TEXT);\nINSERT INTO ticket (id, subject) VALUES (1, 'a'), (2, 'b');\n"
@@ -556,6 +558,10 @@ async def test_failures() -> None:
         expect("a test reaching for client.session is caught and told about db_session",
                any("test_q.py::test_b" in i and "client.session" in i and "db_session" in i for i in found), str(found)[:300])
         expect("client.get and client.post are not flagged", not any("client.get" in i or "client.post" in i for i in found))
+        expect("a test that builds its own Session from app.db.engine is caught",
+               any("test_q.py::test_c" in i and "own database session" in i for i in found), str(found)[-300:])
+        expect("...and the coach explains the resulting error",
+               "engine()" in failures.coach("E   AttributeError: '_lru_cache_wrapper' object has no attribute 'connect'"))
     finally:
         repo.destroy(rid)
         _drop_runs([rid])
