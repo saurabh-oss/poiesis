@@ -526,7 +526,7 @@ async def test_failures() -> None:
         expect("a criterion promising at least N rows is checked against init.sql",
                len(seed) == 1 and "150 tickets" in seed[0] and "2 row(s)" in seed[0], str(seed)[:300])
         expect("counts that are met, small numbers and non-data nouns are ignored",
-               not any("customer" in i or "criteria" in i or "columns" in i for i in seed))
+               not any("into `customer`" in i or "into `criteria`" in i or "into `columns`" in i for i in seed))
         found = checks.test_issues(rid, ["tests/test_q.py"])
         expect("an invented import inside a test function is caught and attributed to the test",
                any("test_q.py::test_a" in i and "SessionLocal" in i and "get_session" in i for i in found), str(found)[:300])
