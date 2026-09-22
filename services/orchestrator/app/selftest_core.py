@@ -250,6 +250,13 @@ async def test_llm_client(fake: FakeOllama, rid: str) -> None:
         out = await llm.complete_json(role="coding", system="s", user="u")
         expect("inline <think> blocks are stripped", out == {"a": 1})
 
+        fake.script = [{"content": '{"a": 1}'}]
+        await llm.complete_json(role="coding", system="s", user="x" * 200_000)
+        req = fake.requests[-1]
+        expect("a prompt that would not fit grows num_ctx for that call instead of being cut",
+               req["options"]["num_ctx"] > s.poiesis_local_num_ctx and req["options"]["num_ctx"] % 4096 == 0,
+               str(req["options"]))
+
         vecs = await llm.embed(["seed rows", "other"])
         expect("embeddings come back one per text", len(vecs) == 2 and len(vecs[0]) == 64)
     finally:

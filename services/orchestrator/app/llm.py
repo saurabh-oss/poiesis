@@ -190,16 +190,26 @@ def _explain(status: int, text: str, model: str) -> str:
 
 
 _THINK_TAGS = re.compile(r"<think>.*?</think>\s*", re.S)
+_MAX_NUM_CTX = 131072   # the Qwen3.6 models take 256k; KV cache is the practical ceiling
 
 
 async def _ollama(model: str, messages: list[dict[str, str]], *, max_tokens: int,
                   temperature: float, fmt: Any = None, think: bool | None = None) -> Reply:
     s = settings()
+    # Ollama drops the *start* of a prompt that does not fit num_ctx, silently:
+    # the system prompt goes first. Estimate the prompt and grow the window for
+    # this request rather than let that happen; the model reloads once, which is
+    # cheap next to a Developer that forgot every rule it was given.
+    estimate = sum(len(m.get("content") or "") for m in messages) // 3 + 64
+    num_ctx = s.poiesis_local_num_ctx
+    if estimate + max_tokens + 256 > num_ctx:
+        num_ctx = min(_MAX_NUM_CTX, ((estimate + max_tokens + 1024) // 4096 + 1) * 4096)
+        log.warning("prompt of ~%d tokens plus a %d-token reply exceeds num_ctx %d; using %d for this call",
+                    estimate, max_tokens, s.poiesis_local_num_ctx, num_ctx)
     body: dict[str, Any] = {
         "model": model, "messages": messages, "stream": True,
         "keep_alive": s.poiesis_local_keep_alive,
-        "options": {"num_predict": max_tokens, "temperature": temperature,
-                    "num_ctx": s.poiesis_local_num_ctx},
+        "options": {"num_predict": max_tokens, "temperature": temperature, "num_ctx": num_ctx},
     }
     if fmt:
         body["format"] = fmt
@@ -250,7 +260,8 @@ async def _ollama(model: str, messages: list[dict[str, str]], *, max_tokens: int
         finish_reason=str(stats.get("done_reason") or "stop"),
         thinking="".join(thinking) or (text[:len(text) - len(stripped)] if stripped != text else ""),
         model=model,
-        extra={"load_ms": int((stats.get("load_duration") or 0) / 1e6),
+        extra={"num_ctx": num_ctx, "prompt_estimate": estimate,
+               "load_ms": int((stats.get("load_duration") or 0) / 1e6),
                "prompt_ms": int((stats.get("prompt_eval_duration") or 0) / 1e6),
                "eval_ms": int((stats.get("eval_duration") or 0) / 1e6)},
     )
