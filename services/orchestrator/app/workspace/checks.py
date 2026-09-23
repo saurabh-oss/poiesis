@@ -27,6 +27,7 @@ import re
 from pathlib import Path
 
 from .interface import (
+    ROUTER_PREFIX,
     EXAMPLE_ROUTER,
     GENERIC_ROUTER,
     EXAMPLE_SCREEN,
@@ -1105,6 +1106,63 @@ def _called_paths(run_id: str) -> list[str]:
     return paths
 
 
+def neutralise_bare_routes(run_id: str, rels: list[str]) -> list[str]:
+    """Strip the decorator off any route declared at the root of /api in these files.
+
+    `@router.get("/{incident_id}")` next to proper `/incidents/...` routes once
+    turned every other screen's GET into a 422 for two repair rounds, and then
+    took the whole deployment down. The function stays (the file still imports);
+    only the decorator that mounted it at the root goes. Returns notes.
+    """
+    root = workspace_path(run_id)
+    notes: list[str] = []
+    for rel in rels:
+        key = rel.replace("\\", "/").lstrip("./")
+        path = root / key
+        if not (key.startswith("backend/app/routers/") and key.endswith(".py") and path.is_file()):
+            continue
+        if path.name in (EXAMPLE_ROUTER, GENERIC_ROUTER):
+            continue
+        src = path.read_text(encoding="utf-8", errors="replace")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        drop: list[tuple[int, int, str, str]] = []  # (first line, last line, path, function)
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for deco in node.decorator_list:
+                if not (isinstance(deco, ast.Call) and isinstance(deco.func, ast.Attribute)
+                        and deco.func.attr.lower() in _HTTP_METHODS_LOWER and deco.args
+                        and isinstance(deco.args[0], ast.Constant) and isinstance(deco.args[0].value, str)):
+                    continue
+                route = deco.args[0].value
+                route = route if route.startswith("/") else "/" + route
+                prefix = ""
+                if _is_bare(f"{ROUTER_PREFIX}{route}"):
+                    drop.append((deco.lineno, deco.end_lineno or deco.lineno, route, node.name))
+        if not drop:
+            continue
+        lines = src.splitlines(keepends=True)
+        for first, last, _, _ in sorted(drop, reverse=True):
+            del lines[first - 1:last]
+        new = "".join(lines)
+        try:
+            ast.parse(new)
+        except SyntaxError:
+            continue
+        path.write_text(new, encoding="utf-8", newline="\n")
+        for _, _, route, fn in drop:
+            notes.append(f"{key}: removed the route `{route}` from `def {fn}` — declared at the root of /api it is "
+                         "served as /api/{…} and swallows every other story's path (every GET answered 422). "
+                         "If the story needs it, declare it under the resource: `/incidents/{incident_id}`.")
+    return notes
+
+
+_HTTP_METHODS_LOWER = {"get", "post", "put", "patch", "delete"}
+
+
 def mount_bare_routers(run_id: str) -> list[str]:
     """Give a story router declared at "/" the resource path its callers already use.
 
@@ -1522,9 +1580,12 @@ for route in app.routes:
     if not isinstance(route, APIRoute) or "GET" not in route.methods or not route.path.startswith("/api/"):
         continue
     path = re.sub(r"\{[^}]+\}", "1", route.path)
+    parametrised = "{" in route.path
     try:
         r = client.get(path)
-        out.append({"path": route.path, "status": r.status_code, "detail": r.text[:400] if r.status_code >= 500 else ""})
+        bad = r.status_code >= (500 if parametrised else 400)
+        out.append({"path": route.path, "status": r.status_code, "parametrised": parametrised,
+                    "detail": r.text[:400] if bad else ""})
     except Exception:  # noqa: BLE001 — the traceback is the finding
         tb = traceback.format_exc()
         lines = [l for l in tb.splitlines() if "site-packages" not in l]
@@ -1567,7 +1628,9 @@ async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
         rows = json.loads(result.stdout.split(marker, 1)[1])
     except json.JSONDecodeError:
         return [], "the smoke check produced unreadable output"
-    return [r for r in rows if int(r.get("status", 0)) >= 500], ""
+    # A GET with no parameters that answers 4xx is wrong too: a 422 on /api/metrics is
+    # how a stray root route in another router shows itself.
+    return [r for r in rows if int(r.get("status", 0)) >= (500 if r.get("parametrised") else 400)], ""
 
 
 def smoke_failures_by_file(run_id: str, failures: list[dict]) -> dict[str, list[dict]]:

@@ -31,6 +31,7 @@ from ...workspace.checks import (
     heal_init_sql,
     heal_screens,
     mount_bare_routers,
+    neutralise_bare_routes,
     screen_syntax_errors,
     validate_init_sql,
     platform_checks,
@@ -381,6 +382,9 @@ async def _apply(
                                "version so other stories are not broken by it",
                        agent="governance", stage="build", level="warn")
     await _mount_bare(run_id, sid)
+    for note in neutralise_bare_routes(run_id, list(proposed)):
+        refused.append(note)
+        await emit(run_id, f"{sid}: {note[:220]}", agent="governance", stage="build", level="warn")
     # ES modules cannot list a directory, so the shell reads a generated registry.
     # Rebuilt after every write so a new screen is live on the next check.
     regenerate_registry(run_id)

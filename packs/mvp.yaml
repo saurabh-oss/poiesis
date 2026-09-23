@@ -22,8 +22,8 @@ gates:
 build:
   mode: mvp                     # screens over the generic data API; no Tester, no pytest
   foundation: true              # whole data model + demonstration data before any story
-  max_repair_attempts: 2
-  max_rework_rounds: 1
+  max_repair_attempts: 3
+  max_rework_rounds: 2
   sandbox_image: python:3.12-slim
   test_timeout_seconds: 600
 

@@ -802,6 +802,14 @@ async def test_foundation() -> None:
         expect("a story router that shadows a generic path owns its failure",
                list(checks.smoke_failures_by_file(rid, [{"path": "/api/tickets", "status": 500}])) == ["backend/app/routers/incidents.py"])
         (root / "backend" / "app" / "routers" / "incidents.py").unlink()
+        (root / "backend" / "app" / "routers" / "stray.py").write_text(
+            "from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.get('/strays')\ndef ok():\n    return []\n\n\n"
+            "@router.get('/{stray_id}')\ndef one(stray_id: int):\n    return {}\n", encoding="utf-8")
+        notes = checks.neutralise_bare_routes(rid, ["backend/app/routers/stray.py"])
+        after = (root / "backend" / "app" / "routers" / "stray.py").read_text(encoding="utf-8")
+        expect("a stray root route loses its decorator and the proper route stays",
+               len(notes) == 1 and "/{stray_id}" in notes[0] and "@router.get('/strays')" in after
+               and "@router.get('/{stray_id}')" not in after and "def one(" in after, str(notes)[:200])
         expect("the smoke failures map to the router that serves the path",
                list(checks.smoke_failures_by_file(rid, [{"path": "/api/tickets", "status": 500}])) == ["backend/app/routers/resources.py"])
         (root / "backend" / "app" / "routers" / "metrics.py").write_text(
