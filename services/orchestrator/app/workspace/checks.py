@@ -168,20 +168,40 @@ def _normalise(path: str) -> str:
 # A screen that needs an id and gives up without one: `const id = params[0]; if (!id) { ...; return; }`
 # before any api() call. The navigation opens every screen without parameters.
 _PARAM_ID = re.compile(r"\bparams\s*(?:\[\s*0\s*\]|\?\.\[\s*0\s*\])|\bparams\s*\)|\[\s*\w+\s*\]\s*=\s*params")
-_EARLY_RETURN = re.compile(r"if\s*\(\s*!\s*[\w.]+\s*\)\s*\{[^{}]*?\breturn\b", re.S)
+_GUARD_OPEN = re.compile(r"if\s*\(\s*!\s*[\w.$]+\s*\)\s*\{")
+
+
+def _gives_up_without_id(code: str) -> tuple[int, str] | None:
+    """The first `if (!x) { … return … }` block that runs before any api() call.
+
+    Brace-aware, because the block usually builds an empty state with h() calls
+    whose props are objects — a regex that forbids nested braces never matched.
+    """
+    for m in _GUARD_OPEN.finditer(code):
+        if "api(" in code[:m.start()]:
+            return None  # data was loaded first; a later guard is a real branch
+        depth, i, n = 1, m.end(), len(code)
+        while i < n and depth:
+            ch = code[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            i += 1
+        block = code[m.end():i - 1]
+        if re.search(r"\breturn\b", block) and "api(" not in block:
+            return m.start(), code[m.start():m.end()]
+    return None
 
 
 def _idless_issue(rel: str, code: str) -> str:
     """Why a screen would show nothing when opened from the navigation, or ''."""
     if not _PARAM_ID.search(code):
         return ""
-    m = _EARLY_RETURN.search(code)
-    if not m:
+    hit = _gives_up_without_id(code)
+    if not hit:
         return ""
-    before = code[:m.start()]
-    if "api(" in before:
-        return ""  # it loads something first; the guard is for a later step
-    return (f"{rel}: gives up when opened without an id (`{m.group(0)[:60].strip()}…`), and the navigation "
+    return (f"{rel}: gives up when opened without an id (`{hit[1][:60].strip()}…`), and the navigation "
             "opens every screen without one — so a visitor sees only that message. When `params` is empty, "
             "fetch the list (`await api(\"/tickets\")`) and show it as a `ui.table` whose `onRow` navigates to "
             "this screen with the row's id; show the detail once an id is present.")
