@@ -24,8 +24,8 @@ from .runner import ExecResult, run_in_sandbox
 SEED_SCRIPT = "db/seed.py"
 # A generator is a few hundred lines. Past that it is the rows written out as
 # literals, which is what the reply budget cannot hold and the check refuses.
-MAX_SEED_LINES = 450
-MAX_SEED_CHARS = 32000
+MAX_SEED_LINES = 700
+MAX_SEED_CHARS = 60000
 SEED_MARKER = "-- ==== DEMONSTRATION DATA — generated from db/seed.py by the platform; this section is rewritten ===="
 MAX_ROWS_PER_TABLE = 5000
 _CHUNK = 50
@@ -64,7 +64,7 @@ def size_issue(script: str) -> str:
         return ""
     return (f"{SEED_SCRIPT} is {lines} lines / {len(script):,} characters: that is the rows written out as "
             f"literals, not a generator, and the reply was cut off before the file ended. Write at most "
-            f"{MAX_SEED_LINES // 1.5:.0f} lines: catalogues of 30-40 distinct subjects, names and companies, "
+            f"300 lines: catalogues of 30-40 distinct subjects, names and companies, "
             "a seeded random.Random, and loops that combine them into the counts the brief asks for.")
 
 

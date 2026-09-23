@@ -481,9 +481,40 @@ def _top_level(text: str, sep: str = ",") -> list[str]:
     return parts
 
 
+_SQL_COMMENT = re.compile(r"--[^\n]*|/\*[\s\S]*?\*/")
+
+
+def strip_sql_comments(sql: str) -> str:
+    """Comments out, quoted text intact: a `-- investigating|identified` note after a
+    column once swallowed the column on the next line and every check after it."""
+    out, i, n, quote = [], 0, len(sql), ""
+    while i < n:
+        ch = sql[i]
+        if quote:
+            out.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+        elif ch in "'\"":
+            quote = ch
+            out.append(ch)
+            i += 1
+        elif sql.startswith("--", i):
+            j = sql.find("\n", i)
+            i = n if j < 0 else j
+        elif sql.startswith("/*", i):
+            j = sql.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
 def _table_columns(sql: str) -> dict[str, dict[str, bool]]:
     """table -> {column: whether an INSERT must supply it}, from every CREATE TABLE."""
     out: dict[str, dict[str, bool]] = {}
+    sql = strip_sql_comments(sql)
     for m in _TABLE_DEF.finditer(sql):
         cols: dict[str, bool] = {}
         for part in _top_level(m.group(2)):

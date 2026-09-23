@@ -39,6 +39,7 @@ from .interface import (
     _table_columns,
     declared_routes,
     router_files,
+    strip_sql_comments,
 )
 from .repo import history, show, workspace_path
 from .runner import ExecResult, mount_source, run_in_sandbox
@@ -466,7 +467,7 @@ def _sql_columns(run_id: str) -> dict[str, set[str]]:
     init = workspace_path(run_id) / "db" / "init.sql"
     if not init.is_file():
         return {}
-    text = init.read_text(encoding="utf-8", errors="replace")
+    text = strip_sql_comments(init.read_text(encoding="utf-8", errors="replace"))
     out: dict[str, set[str]] = {}
     for m in _CREATE_TABLE.finditer(text):
         table, columns = m.group(1).lower(), set()
