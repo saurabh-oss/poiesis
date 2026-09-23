@@ -202,33 +202,39 @@ def tables_in(run_id: str) -> dict[str, dict[str, bool]]:
     return _table_columns(strip_seed_section(path.read_text(encoding="utf-8", errors="replace")))
 
 
+SEED_OUTPUT = ".poiesis/seed.json"
+# The rows go to a file, not stdout: the sandbox keeps only the tail of stdout,
+# and 150 tickets of prose are longer than that.
 _RUNNER = (
-    "python - <<'PY'\n"
+    "mkdir -p .poiesis && python - <<'PY'\n"
     "import json, sys\n"
     "sys.path.insert(0, 'db')\n"
     "import seed\n"
     "data = seed.rows()\n"
-    "print('POIESIS_SEED_JSON')\n"
-    "print(json.dumps(data, default=str))\n"
+    f"json.dump(data, open('{SEED_OUTPUT}', 'w'), default=str)\n"
+    "print('POIESIS_SEED_OK')\n"
     "PY"
 )
 
 
 async def run_seed_script(run_id: str, timeout: int = 120) -> tuple[dict[str, list[dict[str, Any]]] | None, str]:
     """Run db/seed.py in the sandbox. Returns (rows by table, error text)."""
+    out_path = workspace_path(run_id) / SEED_OUTPUT
+    if out_path.exists():
+        out_path.unlink()
     result: ExecResult = await run_in_sandbox(run_id, _RUNNER, timeout=timeout, network=False)
     if result.timed_out:
         return None, f"{SEED_SCRIPT} did not finish within {timeout}s — it must run in seconds"
-    marker = "POIESIS_SEED_JSON\n"
-    if not result.ok or marker not in result.stdout:
+    if not result.ok or "POIESIS_SEED_OK" not in result.stdout or not out_path.is_file():
         err = (result.stderr or result.stdout).strip()
         lines = [l for l in err.splitlines() if l.strip()][-12:]
         return None, f"{SEED_SCRIPT} failed:\n" + "\n".join(lines)
-    payload = result.stdout.split(marker, 1)[1]
     try:
-        data = json.loads(payload)
+        data = json.loads(out_path.read_text(encoding="utf-8", errors="replace"))
     except json.JSONDecodeError as exc:
-        return None, f"{SEED_SCRIPT} printed something rows() could not be read from: {exc}"
+        return None, f"{SEED_SCRIPT} produced something rows() could not be read from: {exc}"
+    finally:
+        out_path.unlink(missing_ok=True)
     if not isinstance(data, dict):
         return None, f"{SEED_SCRIPT}: rows() must return a dict of table -> list of rows"
     return data, ""
