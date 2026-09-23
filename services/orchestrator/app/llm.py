@@ -36,6 +36,7 @@ import httpx
 import litellm
 from tenacity import (
     retry,
+    retry_if_exception_type,
     retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential,
@@ -342,7 +343,9 @@ async def complete(
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=5, max=90),
-       retry=retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)),
+       # Exception only: a task cancellation (CancelledError is a BaseException) must
+       # stop the call, not be retried for five attempts while the run carries on.
+       retry=retry_if_exception_type(Exception) & retry_if_not_exception_type((ReplyTruncated, ModelUnavailable)),
        before_sleep=lambda rs: log.warning("model call failed (%s); retry %d in %.0fs",
                                            rs.outcome.exception(), rs.attempt_number,
                                            rs.next_action.sleep))
