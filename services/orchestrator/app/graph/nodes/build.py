@@ -32,6 +32,7 @@ from ...workspace.checks import (
     screen_syntax_errors,
     validate_init_sql,
     platform_checks,
+    preserve_routes,
     preserve_shared,
     regenerate_registry,
     test_issues,
@@ -327,6 +328,8 @@ async def _apply(
             agent="developer", stage="build", level="warn", data={"refused": refused},
         )
     proposed, restored = preserve_shared(run_id, proposed)
+    proposed, kept_routes = preserve_routes(run_id, proposed)
+    restored += kept_routes
     if "db/init.sql" in proposed:
         from ...workspace.seeding import reapply_seed
         proposed["db/init.sql"], dropped_seed = reapply_seed(run_id, str(proposed["db/init.sql"]))

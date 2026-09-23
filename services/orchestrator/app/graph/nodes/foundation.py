@@ -41,7 +41,7 @@ from ..state import RunState
 from ..store import save_artifact, set_stage
 from .build import _apply, _refused_note
 
-SEED_REPAIRS = 3
+SEED_REPAIRS = 4
 
 
 def enabled() -> bool:

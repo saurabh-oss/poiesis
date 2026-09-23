@@ -1459,6 +1459,100 @@ def _baseline_requirements() -> str:
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def _route_functions(src: str) -> dict[tuple[str, str], ast.FunctionDef | ast.AsyncFunctionDef]:
+    """(METHOD, declared path) -> the decorated function, for one router module."""
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return {}
+    out: dict[tuple[str, str], ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for deco in node.decorator_list:
+            if (isinstance(deco, ast.Call) and isinstance(deco.func, ast.Attribute)
+                    and deco.func.attr.lower() in ("get", "post", "put", "patch", "delete") and deco.args
+                    and isinstance(deco.args[0], ast.Constant) and isinstance(deco.args[0].value, str)):
+                route = deco.args[0].value
+                out[(deco.func.attr.upper(), route if route.startswith("/") else "/" + route)] = node
+    return out
+
+
+def _screen_calls(run_id: str, skip: set[str]) -> list[tuple[str, str]]:
+    """Every (METHOD or '', normalised path) a screen not in `skip` calls."""
+    root = workspace_path(run_id)
+    calls: list[tuple[str, str]] = []
+    for path in story_screens(run_id):
+        rel = path.relative_to(root).as_posix()
+        if rel in skip:
+            continue
+        code = _COMMENTS.sub(" ", path.read_text(encoding="utf-8", errors="replace"))
+        for call in _API_CALL.finditer(code):
+            calls.append(((call.group(2) or "").upper(), _normalise(call.group(4))))
+    return calls
+
+
+def preserve_routes(run_id: str, files: dict[str, str]) -> tuple[dict[str, str], list[str]]:
+    """Put back an endpoint a router rewrite dropped while another screen still calls it.
+
+    A metrics story once returned `routers/metrics.py` complete with its own
+    routes and without the dashboard's `/metrics/dashboard`, which an earlier
+    story had put in the same file. The dashboard answered 404 on the next
+    deploy and the round was lost. Dropped route functions that a screen
+    outside this reply still calls are appended back, with their imports.
+    """
+    root = workspace_path(run_id)
+    out = dict(files)
+    restored: list[str] = []
+    calls = _screen_calls(run_id, {k.replace("\\", "/").lstrip("./") for k in files})
+    for rel, new in files.items():
+        key = rel.replace("\\", "/").lstrip("./")
+        if not (key.startswith("backend/app/routers/") and key.endswith(".py")) or not isinstance(new, str):
+            continue
+        current = root / key
+        if not current.is_file() or not new.strip():
+            continue
+        old = current.read_text(encoding="utf-8", errors="replace")
+        old_routes, new_routes = _route_functions(old), _route_functions(new)
+        if not old_routes or not new_routes:
+            continue
+        # A path is "still served" when the new file declares it, whatever the function is called.
+        served = {(m, _normalise(p)) for (m, p) in new_routes}
+        dropped = {k: fn for k, fn in old_routes.items() if (k[0], _normalise(k[1])) not in served}
+        needed = {}
+        for (method, path), fn in dropped.items():
+            pattern = _route_pattern(_normalise(path))
+            if any(pattern.match(called) and (not m or m == method) for m, called in calls):
+                needed[(method, path)] = fn
+        if not needed:
+            continue
+        try:
+            old_tree, new_tree = ast.parse(old), ast.parse(new)
+        except SyntaxError:
+            continue
+        imports = (ast.Import, ast.ImportFrom)
+        have = {ast.get_source_segment(new, n) for n in new_tree.body if isinstance(n, imports)}
+        missing = [s for n in old_tree.body if isinstance(n, imports)
+                   and (s := ast.get_source_segment(old, n)) and s not in have and "__future__" not in s]
+        new_names = {n.name for n in new_tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        segments = []
+        for (method, path), fn in needed.items():
+            seg = ast.get_source_segment(old, fn) or ""
+            if fn.name in new_names:
+                seg = seg.replace(f"def {fn.name}(", f"def {fn.name}_kept(", 1)
+            segments.append(seg)
+        lines = new.rstrip("\n").splitlines()
+        last = max((n.end_lineno or 0 for n in new_tree.body if isinstance(n, imports)), default=0)
+        merged = "\n".join(lines[:last] + missing + lines[last:]) + "\n\n\n" + "\n\n\n".join(segments) + "\n"
+        try:
+            ast.parse(merged)
+        except SyntaxError:
+            continue
+        out[rel] = merged
+        restored += [f"{key}: {m} {p} (another screen calls it)" for (m, p) in needed]
+    return out, restored
+
+
 def preserve_shared(run_id: str, files: dict[str, str]) -> tuple[dict[str, str], list[str]]:
     """Put back what a rewrite of a shared file dropped, when something still uses it.
 

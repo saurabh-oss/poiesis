@@ -56,6 +56,8 @@ THE CONTRACT FOR {SEED_SCRIPT}:
   incident_id is left None on a real share of rows (10-40%), so a queue has untriaged
   tickets, an "assign" flow has unassigned ones, and a board has rows in every column.
 - Fast: it runs in well under ten seconds and prints nothing.
+- Text with an apostrophe ("hasn't", "customer's") goes in double-quoted Python strings;
+  an apostrophe inside a single-quoted string is the syntax error that fails the whole file.
 - SHORT: at most 300 lines. That is the size of a generator. A file of literal rows is
   thousands of lines, is cut off before it ends, and is refused without being run. Write
   catalogues (lists of 30-40 subjects, of names, of companies) and loops that combine them.

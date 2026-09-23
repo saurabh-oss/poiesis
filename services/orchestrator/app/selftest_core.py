@@ -708,6 +708,23 @@ async def test_foundation() -> None:
         static = checks.static_issues(rid, "S1", True, set())
         expect("a screen calling the generic API passes the route check",
                not any("does not serve" in i for i in static), str(static)[:300])
+        (root / "backend" / "app" / "routers" / "metrics.py").write_text(
+            "from fastapi import APIRouter\nfrom sqlalchemy import func\nrouter = APIRouter()\n\n\n"
+            "@router.get('/metrics/dashboard')\ndef dashboard():\n    return {'open': 1}\n", encoding="utf-8")
+        (root / "frontend" / "screens" / "dashboard.js").write_text(
+            "export default { title: 'Dashboard', story: 'S2', async render(root, { api }) {"
+            " root.append(JSON.stringify(await api('/metrics/dashboard'))); } };\n", encoding="utf-8")
+        rewrite = ("from fastapi import APIRouter\nrouter = APIRouter()\n\n\n"
+                   "@router.get('/metrics/weekly')\ndef weekly():\n    return []\n")
+        kept, notes = checks.preserve_routes(rid, {"backend/app/routers/metrics.py": rewrite})
+        merged = kept["backend/app/routers/metrics.py"]
+        expect("a router rewrite keeps the endpoint another screen calls",
+               "/metrics/dashboard" in merged and "/metrics/weekly" in merged and "from sqlalchemy import func" in merged
+               and any("GET /metrics/dashboard" in n for n in notes), str(notes)[:300])
+        kept2, notes2 = checks.preserve_routes(rid, {"backend/app/routers/metrics.py": rewrite,
+                                                     "frontend/screens/dashboard.js": "export default {}"})
+        expect("a route only the rewriting story's own screen called is not forced back",
+               kept2["backend/app/routers/metrics.py"] == rewrite and not notes2, str(notes2))
     finally:
         _drop_runs([rid])
         shutil.rmtree(repo.workspace_path(rid), ignore_errors=True)
