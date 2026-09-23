@@ -33,12 +33,15 @@ visitor can be impressed by within an hour on local models:
 
 1. **Foundation stage** (after scaffold, before any story). The Foundation Developer writes
    `models.py`, `schemas.py` and the `CREATE TABLE`s for every entity in the whole backlog at
-   once. The Data Designer then writes `db/seed.py`, a small generator (catalogues of
-   realistic subjects, names and companies, a seeded RNG, dates spread over the period the
-   brief names, explicit near-duplicate clusters). The platform runs it in the sandbox,
-   checks it (columns exist, NOT NULL columns filled, text varied, the counts the brief asks
-   for), renders it as INSERT statements into a section of `db/init.sql` it owns, and
-   proves the file executes on Postgres. Every screen, and the test database, opens on that data.
+   once. The Data Designer then writes a JSON *spec* for the demonstration data, decoded
+   under a schema built from those tables: catalogues of realistic subjects and bodies,
+   weighted choices, references between tables, look-ups, time windows, near-duplicate
+   clusters. The platform expands it deterministically (`workspace/seedspec.py`), checks
+   the rows (every column exists, NOT NULL filled, text varied, every state present, the
+   counts the brief asks for), renders them into a section of `db/init.sql` it owns, and
+   proves the file executes on Postgres. A story's rewrite of init.sql can never thin
+   them. `POST /api/runs/{id}/reseed` regenerates the data for a run;
+   `POST /api/runs/{id}/deploy?fresh=true` restarts its app on it.
 2. **A generic data API.** `backend/app/routers/resources.py` serves every table without a
    router: list with `?q=`, `?column=value`, `?sort=-column`, paging; read, create, update,
    delete; `GET /api/resources` describes them. A story writes a router only for what that
@@ -47,10 +50,13 @@ visitor can be impressed by within an hour on local models:
    paged tables with keyboard navigation, badges, avatars, relative times, key/value details,
    list-and-detail layouts, forms, bar and time-series charts and toasts, all on the design
    system in `styles.css`. The Developer composes; it does not draw.
-4. **No Tester and no pytest.** A story is implemented, compiled, checked statically, then
-   deployed and opened in a real browser. Two repairs per story, one rework round, every
-   gate but the release auto-approved. The Reviewer is told tests are absent by design and
-   judges what a visitor sees.
+4. **No Tester and no pytest.** A story is implemented, compiled, checked statically (a
+   screen that gives up without an id, a render argument never taken, a router without a
+   router, a stray root route, a call to a path nothing serves), then every GET is answered
+   against a seeded in-memory database before deploy, and the app is opened in a real
+   browser. Three repairs per story, two automatic rework rounds, every gate but the
+   release auto-approved. The Reviewer is told tests are absent by design and judges what
+   a visitor sees.
 
 Switch to `packs/default.yaml` for the full build: Tester, repair loops, regressions.
 
