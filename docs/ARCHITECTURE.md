@@ -92,7 +92,7 @@ isn't ready," or "hold."
 ## The graph
 
 ```
-intake → discovery → vision → backlog → architecture → sprint → build → deploy → review
+intake → discovery → vision → backlog → architecture → sprint → scaffold → foundation → build → deploy → review
                                             ▲                                        │
                                             │                          ┌── rework ◄──┤ (bounded rounds)
                                             │                          ▼             │
@@ -103,6 +103,12 @@ intake → discovery → vision → backlog → architecture → sprint → buil
                                                                        ▼
                                                                      build
 ```
+
+`scaffold` renders a working skeleton without a model call; `foundation` (when the pack
+enables it, as `packs/mvp.yaml` does) then lays the whole data model from every story at once
+and generates the demonstration data through a checked `db/seed.py`, so every story that
+follows builds a screen over tables that exist, hold believable rows, and are already served
+by the generic data API. A rework round returns to `build`, never to `foundation`.
 
 `deploy` starts the increment as its own Compose project on the host — every automated pass
 resets its database to a fresh volume first, since `db/init.sql` only ever runs against an

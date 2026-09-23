@@ -15,6 +15,8 @@ and the schema together.
 | Planner | fast | Backlog, reuse plan | Sprint goal, ranked stories, deferrals | Exceed capacity or violate dependencies |
 | Developer | coding | One story, architecture, workspace tree | Complete files, commit message | Implement anything beyond the acceptance criteria; edit tests |
 | Tester | coding | One story, the implementation | pytest files, criteria coverage map | Weaken an assertion to make a test pass |
+| Foundation Developer | coding | Brief, architect's data model, every story's criteria | models.py, schemas.py and the CREATE TABLEs for the whole product | Invent a column no criterion needs; declare relationships or enums a screen cannot filter |
+| Data Designer | coding | Brief, the tables as written, the contract for db/seed.py | A generator program for the demonstration data, run and checked by the platform | Write rows as literals; number the copies; repeat a sentence; include ids |
 | Reviewer | reasoning | Diff, tests, criteria, reuse plan | Five scored dimensions, findings, verdict | Pass work that fails its criteria |
 | Release Manager | fast | Everything | Version, run command, stakeholder release notes | Use internal component names in the notes |
 

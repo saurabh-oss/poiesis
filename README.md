@@ -24,6 +24,35 @@ The thing that makes Poiesis different from every "prompt to app" tool is the **
 | Compounding memory | Every finished run adds what it built, decided and learned; the next run's Architect and Developer are shown the components, decisions and lessons that apply, by word and by meaning | Neo4j graph + Qdrant vector index |
 | Work tracked where the organisation tracks it | Initiative, epics, stories and sprint in Jira; branch, tag and pull request on the Git remote, as the run goes | `integrations/tracker.py`, `integrations/gitremote.py` |
 | Explainable, measurable | Every model call kept with its prompt and reply; every stage, sandbox run and deploy timed; traces to Jaeger, metrics to Prometheus and Grafana | `telemetry.py`, `/api/runs/{id}/traces`, `/metrics` |
+| A demonstrable MVP in one sitting | Under the `mvp` pack the platform lays the whole data model and generated, believable demonstration data first, serves every table through a generic data API, and has the Developer build only polished screens on a UI kit; no test loop, verification is the real browser | `packs/mvp.yaml`, `foundation` stage, `routers/resources.py`, `frontend/ui.js` |
+
+## MVP mode: screens first
+
+`POIESIS_PACK=packs/mvp.yaml` (the default in `.env`) trades backend rigour for a product a
+visitor can be impressed by within an hour on local models:
+
+1. **Foundation stage** (after scaffold, before any story). The Foundation Developer writes
+   `models.py`, `schemas.py` and the `CREATE TABLE`s for every entity in the whole backlog at
+   once. The Data Designer then writes `db/seed.py`, a small generator (catalogues of
+   realistic subjects, names and companies, a seeded RNG, dates spread over the period the
+   brief names, explicit near-duplicate clusters). The platform runs it in the sandbox,
+   checks it (columns exist, NOT NULL columns filled, text varied, the counts the brief asks
+   for), renders it as INSERT statements into a section of `db/init.sql` it owns, and
+   proves the file executes on Postgres. Every screen, and the test database, opens on that data.
+2. **A generic data API.** `backend/app/routers/resources.py` serves every table without a
+   router: list with `?q=`, `?column=value`, `?sort=-column`, paging; read, create, update,
+   delete; `GET /api/resources` describes them. A story writes a router only for what that
+   cannot do (a computed suggestion, an aggregate, a multi-row action), and its own paths win.
+3. **A UI kit.** `frontend/ui.js` gives every screen headline stats, searchable, sortable,
+   paged tables with keyboard navigation, badges, avatars, relative times, key/value details,
+   list-and-detail layouts, forms, bar and time-series charts and toasts, all on the design
+   system in `styles.css`. The Developer composes; it does not draw.
+4. **No Tester and no pytest.** A story is implemented, compiled, checked statically, then
+   deployed and opened in a real browser. Two repairs per story, one rework round, every
+   gate but the release auto-approved. The Reviewer is told tests are absent by design and
+   judges what a visitor sees.
+
+Switch to `packs/default.yaml` for the full build: Tester, repair loops, regressions.
 
 ## Architecture at a glance
 
