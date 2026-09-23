@@ -4,6 +4,17 @@
 # before any agent writes a line, so the application boots on day one and the
 # Developer's job is to fill named slots rather than invent a topology.
 #
+# The standard topology, the same for every generated application:
+#
+#   frontend (gateway)  the UI, and /api routed to backend, or to data when backend is down
+#   backend  (api)      story endpoints + the generic data API          app.main
+#   data                the generic data API only, no story code        app.data_main
+#   db                  Postgres, seeded from db/init.sql
+#
+# The gateway waits for the database and the data service, not for the api: a
+# story module that breaks the api can no longer keep the whole application from
+# starting. Every service restarts on failure.
+#
 # It contains no host bind mounts on purpose. Poiesis starts it through the
 # Docker socket from inside its own container, where host paths do not exist;
 # everything a service needs is built into its image.
@@ -13,6 +24,7 @@ name: {{project_slug}}
 services:
   db:
     build: ./db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
@@ -27,6 +39,7 @@ services:
 
   backend:
     build: ./backend
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       APP_NAME: "{{project_name}}"
@@ -44,11 +57,35 @@ services:
     expose:
       - "8000"
 
+  data:
+    build: ./backend
+    restart: unless-stopped
+    command: ["uvicorn", "app.data_main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
+      APP_NAME: "{{project_name}}"
+      POIESIS_SERVICE: data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    expose:
+      - "8000"
+
   frontend:
     build: ./frontend
+    restart: unless-stopped
     depends_on:
-      backend:
+      db:
         condition: service_healthy
+      data:
+        condition: service_healthy
+      backend:
+        condition: service_started
     ports:
       # Poiesis sets APP_PORT per deployment so several apps can run at once, and
       # binds to 127.0.0.1 unless told otherwise: this is unauthenticated,

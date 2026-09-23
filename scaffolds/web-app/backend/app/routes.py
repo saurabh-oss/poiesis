@@ -5,6 +5,8 @@ with its own `router`; see routers/examples.py for the shape to copy.
 """
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -19,3 +21,12 @@ def status(db: Session = Depends(get_session)) -> dict:
     """Readiness: proves the API reaches its datastore. The shell's banner calls it."""
     db.execute(text("SELECT 1"))
     return {"database": "connected"}
+
+
+@router.get("/platform/modules")
+def modules() -> dict:
+    """Which story modules loaded. A module that failed to import is left out of the
+    API rather than taking it down; this is where that shows."""
+    from .routers import broken
+
+    return {"service": os.getenv("POIESIS_SERVICE", "api"), "broken": broken}

@@ -249,6 +249,18 @@ def as_row(row: Deployment, title: str = "") -> dict[str, Any]:
 
 # --- lifecycle ----------------------------------------------------------------
 
+async def _gateway_up(run_id: str, entry: str) -> bool:
+    """Is the entry service running and healthy, whatever the others are doing?"""
+    code, out = await _compose(run_id, "ps", "--format", "{{.Service}} {{.State}} {{.Health}}", timeout=60)
+    if code != 0:
+        return False
+    for line in out.splitlines():
+        parts = line.split()
+        if parts and parts[0] == entry:
+            return "running" in parts[1:2] and (len(parts) < 3 or parts[2] in ("healthy", ""))
+    return False
+
+
 async def _probe(run_id: str, service: str, port: int) -> tuple[str | None, str]:
     """Walk the front door from inside the entry container.
 
@@ -321,6 +333,16 @@ async def _deploy(run_id: str, *, fresh: bool = False) -> Outcome:
         )
         if code == 0:
             chosen = port
+            break
+        if not _PORT_TAKEN.search(out) and await _gateway_up(run_id, entry):
+            # The standard topology keeps the gateway and the data service up when
+            # the api service is not: the app is reachable and every table is
+            # served, so it is deployed, degraded, and the browser check says which
+            # screens that costs rather than "the application did not start".
+            chosen = port
+            _, logs = await _compose(run_id, "logs", "backend", "--no-color", "--tail", "40", timeout=60)
+            changes = [*changes, "DEGRADED: the api service is not healthy; the gateway is serving the "
+                                 "data service instead. api logs:\n" + _tail(logs, 25)]
             break
         last = out
         if _PORT_TAKEN.search(out):

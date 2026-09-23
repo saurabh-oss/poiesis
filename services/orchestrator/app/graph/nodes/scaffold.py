@@ -44,6 +44,7 @@ PROTECTED = (
     "conftest.py",
     "backend/Dockerfile",
     "backend/app/main.py",
+    "backend/app/data_main.py",
     "backend/app/db.py",
     "backend/app/routes.py",
     "backend/app/routers/__init__.py",
@@ -66,11 +67,13 @@ PROTECTED = (
 # Platform-owned files every workspace must have. One bootstrapped before a file
 # existed gets it at the start of its next build round, the way deploy upgrades
 # an old compose file, so an in-flight run benefits from a new check.
-PLATFORM_FILES = ("tests/test_platform_endpoints.py", "frontend/ui.js", "backend/app/routers/resources.py")
+PLATFORM_FILES = ("tests/test_platform_endpoints.py", "frontend/ui.js", "backend/app/routers/resources.py",
+                  "backend/app/data_main.py")
 # Platform-owned files stories may not edit, so the platform may rewrite them when
 # the template changes: an in-flight run gets the fixed shell on its next round.
 PLATFORM_SHELL = ("frontend/app.js", "frontend/ui.js", "frontend/styles.css", "frontend/screens/example.js",
-                  "frontend/Dockerfile",
+                  "frontend/Dockerfile", "frontend/nginx.conf", "docker-compose.yml",
+                  "backend/app/routes.py", "tests/test_platform_endpoints.py",
                   "backend/app/routers/__init__.py", "backend/app/routers/resources.py", "tests/conftest.py")
 
 

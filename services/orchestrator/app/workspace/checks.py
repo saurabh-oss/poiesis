@@ -1590,6 +1590,13 @@ for route in app.routes:
         tb = traceback.format_exc()
         lines = [l for l in tb.splitlines() if "site-packages" not in l]
         out.append({"path": route.path, "status": 500, "detail": "\n".join(lines[-14:])[-1800:]})
+try:
+    from app.routers import broken
+except Exception:  # noqa: BLE001 — an older workspace without isolation
+    broken = {}
+for name, err in broken.items():
+    out.append({"path": "(import)", "status": 500, "file": f"backend/app/routers/{name}.py",
+                "detail": f"this router did not load, so none of its endpoints exist: {err}"})
 print("POIESIS_SMOKE_JSON")
 print(json.dumps(out))
 """

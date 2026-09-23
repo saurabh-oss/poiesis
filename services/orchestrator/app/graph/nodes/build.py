@@ -103,7 +103,8 @@ def _findings_for(state: RunState, story_id: str) -> str:
         "\n\nTHE PREVIOUS INCREMENT WAS REJECTED. These findings, from the Reviewer and "
         f"from the platform's check of the running app, are binding:\n{lines}\n"
         f"Reviewer's rationale: {str(review.get('verdict_rationale', ''))[:600]}\n"
-        "Return the corrected implementation. Do not modify tests."
+        "Return the corrected implementation. Do not modify tests. Fix every finding above "
+        "in this one pass: there is no further round before release."
     )
 
 
@@ -616,6 +617,11 @@ async def _repair_once(
         + failures.coach(failed.stdout)
         + _failing_test_source(run_id, failed.stdout, scaled(6000))
         + extra
+        + ("\nTHIS IS YOUR ONLY REPAIR. Nothing checks your work again before it ships, so fix "
+           "EVERY problem listed above in this one reply, not just the first: go through the list, "
+           "and for each one change the file it names. Where a screen and its router disagree "
+           "about a path or a field name, change the screen to match what the API serves.\n"
+           if int(pack().get("build", {}).get("max_repair_attempts", 3)) <= 1 else "")
         + "\nReturn the corrected implementation files only, each complete. "
         "Do not modify the tests."
     )

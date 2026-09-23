@@ -28,3 +28,10 @@ GET_ROUTES = sorted({
 def test_get_endpoint_does_not_crash(client, path):
     response = client.get(path)
     assert response.status_code < 500, f"GET {path} answered {response.status_code}: {response.text[:300]}"
+
+
+def test_every_router_module_loads():
+    """A router that fails to import is left out of the running API; here it fails loudly."""
+    from app.routers import broken
+
+    assert not broken, "router module(s) did not load: " + "; ".join(f"{k}: {v}" for k, v in broken.items())

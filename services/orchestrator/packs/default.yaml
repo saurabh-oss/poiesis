@@ -55,6 +55,7 @@ archetypes:
     services:
       - { name: frontend, role: ui,        port: 80,   healthcheck: /        }
       - { name: backend,  role: api,       port: 8000, healthcheck: /health  }
+      - { name: data,     role: data-api,  port: 8000, healthcheck: /health  }
       - { name: db,       role: datastore                                    }
     definition_of_deployable:
       - docker compose up -d brings every service to healthy

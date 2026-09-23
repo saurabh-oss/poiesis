@@ -52,11 +52,35 @@ def load_pdf(data: bytes) -> list[Chunk]:
 
 
 def load_docx(data: bytes) -> list[Chunk]:
+    """Paragraphs and tables, in document order.
+
+    A business requirements document keeps its requirements, stakeholders and
+    data volumes in tables; reading paragraphs alone dropped all of them.
+    """
     import docx
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
 
     doc = docx.Document(io.BytesIO(data))
-    text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
-    return _split(text, "")
+    parts: list[str] = []
+    for child in doc.element.body.iterchildren():
+        tag = child.tag.rsplit("}", 1)[-1]
+        if tag == "p":
+            text = Paragraph(child, doc).text.strip()
+            if text:
+                parts.append(text)
+        elif tag == "tbl":
+            rows = []
+            for row in Table(child, doc).rows:
+                cells = []
+                for cell in row.cells:
+                    value = " ".join(cell.text.split())
+                    if not cells or cells[-1] != value:  # merged cells repeat
+                        cells.append(value)
+                rows.append(" | ".join(cells))
+            if rows:
+                parts.append("\n".join(rows))
+    return _split("\n\n".join(parts), "")
 
 
 async def load_url(url: str) -> list[Chunk]:
