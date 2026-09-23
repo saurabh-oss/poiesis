@@ -158,6 +158,7 @@ def rows_to_sql(rows_by_table: dict[str, list[dict[str, Any]]], tables: dict[str
 _ARRIVAL = re.compile(r"^(created|arriv|opened|submitted|received|started|reported|logged)|^date$|_date$", re.I)
 
 
+_EVENT_TABLE = re.compile(r"(history|log|audit|entry|entries|event|events|transaction|movement)s?$", re.I)
 _VOLUME_ROW = re.compile(r"(?m)^\s*([A-Za-z][A-Za-z ]{2,30}?)(?:\s*\([^)|]*\))?\s*\|\s*(?:at least|minimum|min\.?|>=|≥)\s*(\d+)", re.I)
 _DATEISH = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
@@ -200,7 +201,10 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
                                           "give every state a believable share so each screen has rows to show")
                     elif len(distinct) == 1 and key.lower() in ("status", "state", "stage", "priority", "severity"):
                         issues.append(f"{table}.{key}: every row is '{strings[0]}' — represent every allowed value")
-                if key.lower().endswith("_id") and key.lower() in spec and not spec[key.lower()]:
+                # Only a live holder reference: a history, log or audit row always names its
+                # employee, and a seat or ticket without one is the state a flow acts on.
+                if (key.lower().endswith("_id") and key.lower() in spec and not spec[key.lower()]
+                        and not _EVENT_TABLE.search(str(table))):
                     empty = sum(1 for v in values if v is None)
                     if empty == 0:
                         issues.append(f"{table}.{key} is optional but set on every row — leave it None on a real "

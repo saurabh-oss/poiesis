@@ -738,6 +738,10 @@ async def test_foundation() -> None:
                     "status": {"kind": "time", "after": "missing_col", "days_back": 5}}}]}, spec_tables)
     expect("days_min/days_max offset a date, and an anchor nothing fills falls back to the window",
            dated["ticket"][0]["triaged_at"].startswith("2028-01-01") and dated["ticket"][0]["status"] is not None)
+    hist = {"assignment_history": [{"employee_id": 1 + i % 5, "note": f"Checked out laptop number {i} to staff"} for i in range(30)]}
+    expect("a history table's reference is not required to be empty on some rows",
+           not any("assignment_history.employee_id" in i for i in seeding.quality_issues(
+               hist, [], {"assignment_history": {"employee_id": False, "note": False}})))
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))
