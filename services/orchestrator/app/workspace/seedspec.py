@@ -258,8 +258,32 @@ class _Expander:
             for col in pending:
                 self.issues.append(f"{name}.{col}: its spec depends on a column that has no value")
                 row[col] = None
+            self._stamp(row, spec_cols)
             out.append(row)
         self.rows[name] = out
+
+    @staticmethod
+    def _stamp(row: dict[str, Any], spec_cols: dict[str, bool]) -> None:
+        """A row's created_at is when it came in, not when the database was loaded.
+
+        A spec that spread `arrival_time` over 30 days but left `created_at` to
+        its DEFAULT now() gave a dashboard one bar: every ticket "created" the
+        second the app started. The bookkeeping columns follow the row's own
+        earliest and latest timestamps unless the spec set them.
+        """
+        stamps = []
+        for k, v in row.items():
+            if isinstance(v, str) and re.match(r"^\d{4}-\d{2}-\d{2}T", v):
+                stamps.append(v)
+        if not stamps:
+            return
+        first, last = min(stamps), max(stamps)
+        for col in ("created_at", "created", "inserted_at", "submitted_at"):
+            if col in spec_cols and row.get(col) is None:
+                row[col] = first
+        for col in ("updated_at", "modified_at", "last_updated"):
+            if col in spec_cols and row.get(col) is None:
+                row[col] = last
 
     def _value(self, table: str, col: str, spec: dict[str, Any], row: dict[str, Any],
                unique_pos: dict[str, int], seq_pos: dict[str, int], row_no: int) -> tuple[bool, Any]:
