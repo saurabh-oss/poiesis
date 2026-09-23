@@ -18,6 +18,7 @@ import re
 from typing import Any
 
 from .checks import _AT_LEAST, _NOT_DATA, _table_columns
+from .interface import _INSERT_HEAD, _LEADING_NOISE
 from .repo import workspace_path
 from .runner import ExecResult, run_in_sandbox
 
@@ -189,10 +190,52 @@ def strip_seed_section(sql: str) -> str:
 
 
 def write_seed_section(run_id: str, seed_sql: str) -> None:
-    """Replace the platform's section of db/init.sql with these statements."""
-    path = workspace_path(run_id) / "db" / "init.sql"
+    """Replace the platform's section of db/init.sql with these statements, and keep them."""
+    root = workspace_path(run_id)
+    path = root / "db" / "init.sql"
     base = strip_seed_section(path.read_text(encoding="utf-8", errors="replace")) if path.is_file() else ""
     path.write_text(base.rstrip() + "\n\n" + SEED_MARKER + "\n" + seed_sql, encoding="utf-8", newline="\n")
+    keep = root / SEED_SQL
+    keep.parent.mkdir(exist_ok=True)
+    if seed_sql.strip():
+        keep.write_text(seed_sql, encoding="utf-8", newline="\n")
+    elif keep.exists():
+        keep.unlink()
+
+
+def kept_seed(run_id: str) -> str:
+    """The platform's seed statements for this workspace, or '' when there are none."""
+    keep = workspace_path(run_id) / SEED_SQL
+    return keep.read_text(encoding="utf-8", errors="replace") if keep.is_file() else ""
+
+
+def reapply_seed(run_id: str, proposed_sql: str) -> tuple[str, list[str]]:
+    """A story's init.sql with the platform's seed section put back, whole.
+
+    A story once returned init.sql with five tickets of its own where the
+    foundation had seeded 150: its rewrite kept the tables and replaced the
+    data. The seeded tables' rows are the platform's; a story's own INSERTs
+    into them are dropped and the kept section appended. Returns the SQL and
+    notes on what was dropped.
+    """
+    seed = kept_seed(run_id)
+    if not seed.strip():
+        return proposed_sql, []
+    from .interface import _inserts_by_table, _sql_statements
+    seeded = set(_inserts_by_table(seed))
+    body = strip_seed_section(proposed_sql)
+    kept: list[str] = []
+    dropped: dict[str, int] = {}
+    for statement in _sql_statements(body):
+        head = _INSERT_HEAD.match(statement[_LEADING_NOISE.match(statement).end():])
+        table = head.group(1).lower() if head else None
+        if table in seeded:
+            dropped[table] = dropped.get(table, 0) + 1
+            continue
+        kept.append(statement)
+    notes = [f"db/init.sql: its {n} INSERT(s) into `{t}` were dropped; that table's rows are the platform's "
+             "demonstration data, which was put back whole" for t, n in sorted(dropped.items())]
+    return "\n".join(kept).rstrip() + "\n\n" + SEED_MARKER + "\n" + seed, notes
 
 
 def tables_in(run_id: str) -> dict[str, dict[str, bool]]:
@@ -203,6 +246,9 @@ def tables_in(run_id: str) -> dict[str, dict[str, bool]]:
 
 
 SEED_OUTPUT = ".poiesis/seed.json"
+# The rendered seed statements, kept beside the workspace so a story's rewrite
+# of init.sql can never thin them: they are put back after every write.
+SEED_SQL = ".poiesis/seed.sql"
 # The rows go to a file, not stdout: the sandbox keeps only the tail of stdout,
 # and 150 tickets of prose are longer than that.
 _RUNNER = (

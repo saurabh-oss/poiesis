@@ -25,7 +25,10 @@ Python module and file, kebab-case in URLs. A story about leave requests writes
 | Add a dependency | `backend/requirements.txt` |
 
 `schemas.py`, `models.py` and `init.sql` are shared by every story. Return them complete,
-with every class and table already in them kept. Dropping one breaks another story.
+with every class and table already in them kept. Dropping one breaks another story. Return
+them **only when your story needs a new table or column**; otherwise leave them out of your
+reply. Never write INSERT rows for a table the platform already seeds: those rows are
+put back whole and yours are discarded.
 
 If an earlier story already created the router or screen for the same resource and yours
 extends it, return that file complete with your additions and add your story id to its

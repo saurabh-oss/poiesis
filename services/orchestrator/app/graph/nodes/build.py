@@ -327,6 +327,10 @@ async def _apply(
             agent="developer", stage="build", level="warn", data={"refused": refused},
         )
     proposed, restored = preserve_shared(run_id, proposed)
+    if "db/init.sql" in proposed:
+        from ...workspace.seeding import reapply_seed
+        proposed["db/init.sql"], dropped_seed = reapply_seed(run_id, str(proposed["db/init.sql"]))
+        restored = [r for r in restored if not (r.startswith("db/init.sql:") and "seed" in r)] + dropped_seed
     if restored:
         await emit(
             run_id, f"{sid}: the rewrite dropped definitions other code still uses; kept "
