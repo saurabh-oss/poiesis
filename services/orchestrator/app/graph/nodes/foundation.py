@@ -25,18 +25,14 @@ from ...workspace import repo
 from ...workspace.checks import validate_init_sql
 from ...workspace.interface import excerpt, EDITABLE
 from ...workspace.seeding import (
-    SEED_CONTRACT,
-    SEED_SCRIPT,
     quality_issues,
     rows_to_sql,
-    run_seed_script,
-    size_issue,
-    syntax_issue,
     strip_seed_section,
     summary,
     tables_in,
     write_seed_section,
 )
+from ...workspace.seedspec import SPEC_CONTRACT, SPEC_FILE, expand_spec, spec_schema
 from ..memo import remember
 from ..state import RunState
 from ..store import save_artifact, set_stage
@@ -95,8 +91,8 @@ def _seed_prompt(state: RunState, run_id: str) -> str:
           "to do (a queue needs untriaged rows, an assign flow needs unassigned rows, a status board needs "
           "rows in every status):\n" + screens
         + f"\n\nTHE TABLES (db/init.sql, exactly as they are — every column name is what you use as a key):\n{sql[:14000]}\n\n"
-        + SEED_CONTRACT
-        + f"\nWrite {SEED_SCRIPT}."
+        + SPEC_CONTRACT
+        + "\nWrite the spec."
     )
 
 
@@ -109,6 +105,7 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
     tables = tables_in(run_id)
     base_prompt = _seed_prompt(state, run_id) + extra_feedback
     criteria = _criteria(state) + [str(state.get("brief") or "")[:6000]]
+    schema = spec_schema(sorted(t for t in tables if t != "example"))
     feedback = ""
     rows: dict[str, list[dict[str, Any]]] | None = None
     seed_sql = ""
@@ -117,45 +114,36 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
     for attempt in range(SEED_REPAIRS + 1):
         try:
             reply = await remember(run_id, f"{key_prefix}:{attempt}", lambda: DATA_DESIGNER.json(
-                base_prompt + feedback, max_tokens=9000))
+                base_prompt + feedback, max_tokens=12000, schema=schema))
         except (ReplyTruncated, UnparseableReply) as exc:
-            # A reply that does not fit is the rows written out as literals.
-            reply = {"files": {}, "reasoning": ""}
+            reply = {"tables": [], "reasoning": ""}
             problems = [f"your reply could not be used ({type(exc).__name__}): it was too long to finish. "
-                        f"{SEED_SCRIPT} must be a generator of at most 300 lines, never the rows as literals"]
+                        "Keep records to 30-40 per large table and bodies to two sentences"]
             await emit(run_id, f"Demonstration data, attempt {attempt + 1}: " + problems[0][:200],
                        agent="data_designer", stage=stage, level="warn")
-            feedback = "\n\nYOUR PREVIOUS REPLY WAS CUT OFF: " + problems[0] + "\nReturn a short generator."
+            feedback = "\n\nYOUR PREVIOUS REPLY WAS CUT OFF: " + problems[0] + "\nReturn a shorter spec."
             continue
-        script = (reply.get("files") or {}).get(SEED_SCRIPT)
-        rows = None
-        if not isinstance(script, str) or not script.strip():
-            problems = [f"the reply contained no {SEED_SCRIPT}"]
-        elif size_issue(script):
-            problems = [size_issue(script)]
-        elif syntax_issue(script):
-            problems = [syntax_issue(script)]
-        else:
-            repo.write_files(run_id, {SEED_SCRIPT: script})
-            rows, error = await run_seed_script(run_id)
-            if rows is None:
-                problems = [error]
-            else:
-                seed_sql, problems = rows_to_sql(rows, tables)
-                problems += quality_issues(rows, criteria, tables)
-                if not problems:
-                    write_seed_section(run_id, seed_sql)
-                    check = await validate_init_sql(run_id)
-                    if not check.ok:
-                        problems = ["the generated INSERT statements were rejected by Postgres: "
-                                    + check.stdout.strip()[-600:]]
+        rows, problems = expand_spec(reply, tables)
+        if rows and not problems:
+            import json as _json
+            repo.write_files(run_id, {SPEC_FILE: _json.dumps(reply, indent=1)})
+            seed_sql, problems = rows_to_sql(rows, tables)
+            problems += quality_issues(rows, criteria, tables)
+            if not problems:
+                write_seed_section(run_id, seed_sql)
+                check = await validate_init_sql(run_id)
+                if not check.ok:
+                    problems = ["the generated INSERT statements were rejected by Postgres: "
+                                + check.stdout.strip()[-600:]]
+        elif not rows and not problems:
+            problems = ["the spec produced no rows"]
         if not problems:
             break
         await emit(run_id, f"Demonstration data, attempt {attempt + 1}: " + "; ".join(p[:160] for p in problems[:4]),
                    agent="data_designer", stage=stage, level="warn", data={"problems": problems})
-        feedback = ("\n\nYOUR PREVIOUS seed.py WAS RUN. It cannot be used as it is:\n"
+        feedback = ("\n\nYOUR PREVIOUS SPEC WAS EXPANDED. It cannot be used as it is:\n"
                     + "\n".join(f"- {p}" for p in problems[:12])
-                    + "\nReturn the whole corrected file.")
+                    + "\nReturn the whole corrected spec.")
     else:
         # The seed never met the bar; whatever the last run produced is still better than nothing.
         if rows and seed_sql:

@@ -674,6 +674,49 @@ async def test_foundation() -> None:
     expect("an apostrophe in a single-quoted string is named with its line and the fix",
            "line 2" in seeding.syntax_issue(bad) and "double" in seeding.syntax_issue(bad), seeding.syntax_issue(bad))
     expect("a script that parses has no syntax issue", seeding.syntax_issue("def rows():\n    return {}\n") == "")
+    from .workspace import seedspec
+    spec = {"tables": [
+        {"table": "agent", "count": 5, "columns": {"name": {"kind": "person_name"}}},
+        {"table": "customer", "count": 25, "columns": {"name": {"kind": "company_name"},
+                                                       "plan": {"kind": "choices", "choices": {"Free": 5, "Business": 3, "Enterprise": 2}}}},
+        {"table": "ticket", "count": 150,
+         "records": [{"subject": f"Subject number {i} about a real problem", "body": f"Body {i} with two sentences. Really.",
+                      "product_line": ["Billing", "Mobile App", "Integrations"][i % 3]} for i in range(36)],
+         "columns": {"customer_id": {"kind": "ref", "table": "customer"},
+                     "customer_name": {"kind": "lookup", "via": "customer_id", "field": "name"},
+                     "status": {"kind": "choices", "choices": {"open": 4, "triaged": 5, "resolved": 3}},
+                     "priority": {"kind": "choices", "choices": {"P1": 1, "P2": 3, "P3": 5, "P4": 2}},
+                     "arrival_time": {"kind": "time", "days_back": 30},
+                     "triaged_at": {"kind": "time", "after": "arrival_time", "hours_min": 0.2, "hours_max": 8,
+                                    "only_when": {"column": "status", "in": ["triaged", "resolved"]}},
+                     "assignee_id": {"kind": "ref", "table": "agent", "only_when": {"column": "status", "in": ["triaged", "resolved"]}},
+                     "ref": {"kind": "sequence", "prefix": "TD-", "start": 1000}}},
+    ]}
+    spec_tables = {"agent": {"id": False, "name": True},
+                   "customer": {"id": False, "name": True, "plan": True},
+                   "ticket": {"id": False, "subject": True, "body": True, "product_line": True, "customer_id": True,
+                              "customer_name": True, "status": False, "priority": True, "arrival_time": True,
+                              "triaged_at": False, "assignee_id": False, "ref": False}}
+    rows, issues = seedspec.expand_spec(spec, spec_tables)
+    expect("a spec expands into the requested rows", not issues and {t: len(r) for t, r in rows.items()} ==
+           {"agent": 5, "customer": 25, "ticket": 150}, str(issues)[:300])
+    t = rows.get("ticket") or [{}]
+    expect("records are reused with generated columns and look-ups resolve",
+           len({x["subject"] for x in t}) == 36 and all(x["customer_name"] == rows["customer"][x["customer_id"] - 1]["name"] for x in t))
+    expect("only_when leaves untriaged tickets unassigned",
+           all((x["assignee_id"] is None and x["triaged_at"] is None) for x in t if x["status"] == "open")
+           and any(x["assignee_id"] is not None for x in t if x["status"] != "open"))
+    expect("a timestamp after another comes after it",
+           all(x["triaged_at"] > x["arrival_time"] for x in t if x["triaged_at"]))
+    expect("a sequence counts up", t[0]["ref"] == "TD-1000" and t[1]["ref"] == "TD-1001")
+    expect("the expanded rows pass the seed quality checks",
+           seeding.quality_issues(rows, ["at least 150 tickets", "about 25 named customers"], spec_tables) == [],
+           str(seeding.quality_issues(rows, ["at least 150 tickets"], spec_tables))[:300])
+    _, bad_issues = seedspec.expand_spec({"tables": [{"table": "ticket", "count": 3, "columns": {"colour": {"kind": "const", "value": 1}}}]}, spec_tables)
+    expect("an unknown column and an uncovered NOT NULL column are reported",
+           any("colour" in i for i in bad_issues) and any("subject" in i and "NOT NULL" in i for i in bad_issues), str(bad_issues)[:300])
+    expect("the reply schema constrains the table names and kinds",
+           seedspec.spec_schema(["ticket"])["properties"]["tables"]["items"]["properties"]["table"]["enum"] == ["ticket"])
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

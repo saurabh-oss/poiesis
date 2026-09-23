@@ -208,7 +208,9 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
             if not _texty(values):
                 continue
             distinct = len({str(v).strip().lower() for v in values})
-            if distinct < max(6, len(values) * 0.35):
+            # Thirty distinct subjects reused over 150 rows is what a catalogue produces
+            # and what a real queue looks like; six copies of six titles is not.
+            if distinct < max(6, min(30, len(values) * 0.35)):
                 issues.append(f"{table}.{key}: only {distinct} distinct values across {len(values)} rows — "
                               "write a catalogue of 30+ distinct, realistic entries and vary the wording; "
                               "only deliberate near-duplicate clusters should share a subject")
