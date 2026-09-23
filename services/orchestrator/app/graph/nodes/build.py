@@ -26,6 +26,8 @@ from ...llm import ReplyTruncated, UnparseableReply, scaled
 from ...reuse.retriever import render_for_prompt, render_lessons
 from ...workspace import failures, repo
 from ...workspace.checks import (
+    api_smoke,
+    smoke_failures_by_file,
     heal_init_sql,
     heal_screens,
     mount_bare_routers,
@@ -870,6 +872,57 @@ async def _regressions(
                    data={"output": full.stdout[-3000:]})
 
 
+async def _smoke_round(
+    run_id: str, state: RunState, rnd: int, timeout: int, results: list[dict[str, Any]], require_screen: bool,
+) -> None:
+    """Every GET answered before deploy; a 500 goes back to its story for one repair.
+
+    MVP mode writes no tests, so a server error in an endpoint nobody has called
+    would otherwise be found by the browser after deploy — a whole round late.
+    """
+    owners = {p: r for r in results if r.get("status") == "green" for p in r.get("files") or []}
+    for round_no in range(2):
+        async def _run() -> dict[str, Any]:
+            failures, error = await api_smoke(run_id, timeout)
+            return {"failures": failures, "error": error}
+        smoke = await remember(run_id, f"smoke:r{rnd}:i{round_no}", _run)
+        if smoke["error"]:
+            await emit(run_id, "API smoke check could not run: " + smoke["error"][:300],
+                       agent="governance", stage="build", level="warn", data=smoke)
+            return
+        if not smoke["failures"]:
+            await emit(run_id, "API smoke check: every GET answers", agent="governance", stage="build")
+            return
+        by_file = smoke_failures_by_file(run_id, smoke["failures"])
+        await emit(run_id, f"API smoke check: {len(smoke['failures'])} GET(s) answer 500 — "
+                           + ", ".join(f["path"] for f in smoke["failures"][:6]),
+                   agent="governance", stage="build", level="warn", data={"failures": smoke["failures"]})
+        if round_no == 1:
+            for file, fails in by_file.items():
+                r = owners.get(file)
+                if r and r.get("status") == "green":
+                    r["status"] = "red"
+                    r["reason"] = "its endpoint answers 500: " + "; ".join(f["path"] for f in fails)
+                    await emit(run_id, f"{r['story_id']}: still answers 500 on {', '.join(f['path'] for f in fails)} — marked red",
+                               agent="tester", stage="build", level="error")
+            return
+        for file, fails in by_file.items():
+            r = owners.get(file)
+            if not r:
+                continue
+            story = _story(state, r["story_id"])
+            text = ("=== API SMOKE: these GET endpoints raise a server error against a seeded database ===\n"
+                    + "\n".join(f"GET {f['path']} -> {f['status']}\n{f.get('detail', '')}" for f in fails))
+            await emit(run_id, f"{story['id']}: its endpoint answers 500 — one repair",
+                       agent="developer", stage="build", level="warn", data={"stdout": text[:3000]})
+            ok, _, fixed = await _repair_once(
+                run_id, state, story, ExecResult(1, text, "", False),
+                f"smoke:{story['id']}:r{rnd}", "repair after the API smoke check", "")
+            if ok:
+                for p in fixed:
+                    owners.setdefault(p, r)
+
+
 async def build(state: RunState) -> RunState:
     run_id = state["run_id"]
     await set_stage(run_id, "build")
@@ -1104,6 +1157,8 @@ async def build(state: RunState) -> RunState:
         if not exec_result.ok and decision.get("decision") == "abort":
             break
 
+    if _mvp():
+        await _smoke_round(run_id, state, rnd, timeout, results, require_screen)
     await _regressions(run_id, rnd, timeout, results)
     regenerate_registry(run_id)
     repo.commit(run_id, "chore: refresh the screen registry")

@@ -755,6 +755,29 @@ async def test_foundation() -> None:
         static = checks.static_issues(rid, "S1", True, set())
         expect("a screen calling the generic API passes the route check",
                not any("does not serve" in i for i in static), str(static)[:300])
+        (root / "frontend" / "screens" / "ticket_detail.js").write_text(
+            "export default { title: 'Ticket', story: 'S1', async render(root, { api, h, params, ui }) {"
+            " const id = params[0]; if (!id) { root.append(ui.empty('No ticket selected')); return; }"
+            " const t = await api(`/tickets/${id}`); root.append(h('p', {}, t.subject)); } };\n", encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, set())
+        expect("a screen that gives up without an id is caught before deploy",
+               any("ticket_detail.js" in i and "opened without an id" in i for i in static), str(static)[:300])
+        (root / "frontend" / "screens" / "ticket_detail.js").write_text(
+            "export default { title: 'Ticket', story: 'S1', async render(root, { api, h, params, ui }) {"
+            " const id = params[0]; if (!id) { const rows = await api('/tickets'); root.append(ui.table({ rows, columns: [] })); return; }"
+            " const t = await api(`/tickets/${id}`); root.append(h('p', {}, t.subject)); } };\n", encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, set())
+        expect("one that shows the list instead is fine",
+               not any("opened without an id" in i for i in static), str(static)[:300])
+        (root / "frontend" / "screens" / "status.js").write_text(
+            "export default { title: 'Status', story: 'S1', async render(root, { api, h, ui }) {"
+            " const id = params[0]; const rows = await api('/incidents'); root.append(ui.table({ rows, columns: [] }));"
+            " if (id) navigate('#/x'); } };\n", encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, set())
+        expect("a screen using params and navigate without receiving them is caught",
+               any("status.js" in i and "`params`" in i and "`navigate`" in i for i in static), str(static)[:300])
+        expect("the smoke failures map to the router that serves the path",
+               list(checks.smoke_failures_by_file(rid, [{"path": "/api/tickets", "status": 500}])) == ["backend/app/routers/resources.py"])
         (root / "backend" / "app" / "routers" / "metrics.py").write_text(
             "from fastapi import APIRouter\nfrom sqlalchemy import func\nrouter = APIRouter()\n\n\n"
             "@router.get('/metrics/dashboard')\ndef dashboard():\n    return {'open': 1}\n", encoding="utf-8")

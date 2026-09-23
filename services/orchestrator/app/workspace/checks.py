@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import json
 import re
 from pathlib import Path
 
@@ -162,6 +163,57 @@ def _normalise(path: str) -> str:
     if not re.match(r"^/api(/|$)", path):
         path = "/api" + path
     return path.rstrip("/") or "/api"
+
+
+# A screen that needs an id and gives up without one: `const id = params[0]; if (!id) { ...; return; }`
+# before any api() call. The navigation opens every screen without parameters.
+_PARAM_ID = re.compile(r"\bparams\s*(?:\[\s*0\s*\]|\?\.\[\s*0\s*\])|\bparams\s*\)|\[\s*\w+\s*\]\s*=\s*params")
+_EARLY_RETURN = re.compile(r"if\s*\(\s*!\s*[\w.]+\s*\)\s*\{[^{}]*?\breturn\b", re.S)
+
+
+def _idless_issue(rel: str, code: str) -> str:
+    """Why a screen would show nothing when opened from the navigation, or ''."""
+    if not _PARAM_ID.search(code):
+        return ""
+    m = _EARLY_RETURN.search(code)
+    if not m:
+        return ""
+    before = code[:m.start()]
+    if "api(" in before:
+        return ""  # it loads something first; the guard is for a later step
+    return (f"{rel}: gives up when opened without an id (`{m.group(0)[:60].strip()}…`), and the navigation "
+            "opens every screen without one — so a visitor sees only that message. When `params` is empty, "
+            "fetch the list (`await api(\"/tickets\")`) and show it as a `ui.table` whose `onRow` navigates to "
+            "this screen with the row's id; show the detail once an id is present.")
+
+
+_RENDER_ARGS = re.compile(r"\brender\s*\(\s*\w+\s*,\s*\{([^}]*)\}")
+_RENDER_GIVES = ("api", "h", "navigate", "params", "actions", "ui")
+
+
+def _missing_render_args(rel: str, code: str) -> str:
+    """A name the shell hands render() that the screen uses but did not take.
+
+    `const incidentId = params[0]` with `render(root, { api, h, ui })` is a
+    ReferenceError the moment the screen opens; it was found in the browser
+    after deploy, a whole round late.
+    """
+    m = _RENDER_ARGS.search(code)
+    if not m:
+        return ""
+    taken = {a.split(":")[0].strip() for a in m.group(1).split(",") if a.strip()}
+    body = code[m.end():]
+    missing = []
+    for name in _RENDER_GIVES:
+        if name in taken:
+            continue
+        if re.search(rf"(?<![\w.$]){name}\b(?!\s*[:=])", body) and not re.search(rf"\b(?:const|let|var)\s+{name}\b", body):
+            missing.append(name)
+    if not missing:
+        return ""
+    return (f"{rel}: uses {', '.join(f'`{n}`' for n in missing)} but render() does not receive it — "
+            "a ReferenceError the moment the screen opens. Take everything from the shell: "
+            "`async render(root, { api, h, navigate, params, actions, ui })`.")
 
 
 _RENDER = re.compile(r"\brender\s*\(")
@@ -321,6 +373,12 @@ def static_issues(
             if hit:
                 issues.append(f"{rel}: " + message.format(hit.group(1) if hit.groups() else ""))
         issues += _screen_shell_issues(rel, code)
+        idless = _idless_issue(rel, code)
+        if idless:
+            issues.append(idless)
+        unreceived = _missing_render_args(rel, code)
+        if unreceived:
+            issues.append(unreceived)
         for call in _API_CALL.finditer(code):
             method = (call.group(2) or "").upper()
             called = _normalise(call.group(4))
@@ -1408,6 +1466,89 @@ async def platform_checks(
 
     body = "\n\n".join(f"- {i}" for i in issues) if issues else node_out
     return ExecResult(0 if not issues else 1, HEADER + body, "", False)
+
+
+# --- the API answered, before deploy --------------------------------------------------------
+
+SMOKE_SCRIPT = r"""
+import json, re, sys, traceback
+sys.path.insert(0, "backend"); sys.path.insert(0, ".")
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from app import models  # noqa: F401
+from app.db import Base, get_session
+from app.main import app
+try:
+    from tests.conftest import seed_from_init_sql
+except Exception:  # noqa: BLE001
+    seed_from_init_sql = None
+engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+Base.metadata.create_all(engine)
+if seed_from_init_sql:
+    seed_from_init_sql(engine)
+S = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+app.dependency_overrides[get_session] = lambda: S()
+from fastapi.routing import APIRoute
+from fastapi.testclient import TestClient
+client = TestClient(app, raise_server_exceptions=True)
+out = []
+for route in app.routes:
+    if not isinstance(route, APIRoute) or "GET" not in route.methods or not route.path.startswith("/api/"):
+        continue
+    path = re.sub(r"\{[^}]+\}", "1", route.path)
+    try:
+        r = client.get(path)
+        out.append({"path": route.path, "status": r.status_code, "detail": r.text[:400] if r.status_code >= 500 else ""})
+    except Exception:  # noqa: BLE001 — the traceback is the finding
+        tb = traceback.format_exc()
+        lines = [l for l in tb.splitlines() if "site-packages" not in l]
+        out.append({"path": route.path, "status": 500, "detail": "\n".join(lines[-14:])[-1800:]})
+print("POIESIS_SMOKE_JSON")
+print(json.dumps(out))
+"""
+
+SMOKE_COMMAND = (
+    "if [ -f backend/requirements.txt ]; then "
+    "pip install --quiet --disable-pip-version-check --root-user-action=ignore -r backend/requirements.txt; fi; "
+    "pip install --quiet --disable-pip-version-check --root-user-action=ignore pytest httpx; "
+    "python .poiesis/api_smoke.py"
+)
+
+
+async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
+    """GET every route against a seeded in-memory database. Returns (failures, error).
+
+    A workload endpoint once answered 500 to the first real request because of a
+    SQLAlchemy call that does not exist; no test had called it, and the browser
+    found it after deploy. This finds it before, in the sandbox.
+    """
+    root = workspace_path(run_id)
+    tools = root / ".poiesis"
+    tools.mkdir(exist_ok=True)
+    (tools / "api_smoke.py").write_text(SMOKE_SCRIPT, encoding="utf-8", newline="\n")
+    result = await run_in_sandbox(run_id, SMOKE_COMMAND, timeout=timeout, network=True)
+    marker = "POIESIS_SMOKE_JSON\n"
+    if marker not in result.stdout:
+        err = (result.stderr or result.stdout).strip()
+        lines = [l for l in err.splitlines() if l.strip() and "site-packages" not in l][-16:]
+        return [], "the API could not be started for the smoke check:\n" + "\n".join(lines)
+    try:
+        rows = json.loads(result.stdout.split(marker, 1)[1])
+    except json.JSONDecodeError:
+        return [], "the smoke check produced unreadable output"
+    return [r for r in rows if int(r.get("status", 0)) >= 500], ""
+
+
+def smoke_failures_by_file(run_id: str, failures: list[dict]) -> dict[str, list[dict]]:
+    """Which router file serves each failing path."""
+    routes = [(r["method"], _route_pattern(r["path"]), r["file"]) for r in declared_routes(run_id)]
+    out: dict[str, list[dict]] = {}
+    for f in failures:
+        path = _normalise(str(f.get("path", "")))
+        owner = next((file for m, p, file in routes if m == "GET" and p.match(path)), "")
+        out.setdefault(owner, []).append(f)
+    return out
 
 
 # --- keeping shared files whole ---------------------------------------------------------
