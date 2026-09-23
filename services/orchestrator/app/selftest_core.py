@@ -742,6 +742,11 @@ async def test_foundation() -> None:
     expect("a history table's reference is not required to be empty on some rows",
            not any("assignment_history.employee_id" in i for i in seeding.quality_issues(
                hist, [], {"assignment_history": {"employee_id": False, "note": False}})))
+    models, estate_issues, _ = seedspec.expand_spec({"tables": [{"table": "agent", "count": 320,
+        "records": [{"name": m} for m in ["Dell Latitude 5440", "ThinkPad T14", "MacBook Pro 14", "iPhone 15"]],
+        "columns": {}}]}, spec_tables)
+    expect("a short catalogue of models reused over many rows is not called copies",
+           not any("copies" in i for i in estate_issues) and len(models["agent"]) == 320, str(estate_issues)[:200])
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

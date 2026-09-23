@@ -229,9 +229,13 @@ class _Expander:
             prose = str(cspec.get("kind")) in ("catalogue", "text") and len(cspec.get("values") or []) >= 12
             if not prose:
                 self.derived.add((name, col))
-        if count >= 60 and len(records) < 30:
-            self.issues.append(f"{name}: {count} rows over {len(records)} record(s) read as copies — write at "
-                               "least 30 distinct records for it, each with its own wording")
+        # Prose reused over many rows reads as copies (the same ticket body 5 times);
+        # a catalogue of 11 laptop models over 320 assets is simply an estate.
+        prose = [v for r in records for v in r.values() if isinstance(v, str)]
+        wordy = bool(prose) and sum(len(v) for v in prose) / len(prose) >= 40
+        if count >= 60 and len(records) < 30 and wordy:
+            self.issues.append(f"{name}: {count} rows over {len(records)} record(s) of prose read as copies — "
+                               "write at least 30 distinct records for it, each with its own wording")
         spec_cols = self.tables[name]
         for col in list(columns) + [k for r in records for k in r]:
             if col.lower() not in spec_cols and col != "id":
