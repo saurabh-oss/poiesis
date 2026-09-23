@@ -1536,8 +1536,12 @@ def preserve_routes(run_id: str, files: dict[str, str]) -> tuple[dict[str, str],
                    and (s := ast.get_source_segment(old, n)) and s not in have and "__future__" not in s]
         new_names = {n.name for n in new_tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
         segments = []
+        old_lines = old.splitlines()
         for (method, path), fn in needed.items():
-            seg = ast.get_source_segment(old, fn) or ""
+            # The decorators are not part of the function's own segment; without
+            # them the endpoint comes back as a plain function nothing serves.
+            start = min([d.lineno for d in fn.decorator_list] + [fn.lineno]) - 1
+            seg = "\n".join(old_lines[start:fn.end_lineno or fn.lineno])
             if fn.name in new_names:
                 seg = seg.replace(f"def {fn.name}(", f"def {fn.name}_kept(", 1)
             segments.append(seg)

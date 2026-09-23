@@ -139,9 +139,20 @@ def rows_to_sql(rows_by_table: dict[str, list[dict[str, Any]]], tables: dict[str
     return "\n".join(out) + ("\n" if out else ""), issues
 
 
+_ARRIVAL = re.compile(r"^(created|arriv|opened|submitted|received|started|reported|logged)|^date$|_date$", re.I)
+
+
+_DATEISH = re.compile(r"^\d{4}-\d{2}-\d{2}")
+
+
 def _texty(values: list[Any]) -> bool:
+    """Prose, not timestamps: an ISO date is a 25-character string that repeats honestly."""
     strings = [v for v in values if isinstance(v, str)]
-    return len(strings) >= len(values) * 0.8 and strings and sum(len(s) for s in strings) / len(strings) >= 12
+    if not strings or len(strings) < len(values) * 0.8:
+        return False
+    if sum(1 for v in strings if _DATEISH.match(v)) > len(strings) * 0.5:
+        return False
+    return sum(len(v) for v in strings) / len(strings) >= 12
 
 
 def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: list[str],
@@ -190,7 +201,9 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
             if most > max(6, len(values) * 0.2):
                 issues.append(f"{table}.{key}: one value appears {most} times in {len(values)} rows")
         for key in keys:
-            if not (key.endswith("_at") or key.endswith("_date") or key in ("date", "created", "arrived")):
+            # Only the column that says when a row came into being: a triage or
+            # resolution time clustering in the last few days is how real queues look.
+            if not _ARRIVAL.search(key):
                 continue
             days = {str(r.get(key))[:10] for r in rows if isinstance(r, dict) and r.get(key)}
             if len(rows) >= 20 and len(days) < 5:
