@@ -27,6 +27,7 @@ from pathlib import Path
 
 from .interface import (
     EXAMPLE_ROUTER,
+    GENERIC_ROUTER,
     EXAMPLE_SCREEN,
     PACKAGE_DIR,
     REGISTRY,
@@ -341,6 +342,8 @@ def static_issues(
 
     seen: dict[tuple[str, str], str] = {}
     for r in routes:
+        if r.get("generic") is not None:
+            continue  # a story router that redeclares a generic path replaces it, by design
         key = (r["method"], r["path"])
         if key in seen and (own_files is None or seen[key] in own_files or r["file"] in own_files):
             issues.append(f"{r['method']} {r['path']} is declared twice ({seen[key]} and {r['file']}) — "
@@ -358,8 +361,8 @@ def static_issues(
             )
 
     for path in router_files(run_id):
-        if path.name == EXAMPLE_ROUTER:
-            continue  # the worked example is reference, not a story's own content
+        if path.name in (EXAMPLE_ROUTER, GENERIC_ROUTER):
+            continue  # the worked example and the platform's data API are not a story's content
         rel = path.relative_to(root).as_posix()
         if own_files is not None and rel not in own_files:
             continue

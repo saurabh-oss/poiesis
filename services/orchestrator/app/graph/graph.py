@@ -14,6 +14,7 @@ from .nodes.build import build
 from .nodes.deploy import deploy_increment
 from .nodes.design import architecture, plan_sprint
 from .nodes.discovery import analyse, intake
+from .nodes.foundation import lay_foundation
 from .nodes.product import backlog, vision
 from .nodes.scaffold import bootstrap
 from .nodes.ship import harvest, release, review
@@ -55,6 +56,7 @@ def build_graph() -> StateGraph:
     g.add_node("design", architecture)
     g.add_node("plan", plan_sprint)
     g.add_node("bootstrap", bootstrap)
+    g.add_node("found", lay_foundation)
     g.add_node("implement", build)
     g.add_node("assess", review)
     g.add_node("rework", _mark_rework)
@@ -69,7 +71,11 @@ def build_graph() -> StateGraph:
     g.add_edge("write_backlog", "design")
     g.add_edge("design", "plan")
     g.add_edge("plan", "bootstrap")
-    g.add_edge("bootstrap", "implement")
+    # The data model and the demonstration data are laid once, for every story,
+    # so each story builds a screen over tables that exist and hold real-looking
+    # rows. A rework round goes straight back to build.
+    g.add_edge("bootstrap", "found")
+    g.add_edge("found", "implement")
     # Deploy before review: every round is started and opened in a real browser,
     # and the review judges what actually works rather than what the code claims.
     g.add_edge("implement", "deploy")
@@ -91,6 +97,7 @@ STAGES = [
     ("architecture", "Architecture", "Design constrained by what the portfolio already has"),
     ("sprint", "Sprint", "The slice that gets built now"),
     ("scaffold", "Scaffold", "A running application skeleton, before any feature code"),
+    ("foundation", "Foundation", "The whole data model and believable demonstration data, before any story"),
     ("build", "Build", "Developer implements, Tester verifies, repair loop closes the gap"),
     ("deploy", "Deploy", "The increment running at a URL, every screen opened in a real browser"),
     ("review", "Review", "Independent weighted verdict on the code and on what actually runs"),
@@ -122,6 +129,8 @@ STAGE_DETAIL: dict[str, dict] = {
                "asks": "Confirm the scope of the first increment."},
     "scaffold": {"agents": ["scaffold"], "gate": None, "asks": "",
                  "produces": "A working frontend, API and database, laid down before any feature code"},
+    "foundation": {"agents": ["developer", "data_designer"], "gate": None, "asks": "",
+                   "produces": "Every table the stories need, and a generated demonstration data set the app opens with"},
     "build": {"agents": ["developer", "tester"], "gate": "failed_story",
               "produces": "Code, tests and a screen for each story, repaired until the tests and the platform's frontend checks pass",
               "asks": "Stops only if a story still fails after its repairs: carry on, drop it, or stop the sprint."},

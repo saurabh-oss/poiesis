@@ -15,13 +15,17 @@ import importlib
 import pkgutil
 
 EXAMPLE = "examples"
+# The platform's generic data API: mounted last, so a story router that declares
+# the same path is the one FastAPI matches.
+GENERIC = "resources"
 
 
 def _discover() -> list:
     names = sorted(m.name for m in pkgutil.iter_modules(__path__) if not m.name.startswith("_"))
-    real = [n for n in names if n != EXAMPLE]
+    real = [n for n in names if n not in (EXAMPLE, GENERIC)]
+    ordered = (real or [EXAMPLE]) + ([GENERIC] if GENERIC in names else [])
     found = []
-    for name in real or names:
+    for name in ordered:
         module = importlib.import_module(f"{__name__}.{name}")
         router = getattr(module, "router", None)
         if router is not None:

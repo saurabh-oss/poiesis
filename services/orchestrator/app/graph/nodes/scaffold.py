@@ -48,11 +48,13 @@ PROTECTED = (
     "backend/app/routes.py",
     "backend/app/routers/__init__.py",
     "backend/app/routers/examples.py",
+    "backend/app/routers/resources.py",
     "db/Dockerfile",
     "frontend/Dockerfile",
     "frontend/nginx.conf",
     "frontend/index.html",
     "frontend/app.js",
+    "frontend/ui.js",
     "frontend/styles.css",
     "frontend/screens/index.js",
     "frontend/screens/example.js",
@@ -64,10 +66,11 @@ PROTECTED = (
 # Platform-owned files every workspace must have. One bootstrapped before a file
 # existed gets it at the start of its next build round, the way deploy upgrades
 # an old compose file, so an in-flight run benefits from a new check.
-PLATFORM_FILES = ("tests/test_platform_endpoints.py",)
+PLATFORM_FILES = ("tests/test_platform_endpoints.py", "frontend/ui.js", "backend/app/routers/resources.py")
 # Platform-owned files stories may not edit, so the platform may rewrite them when
 # the template changes: an in-flight run gets the fixed shell on its next round.
-PLATFORM_SHELL = ("frontend/app.js", "tests/conftest.py")
+PLATFORM_SHELL = ("frontend/app.js", "frontend/ui.js", "frontend/styles.css", "frontend/screens/example.js",
+                  "backend/app/routers/__init__.py", "backend/app/routers/resources.py", "tests/conftest.py")
 
 
 def slugify(name: str) -> str:

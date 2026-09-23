@@ -103,6 +103,28 @@ def _findings_for(state: RunState, story_id: str) -> str:
     )
 
 
+def _mvp() -> bool:
+    """Screens over the generic data API; no Tester and no pytest in the loop."""
+    return str(pack().get("build", {}).get("mode") or "").lower() == "mvp"
+
+
+def _foundation_note(state: RunState) -> str:
+    f = state.get("foundation") or {}
+    if not f:
+        return ""
+    rows = ", ".join(f"{t} ({n})" for t, n in (f.get("rows") or {}).items() if n)
+    return (
+        "\n\nTHE DATA LAYER IS ALREADY BUILT. models.py, schemas.py and init.sql hold every entity "
+        f"for the whole product ({', '.join(f.get('tables') or [])}), and the database opens with "
+        f"demonstration data: {rows or 'see init.sql'}. The generic data API serves all of it. "
+        "Add a column or table only when a criterion needs one nothing has; otherwise leave the "
+        "shared files alone and build the screen. Write a router only for behaviour the generic "
+        "API cannot do (a computed suggestion, an aggregate, an action that changes several rows).\n"
+        + ("This is an MVP: no tests are written; the platform's checks and a real browser verify "
+           "your screen, so what it shows on first open is what is judged.\n" if _mvp() else "")
+    )
+
+
 def _skeleton(state: RunState) -> str:
     """Tell the Developer what already exists, so it extends rather than replaces."""
     sc = state.get("scaffold") or {}
@@ -143,6 +165,7 @@ def _context(state: RunState, story: dict[str, Any], *, first: bool = True) -> s
         f"\nREUSE PLAN (binding):\n{str(state['architecture'].get('reuse_plan', []))[:scaled(1200)]}\n"
         f"\nPORTFOLIO:\n{render_for_prompt(state.get('portfolio') or {'reuse_candidates': [], 'house_stack': [], 'prior_decisions': []}, limit=scaled(3))}\n"
         + _skeleton(state)
+        + _foundation_note(state)
         + "\nCURRENT WORKSPACE FILES:\n" + ("\n".join(tree) or "(empty)")
         # Without the contracts the Developer rewrites every file from memory and
         # cannot see what the workspace already exports — which is how three
@@ -763,7 +786,18 @@ async def _verify(
     scope = [p for p in (*story_tests, *PLATFORM_TESTS) if (root / p).is_file()]
 
     async def _run() -> dict[str, Any]:
-        async with telemetry.span("sandbox", f"pytest {sid}", story=sid, files=len(scope)) as sp:
+        if _mvp():
+            # No suite in MVP mode: a syntax error is still caught here, before deploy,
+            # in seconds and without installing anything.
+            async with telemetry.span("sandbox", f"compile {sid}", story=sid) as sp:
+                tests = await run_in_sandbox(
+                    run_id, "python -m compileall -q backend && echo COMPILED", timeout=120, network=False)
+                if "COMPILED" not in tests.stdout:
+                    tests = ExecResult(1, "backend does not compile:\n" + (tests.stderr or tests.stdout)[-2500:],
+                                       "", tests.timed_out)
+                sp.set(exit_code=tests.exit_code)
+        else:
+          async with telemetry.span("sandbox", f"pytest {sid}", story=sid, files=len(scope)) as sp:
             tests = await run_in_sandbox(run_id, pytest_command(" ".join(scope)),
                                          timeout=timeout, network=True)
             sp.set(exit_code=tests.exit_code, timed_out=tests.timed_out)
@@ -779,10 +813,10 @@ async def _verify(
         # call turns every one of them into a 405 the Developer cannot read as its
         # own doing. Saying so plainly is what gets the endpoint put back.
         drift = ([failures.for_developer(d) for d in test_issues(run_id, story_tests)]
-                 if not tests.ok else [])
+                 if not tests.ok and story_tests else [])
         return {
             "exit_code": 0 if ok else (tests.exit_code or 1),
-            "stdout": failures.distill(tests.stdout, scaled(3500))
+            "stdout": (tests.stdout if _mvp() else failures.distill(tests.stdout, scaled(3500)))
             + ("" if checks.ok else "\n" + checks.stdout[:scaled(2500)])
             + ("\n\n=== THE TESTS AND YOUR API NO LONGER AGREE ===\nThese tests were written "
                "against endpoints that are not there now. If the story needs them, put them "
@@ -944,18 +978,22 @@ async def build(state: RunState) -> RunState:
         # impossible before either of them wrote a line of logic. Its suite is
         # then checked against the routes the API really serves, and revised, before
         # the Developer is ever asked to satisfy it.
-        tests, test_files, unsound = await _sound_tests(run_id, state, sid, rnd, story, impl)
-        await _mount_bare(run_id, sid)
-        repo.commit(run_id, f"test: cover {story['id']}")
-        own_tests = sorted(p for p in test_files if p.startswith("tests/"))
-        await emit(
-            run_id,
-            f"{len(tests.get('criteria_covered', []))}/"
-            f"{len(story.get('acceptance_criteria', []))} criteria under test",
-            agent="tester", stage="build",
-            data={"covered": tests.get("criteria_covered", []),
-                  "gaps": tests.get("criteria_not_covered", [])},
-        )
+        if _mvp():
+            tests = {"files": {}, "criteria_covered": [], "criteria_not_covered": []}
+            test_files, unsound, own_tests = [], [], []
+        else:
+            tests, test_files, unsound = await _sound_tests(run_id, state, sid, rnd, story, impl)
+            await _mount_bare(run_id, sid)
+            repo.commit(run_id, f"test: cover {story['id']}")
+            own_tests = sorted(p for p in test_files if p.startswith("tests/"))
+            await emit(
+                run_id,
+                f"{len(tests.get('criteria_covered', []))}/"
+                f"{len(story.get('acceptance_criteria', []))} criteria under test",
+                agent="tester", stage="build",
+                data={"covered": tests.get("criteria_covered", []),
+                      "gaps": tests.get("criteria_not_covered", [])},
+            )
 
         own = set(written)
         exec_result, pytest_ok = await _verify(
@@ -985,7 +1023,7 @@ async def build(state: RunState) -> RunState:
         # against the result. Only when pytest itself failed: a frontend problem is
         # never the tests' fault.
         tests_revised = False
-        if not exec_result.ok and not pytest_ok:
+        if not exec_result.ok and not pytest_ok and not _mvp():
             own_tests = [p for p in test_files if p.startswith("tests/")]
             tests_revised = await _reconcile_tests(
                 run_id, sid, rnd, story, own_tests, exec_result, attempts

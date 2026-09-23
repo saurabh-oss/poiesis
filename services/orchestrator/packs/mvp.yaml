@@ -1,0 +1,98 @@
+# Domain pack: MVP showcase.
+#
+# The goal of a run under this pack is an application people are impressed by
+# on first open: every screen works, looks finished, and is full of believable
+# data. Correctness of the API beyond what the screens need is not judged, and
+# no test suite is written — the platform's own checks and a real browser are
+# the verification. Use it to get a demonstrable product fast; switch to
+# default.yaml to harden it.
+
+name: mvp
+description: Screens first. A polished, data-rich MVP with no external integrations and no test loop.
+
+gates:
+  clarify:              { mode: auto }
+  approve_vision:       { mode: auto }
+  approve_backlog:      { mode: auto }
+  approve_architecture: { mode: auto }
+  approve_sprint:       { mode: auto }
+  failed_story:         { mode: auto }
+  approve_release:      { mode: require }
+
+build:
+  mode: mvp                     # screens over the generic data API; no Tester, no pytest
+  foundation: true              # whole data model + demonstration data before any story
+  max_repair_attempts: 2
+  max_rework_rounds: 1
+  sandbox_image: python:3.12-slim
+  test_timeout_seconds: 600
+
+review:
+  ship_threshold: 60
+  release_requires_working_app: true
+  release_requires_ship_verdict: false
+  max_human_rebuilds: 2
+  weights:
+    acceptance_criteria_met: 0.45
+    reuse_compliance: 0.05
+    test_adequacy: 0.05
+    maintainability: 0.15
+    operational_safety: 0.30
+
+product:
+  guidance: |
+    This backlog is for a demonstrable MVP. Every story is a screen or a flow a visitor
+    can try in the browser on the demonstration data: the first story is an overview
+    dashboard with headline numbers and charts; the others are the list, detail and
+    action screens the brief describes. No integrations with external systems (e-mail,
+    Slack, SSO, payment gateways): leave them explicitly out of scope. No login. Keep the
+    stories to at most ten, each delivering one screen or one visible action, and write
+    the criteria in terms of what the visitor sees and does on first open.
+
+archetypes:
+  default: web-app
+
+  web-app:
+    description: A browser application with an HTTP API and a database.
+    scaffold: web-app
+    entrypoint: frontend
+    services:
+      - { name: frontend, role: ui,        port: 80,   healthcheck: /        }
+      - { name: backend,  role: api,       port: 8000, healthcheck: /health  }
+      - { name: db,       role: datastore                                    }
+    definition_of_deployable:
+      - docker compose up -d brings every service to healthy
+      - The backend answers 200 on /health
+      - The frontend is served and reaches the API from the browser
+      - Every story has a screen that opens in a real browser without errors
+      - Every screen shows the demonstration data on first open
+
+  api-service:
+    description: A headless HTTP API with a database and no user interface.
+    scaffold: web-app
+    entrypoint: backend
+    services:
+      - { name: backend, role: api,       port: 8000, healthcheck: /health }
+      - { name: db,      role: datastore                                   }
+    definition_of_deployable:
+      - docker compose up -d brings every service to healthy
+      - The backend answers 200 on /health
+
+  cli-tool:
+    description: A command-line program. No server, no port, no URL.
+    scaffold: cli-tool
+    entrypoint: cli
+    services: []
+    definition_of_deployable:
+      - The documented run command executes and exits 0 on the sample input
+
+definition_of_ready:
+  - Story has at least two acceptance criteria written as Given/When/Then
+  - Story cites at least one evidence id
+  - Story is something a visitor sees or does in the browser
+
+definition_of_done:
+  - The deployed app opens in a real browser and every story's screen works against the live API
+  - Every screen shows the demonstration data on first open, with no placeholders
+  - No blocker findings from the Reviewer
+  - Release notes written in stakeholder language

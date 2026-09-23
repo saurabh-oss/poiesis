@@ -25,6 +25,7 @@ PACKAGE_DIR = ("backend", "app")
 ROUTERS_DIR = ("backend", "app", "routers")
 SCREENS_DIR = ("frontend", "screens")
 EXAMPLE_ROUTER = "examples.py"
+GENERIC_ROUTER = "resources.py"          # the platform's data API over every table
 EXAMPLE_SCREEN = "example.js"
 REGISTRY = "index.js"
 
@@ -206,10 +207,76 @@ def _router_prefix(tree: ast.Module) -> str:
     return ""
 
 
+def plural(table: str) -> str:
+    """`incident_audit_entry` -> `incident-audit-entries`; mirrors routers/resources.py."""
+    word = table.replace("_", "-").lower()
+    if word.endswith("s") and not word.endswith("ss"):
+        return word
+    if word.endswith("y") and word[-2:-1] not in "aeiou":
+        return word[:-1] + "ies"
+    if word.endswith(("s", "x", "z", "ch", "sh")):
+        return word + "es"
+    return word + "s"
+
+
+def model_tables(run_id: str) -> dict[str, list[str]]:
+    """table -> column names, from the classes in models.py that declare __tablename__."""
+    path = workspace_path(run_id) / "backend" / "app" / "models.py"
+    if not path.is_file():
+        return {}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return {}
+    out: dict[str, list[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        table, cols = None, []
+        for item in node.body:
+            if (isinstance(item, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__tablename__" for t in item.targets)
+                    and isinstance(item.value, ast.Constant) and isinstance(item.value.value, str)):
+                table = item.value.value
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                cols.append(item.target.id)
+        if table:
+            out[table] = cols
+    return out
+
+
+def generic_routes(run_id: str) -> list[dict[str, Any]]:
+    """The routes routers/resources.py registers at import time, one set per table.
+
+    It builds them from Base.metadata rather than decorators, so the AST walk in
+    declared_routes cannot see them; this derives the same list from models.py.
+    """
+    root = workspace_path(run_id)
+    rel = "/".join((*ROUTERS_DIR, GENERIC_ROUTER))
+    if not (root / rel).is_file():
+        return []
+    out: list[dict[str, Any]] = []
+    for table, cols in model_tables(run_id).items():
+        base = f"{ROUTER_PREFIX}/{plural(table)}"
+        shape = "{" + ", ".join(cols) + "}"
+        out += [
+            {"method": "GET", "path": base, "body": None, "reply": None, "status": 200, "file": rel,
+             "generic": table, "shape": shape},
+            {"method": "GET", "path": base + "/{item_id}", "body": None, "reply": None, "status": 200, "file": rel, "generic": table, "shape": shape},
+            {"method": "POST", "path": base, "body": None, "reply": None, "status": 201, "file": rel, "generic": table, "shape": shape},
+            {"method": "PATCH", "path": base + "/{item_id}", "body": None, "reply": None, "status": 200, "file": rel, "generic": table, "shape": shape},
+            {"method": "PUT", "path": base + "/{item_id}", "body": None, "reply": None, "status": 200, "file": rel, "generic": table, "shape": shape},
+            {"method": "DELETE", "path": base + "/{item_id}", "body": None, "reply": None, "status": 204, "file": rel, "generic": table, "shape": shape},
+        ]
+    if out:
+        out.append({"method": "GET", "path": f"{ROUTER_PREFIX}/resources", "body": None, "reply": None,
+                    "status": 200, "file": rel, "generic": "", "shape": ""})
+    return out
+
+
 def declared_routes(run_id: str) -> list[dict[str, Any]]:
     """Every endpoint the application serves: method, full path, shapes, owning file."""
     root = workspace_path(run_id)
-    out: list[dict[str, Any]] = []
+    out: list[dict[str, Any]] = generic_routes(run_id)
     for path in router_files(run_id):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
@@ -280,6 +347,8 @@ def route_contract(run_id: str) -> str:
     if not routes:
         return ""
     fields = _schema_fields(run_id)
+    generic = [r for r in routes if r.get("generic") is not None]
+    routes = [r for r in routes if r.get("generic") is None]
     lines: list[str] = []
     for r in routes:
         line = f"  {r['method']:<6} {r['path']}"
@@ -292,11 +361,28 @@ def route_contract(run_id: str) -> str:
             line += f" {'list of ' + shape if many else shape}"
         line += f"   [{Path(r['file']).name}]"
         lines.append(line)
+    generic_block = ""
+    if generic:
+        tables = {}
+        for r in generic:
+            if r["generic"]:
+                tables.setdefault(r["generic"], r["shape"])
+        generic_block = (
+            "\nTHE GENERIC DATA API — already served for every table, no router needed. Rows are "
+            "plain JSON objects with one key per column:\n"
+            + "\n".join(f"  {ROUTER_PREFIX}/{plural(t)}   row shape {shape}" for t, shape in tables.items())
+            + "\n  For each:  GET <path>?q=text&<column>=value&sort=-column&limit=200   list (search, filter, "
+              "order; newest first by default; up to 500 rows unless limit says otherwise)\n"
+              "             GET <path>/{id}   POST <path> {columns}  -> 201 row   PATCH <path>/{id} {changed columns} "
+              "-> row   DELETE <path>/{id} -> 204\n"
+        )
     return (
-        "\nVERIFIED ROUTES — the full URLs this application serves right now. Routers are "
+        generic_block
+        + "\nVERIFIED ROUTES — the full URLs this application serves right now"
+        + (", beyond the generic data API" if generic else "") + ". Routers are "
         f"mounted at {ROUTER_PREFIX}, so a route declared \"/x\" is served at "
         f"\"{ROUTER_PREFIX}/x\". Request these exact paths; anything else returns 404.\n"
-        + "\n".join(lines)
+        + ("\n".join(lines) if lines else "  (none yet)")
         + "\n"
     )
 
@@ -554,9 +640,9 @@ def reference(run_id: str) -> str:
 # screens are no longer here: each story owns its own router and screen file, so
 # only the genuinely shared schema, models and SQL are shown.
 EDITABLE: list[tuple[str, int]] = [
-    ("backend/app/schemas.py", 1800),
-    ("backend/app/models.py", 1500),
-    ("db/init.sql", 900),
+    ("backend/app/schemas.py", 2600),
+    ("backend/app/models.py", 3200),
+    ("db/init.sql", 1200),
 ]
 
 

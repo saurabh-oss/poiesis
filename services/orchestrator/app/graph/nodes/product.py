@@ -61,8 +61,10 @@ async def backlog(state: RunState) -> RunState:
                    else f"Reworking the backlog (round {attempt})",
                    agent="product_owner", stage="backlog")
         dor = pack().get("definition_of_ready", [])
+        guidance = str(pack().get("product", {}).get("guidance") or "").strip()
         doc = await remember(run_id, f"backlog:{attempt}", lambda: PRODUCT_OWNER.json(
             "Produce the BACKLOG.\n\n"
+            + (f"HOW THIS ORGANISATION WANTS ITS BACKLOG SHAPED:\n{guidance}\n\n" if guidance else "")
             + ("DEFINITION OF READY - every story must satisfy all of these:\n"
                + "\n".join(f"- {d}" for d in dor) + "\n\n" if dor else "")
             + f"APPROVED VISION:\n{state['vision']}\n\n"

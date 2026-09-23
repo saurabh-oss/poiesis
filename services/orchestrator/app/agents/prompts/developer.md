@@ -34,7 +34,7 @@ is no longer needed, such as a duplicate router or an abandoned screen, return i
 content (`""`) and the platform deletes it.
 
 Read-only, and edits to them are refused: `backend/app/main.py`, `db.py`, `routes.py`,
-`routers/__init__.py`, `routers/examples.py`, `frontend/app.js`, `index.html`, `styles.css`,
+`routers/__init__.py`, `routers/examples.py`, `routers/resources.py`, `frontend/app.js`, `ui.js`, `index.html`, `styles.css`,
 `screens/index.js`, `screens/example.js`, `docker-compose.yml`, every Dockerfile,
 `nginx.conf`, `conftest.py`, `tests/conftest.py`, `tests/test_scaffold_smoke.py`. The two
 worked examples are there for you to copy, not to edit or delete. They disappear from the
@@ -71,6 +71,35 @@ export default {
   },
 };
 ```
+
+## The UI kit — what makes a screen look finished
+
+`render()` also receives `ui`, a component kit built on the design system. Compose it;
+never draw a table, a badge or a chart by hand when the kit has one. Every part is
+already themed, animated, keyboard-friendly and dark-mode aware.
+
+| Need | Call |
+|---|---|
+| Headline numbers | `ui.stats([{ label: "Open tickets", value: 42, hint: "+6 today", tone: "warn" }])` |
+| A data table with search, sort, paging and keyboard navigation | `ui.table({ columns: [{ key: "subject", label: "Subject", render: (t) => h("strong", {}, t.subject) }, { key: "priority", label: "Priority", render: (t) => ui.badge(t.priority) }], rows, search: true, keyboard: true, pageSize: 25, sort: { key: "created_at", dir: "desc" }, onRow: (t) => navigate(`#/tickets/${t.id}`), onSelect: (t) => showDetail(t), empty: { title: "No tickets", hint: "…" } })` — returns the element; `table.update(rows)` redraws after a change |
+| A status pill, coloured by its word | `ui.badge("P1")`, `ui.badge("resolved")`, `ui.badge(text, "warn")` to force a tone |
+| A person | `ui.avatar(name)`, `ui.person(name, "Billing team")` |
+| Dates | `ui.timeAgo(iso)` ("3h ago"), `ui.date(iso)`, `ui.dateTime(iso)` |
+| Label/value details | `ui.kv([{ label: "Customer", value: t.customer_name }, { label: "Arrived", value: ui.timeAgo(t.created_at) }])` |
+| A section with a heading (and something on its right) | `ui.section("Open incidents", { right: ui.badge(`${n} open`) }, ...children)` |
+| List beside a detail panel | `ui.split([mainSections], [sideSections])` |
+| A row of controls | `ui.toolbar(ui.search({ oninput }), ui.select({ options: ["All", "P1", "P2"], onchange }), ui.button("New", { onclick }))` |
+| A form | `ui.form({ fields: [{ name: "title", label: "Title", required: true }, { name: "priority", label: "Priority", type: "select", options: ["P1","P2","P3","P4"], value: "P3" }, { name: "body", label: "Details", type: "textarea" }], submit: "Create", onsubmit: async (values) => { await api("/tickets", { method: "POST", body: values }); return "Created."; } })` |
+| Buttons | `ui.button("Assign", { onclick, tone: "secondary" \| "danger" \| "ghost", kbd: "A" })` |
+| Charts | `ui.bars([{ label: "P1", value: 4, tone: "down" }])` for categories; `ui.timeseries([{ label: "Mar 1", value: 12 }, …])` for a series over time |
+| Feedback | `ui.toast("Ticket assigned", "ok")`, `ui.notice("…", "warn")`, `ui.empty("No matches", "Clear the filters.")` |
+
+The recipe for a list screen: `ui.stats` above the fold, then `ui.split` with the
+`ui.table` on the left and a detail panel (`ui.kv` + action buttons) on the right that
+follows `onSelect`. For a dashboard: `ui.stats`, then `ui.bars` and `ui.timeseries` in
+`grid-2` cards. For a detail screen: `ui.kv` in one panel, related rows in a `ui.table` in
+another, the actions in the header. Every action re-fetches and redraws (`table.update`,
+or rebuild the panel) and confirms with `ui.toast`.
 
 **The shell already drew the page.** The sidebar, the page heading and the subtitle come
 from `title` and `subtitle` above — so never render your own `<h1>`, app title, nav or
@@ -167,6 +196,16 @@ For a `web-app`, a story is only implemented when a user can reach it. Every sto
 screen, either its own or its id added to the screen it extends.
 
 ## Endpoints
+
+**Most screens need no router at all.** The generic data API (see THE GENERIC DATA API in
+your context) already lists, searches, filters, sorts, reads, creates, updates and deletes
+every table: `api("/tickets?status=open&sort=-created_at")`, `api(`/tickets/${id}`)`,
+`api(`/tickets/${id}`, { method: "PATCH", body: { agent_id: 3 } })`. Load a few hundred rows
+and let the kit's table search and page them. Write a router only for what it cannot do:
+a computed suggestion (a priority from keywords, likely duplicates by wording), an
+aggregate for a dashboard (tickets per day), an action that changes several rows at
+once (resolving an incident and every linked ticket). Such a router serves its own
+distinct paths (`/tickets/{id}/duplicates`, `/metrics/weekly`) and its screen calls those.
 
 Copy the shape of `routers/examples.py`:
 - The body is a parameter typed with a Pydantic schema (`payload: ItemCreate`). Never read

@@ -21,14 +21,17 @@
  *     title: "Leave requests",        // navigation label and page heading
  *     subtitle: "Request time off",   // optional line under the heading
  *     story: "S1",                    // the story (or "S1, S3") it delivers
- *     async render(root, { api, h, navigate, params }) { ... }
+ *     async render(root, { api, h, navigate, params, actions, ui }) { ... }
  *   };
  *
  *   api("/items")                                         GET /api/items -> JSON
  *   api("/items", { method: "POST", body: { name: "a" } }) -> JSON
  *   h("button", { onclick: save }, "Save")                -> a DOM element
  *   navigate("#/items/42")                                -> params = ["42"]
+ *   ui.table({ columns, rows, search: true })             -> see ui.js for the kit
  */
+
+import ui from "./ui.js";
 
 /** Call the backend: same-origin /api, JSON in and out, a real error on failure. */
 export async function api(first, second, third) {
@@ -149,7 +152,7 @@ async function show() {
   try {
     // `actions` lets a screen put its primary button in the page header, where a
     // real product keeps it, without knowing anything about the frame around it.
-    await entry.module.render(root, { api, h, navigate, params, actions: pageActions });
+    await entry.module.render(root, { api, h, navigate, params, actions: pageActions, ui });
   } catch (err) {
     if (mine === token) root.replaceChildren(errorPanel(`${entry.title} hit an error`, err));
   }

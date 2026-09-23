@@ -639,6 +639,80 @@ async def test_failures() -> None:
         _drop_runs([rid])
 
 
+async def test_foundation() -> None:
+    print("\n[6c] demonstration data and the generic data API")
+    from .workspace import seeding
+    from .workspace.interface import declared_routes, generic_routes, plural, route_contract
+    from .workspace import checks
+    tables = {"agent": {"id": False, "name": True, "team": False},
+              "ticket": {"id": False, "subject": True, "agent_id": False, "created_at": False}}
+    rows = {
+        "agent": [{"name": "Priya Nair", "team": "Billing"}, {"name": "Tom O'Neil", "team": None}],
+        "ticket": [{"subject": f"Charged twice for invoice INV-{i}", "agent_id": 1 + i % 2,
+                    "created_at": f"2024-03-{1 + i % 20:02d}T09:00:00+00:00"} for i in range(40)],
+    }
+    sql, issues = seeding.rows_to_sql(rows, tables)
+    expect("rows become INSERT statements with quotes escaped and NULLs",
+           "INSERT INTO agent (name, team) VALUES" in sql and "'Tom O''Neil', NULL" in sql and not issues, str(issues))
+    expect("every row is counted the way the platform counts seed rows",
+           checks._seed_rows(checks._inserts_by_table(sql)["ticket"]) == 40)
+    _, issues = seeding.rows_to_sql({"ticket": [{"subject": "x", "colour": "red"}], "nothing": []}, tables)
+    expect("an unknown column and an unknown table are reported",
+           any("colour" in i for i in issues) and any("`nothing`" in i for i in issues), str(issues))
+    _, issues = seeding.rows_to_sql({"agent": [{"id": 5, "name": "A"}]}, tables)
+    expect("explicit ids that are not 1..N are refused", any("leave `id` out" in i for i in issues), str(issues))
+    _, issues = seeding.rows_to_sql({"agent": [{"team": "Billing"}]}, tables)
+    expect("a NOT NULL column never filled is reported", any("name" in i and "never filled" in i for i in issues), str(issues))
+    dull = {"ticket": [{"subject": "Payment failed for order", "created_at": "2024-03-01"} for _ in range(30)]}
+    q = seeding.quality_issues(dull, ["Given the app, when opened, then I see at least 150 tickets"])
+    expect("repetitive text is flagged", any("distinct" in i for i in q), str(q))
+    expect("rows all on one day are flagged", any("distinct day" in i for i in q), str(q))
+    expect("a criterion's minimum count is checked", any("at least 150 tickets" in i for i in q), str(q))
+    expect("varied data passes", seeding.quality_issues(rows, ["at least 25 tickets"]) == [],
+           str(seeding.quality_issues(rows, ["at least 25 tickets"])))
+    expect("plural mirrors the generic router",
+           (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
+           ("tickets", "incident-audit-entries", "status", "agents"))
+
+    rid = _run_row("selftest foundation")
+    try:
+        root = repo.init_workspace(rid)
+        (root / "backend" / "app" / "routers").mkdir(parents=True)
+        (root / "backend" / "app" / "routers" / "resources.py").write_text("router = None\n", encoding="utf-8")
+        (root / "backend" / "app" / "models.py").write_text(
+            "class Ticket(Base):\n    __tablename__ = 'ticket'\n    id: Mapped[int]\n    subject: Mapped[str]\n\n"
+            "class Incident(Base):\n    __tablename__ = 'incident'\n    id: Mapped[int]\n", encoding="utf-8")
+        (root / "db").mkdir()
+        (root / "db" / "init.sql").write_text(
+            "CREATE TABLE IF NOT EXISTS ticket (id SERIAL PRIMARY KEY, subject VARCHAR(200) NOT NULL);\n"
+            "CREATE TABLE IF NOT EXISTS incident (id SERIAL PRIMARY KEY);\n", encoding="utf-8")
+        g = generic_routes(rid)
+        expect("the generic API's routes are derived from models.py",
+               {(r["method"], r["path"]) for r in g} >= {("GET", "/api/tickets"), ("PATCH", "/api/tickets/{item_id}"),
+                                                          ("POST", "/api/incidents"), ("GET", "/api/resources")})
+        expect("they are part of the verified routes", any(r["path"] == "/api/tickets" for r in declared_routes(rid)))
+        contract = route_contract(rid)
+        expect("the Developer is told the generic API and the row shape",
+               "THE GENERIC DATA API" in contract and "/api/tickets   row shape {id, subject}" in contract, contract[:400])
+        seeding.write_seed_section(rid, "INSERT INTO ticket (subject) VALUES\n  ('a');\n")
+        seeding.write_seed_section(rid, "INSERT INTO ticket (subject) VALUES\n  ('b'),\n  ('c');\n")
+        text = (root / "db" / "init.sql").read_text(encoding="utf-8")
+        expect("the seed section is rewritten, not appended twice",
+               text.count(seeding.SEED_MARKER) == 1 and "('a')" not in text and "('c')" in text)
+        expect("the tables are read without the seed section", set(seeding.tables_in(rid)) == {"ticket", "incident"})
+        (root / "frontend" / "screens").mkdir(parents=True)
+        (root / "frontend" / "screens" / "tickets.js").write_text(
+            "export default { title: 'Tickets', story: 'S1', async render(root, { api, ui }) {"
+            " const rows = await api('/tickets?sort=-id'); root.append(ui.table({ rows, columns: [] })); } };\n",
+            encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, set())
+        expect("a screen calling the generic API passes the route check",
+               not any("does not serve" in i for i in static), str(static)[:300])
+    finally:
+        _drop_runs([rid])
+        shutil.rmtree(repo.workspace_path(rid), ignore_errors=True)
+
+
 async def test_api(rid: str) -> None:
     print("\n[7] observability API")
     from .main import app
@@ -677,6 +751,7 @@ async def main() -> int:
         await test_gitremote(git_id, tmp)
         await test_vectors()
         await test_failures()
+        await test_foundation()
         await test_api(rid)
     finally:
         llm.use_transport(None)
