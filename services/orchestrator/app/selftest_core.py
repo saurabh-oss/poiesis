@@ -709,6 +709,10 @@ async def test_foundation() -> None:
     expect("a timestamp after another comes after it",
            all(x["triaged_at"] > x["arrival_time"] for x in t if x["triaged_at"]))
     expect("a sequence counts up", t[0]["ref"] == "TD-1000" and t[1]["ref"] == "TD-1001")
+    named, _, _ = seedspec.expand_spec({"tables": [{"table": "agent", "count": 5, "columns": {
+        "name": {"kind": "catalogue", "values": ["Ana", "Ben", "Cyd", "Dee", "Eli"]}}}]}, spec_tables)
+    expect("a catalogue as long as the table gives one value each",
+           [a["name"] for a in named["agent"]] == ["Ana", "Ben", "Cyd", "Dee", "Eli"])
     stamped_tables = {**spec_tables, "ticket": {**spec_tables["ticket"], "created_at": False, "updated_at": False}}
     st_rows, _, _ = seedspec.expand_spec(spec, stamped_tables)
     expect("created_at follows the row's earliest timestamp when the spec leaves it out",

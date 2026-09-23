@@ -33,7 +33,7 @@ DOCKERFILE = (
 )
 
 PROBE = r'''
-import json, os, sys
+import json, os, re, sys
 from playwright.sync_api import sync_playwright
 
 base, out = sys.argv[1], sys.argv[2]
@@ -142,6 +142,14 @@ with sync_playwright() as p:
         for ph in PLACEHOLDERS:
             if ph in text:
                 problems.append(f"The screen still shows '{ph}'.")
+        # A dashboard once shipped with "undefined" for every axis label: the screen
+        # read d.date where the API sent d.label. The review called it advisory.
+        for junk in ("undefined", "NaN", "[object Object]", "null"):
+            if re.search(rf"(?<![\w.]){re.escape(junk)}(?![\w.])", text):
+                problems.append(
+                    f"The screen shows the word '{junk}': it reads a field the API does not send, or "
+                    "formats a value that is not there. Use the field names in the response as served.")
+                break
 
         calls = fetched[seen_before:]
         controls = page.evaluate(

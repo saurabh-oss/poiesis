@@ -205,8 +205,13 @@ class _Expander:
             self._table(entry)
         return self.rows, list(dict.fromkeys(self.issues)), self.derived
 
+    def count_of(self, table: str) -> int:
+        return self._counts.get(table, 0)
+
     def _table(self, entry: dict[str, Any]) -> None:
         name = str(entry.get("table") or "").lower()
+        self._counts = getattr(self, "_counts", {})
+        self._counts[name] = max(int(entry.get("count") or 0), len([r for r in (entry.get("records") or []) if isinstance(r, dict)]))
         if name not in self.tables:
             self.issues.append(f"`{name}` is not a table in db/init.sql (tables: {', '.join(sorted(self.tables))})")
             return
@@ -303,7 +308,8 @@ class _Expander:
             if not values:
                 self.issues.append(f"{table}.{col}: a catalogue needs `values`")
                 return True, None
-            if spec.get("unique"):
+            # Five names listed for five agents means one each, whatever `unique` says.
+            if spec.get("unique") or (spec.get("unique") is None and len(values) >= self.count_of(table)):
                 pos = unique_pos.get(col, 0)
                 unique_pos[col] = pos + 1
                 return True, values[pos % len(values)]
