@@ -342,6 +342,19 @@ async def complete(
     return reply.content
 
 
+_LOCAL_GATE = asyncio.Semaphore(1)
+
+
+class _NoGate:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+_NO_GATE = _NoGate()
+
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(min=5, max=90),
        # Exception only: a task cancellation (CancelledError is a BaseException) must
        # stop the call, not be retried for five attempts while the run carries on.
@@ -349,6 +362,7 @@ async def complete(
        before_sleep=lambda rs: log.warning("model call failed (%s); retry %d in %.0fs",
                                            rs.outcome.exception(), rs.attempt_number,
                                            rs.next_action.sleep))
+
 async def _call(
     *,
     role: Role,
@@ -369,8 +383,12 @@ async def _call(
     started = dt.datetime.now(dt.timezone.utc)
     t0 = time.perf_counter()
     status, error, reply = "ok", "", Reply("")
-    async with telemetry.span("llm", f"{role}:{local_name(model)}", role=role, model=model,
-                              max_tokens=budget, think=think, attempt=attempt) as sp:
+    # One local call at a time, platform-wide. A reseed request running beside a
+    # build once sent Ollama two contexts of different sizes in turn; it reloaded
+    # the 23 GB model for each and then produced no token for fifteen minutes.
+    async with (_LOCAL_GATE if is_local() else _NO_GATE), telemetry.span(
+            "llm", f"{role}:{local_name(model)}", role=role, model=model,
+            max_tokens=budget, think=think, attempt=attempt) as sp:
         try:
             if is_local():
                 name = local_name(model)
