@@ -58,6 +58,16 @@ visitor can be impressed by within an hour on local models:
    release auto-approved. The Reviewer is told tests are absent by design and judges what
    a visitor sees.
 
+**The same service topology for every generated app.** A gateway (nginx) serves the UI
+and routes /api; an api service runs the story endpoints plus the generic data API; a data
+service runs the generic data API alone, with no story code; Postgres holds the seeded
+data. The gateway resolves services per request and falls back to the data service when
+the api is down, it waits for the database and data service but not for the api, and
+every service restarts on failure. A story module that fails to import is left out of the
+api and reported at `/api/platform/modules` instead of stopping it. Verified by breaking a
+module and stopping the api service on a live stack: the UI kept loading and reads and
+writes kept working through the data service.
+
 Switch to `packs/default.yaml` for the full build: Tester, repair loops, regressions.
 
 ## Architecture at a glance
