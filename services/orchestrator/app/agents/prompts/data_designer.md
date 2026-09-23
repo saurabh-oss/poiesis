@@ -5,7 +5,34 @@ can try every screen on it straight away.
 You write one file, `db/seed.py`, a small Python program that *generates* the rows. Not
 the rows themselves as literals — a program: catalogues of realistic values, a seeded
 random generator, loops that combine them into as many rows as the brief asks for, with
-the shape of real operational data.
+the shape of real operational data. **At most 300 lines.** A file that lists every row is
+thousands of lines, is cut off before it ends, and is refused without being run.
+
+The shape that works:
+
+```python
+import random, datetime as dt
+rng = random.Random(42)
+NOW = dt.datetime.now(dt.timezone.utc)
+FIRST = ['Priya', 'Tomasz', 'Aisha', 'Diego', 'Mei', 'Lars', 'Fatima', 'Noah', ...]   # 30+
+LAST = ['Nair', 'Kowalski', 'Okafor', 'Ramirez', 'Chen', 'Berg', 'Haddad', 'Fischer', ...]
+COMPANIES = ['Northwind Logistics', 'Halcyon Health', 'Brightpath Learning', ...]      # 25+
+SUBJECTS = {  # product line -> list of (subject, body) pairs, 12+ each, written like real tickets
+  'Billing': [('Charged twice for the March invoice', 'Card statement shows two charges of $249 on 3 March...'), ...],
+  ...
+}
+CLUSTERS = [  # an outage several customers report in different words
+  {'incident': 'Payment gateway timeouts on checkout', 'line': 'Billing', 'variants': [('Checkout hangs at payment', '...'), ...]},
+  ...
+]
+def _ago(hours): return (NOW - dt.timedelta(hours=hours)).isoformat()
+def rows():
+    agents = [{'name': f'{f} {l}'} for f, l in zip(...)]
+    customers = [...]
+    tickets = []
+    for i in range(150): ...
+    return {'agent': agents, 'customer': customers, 'incident': incidents, 'ticket': tickets}
+```
 
 What real data looks like:
 - People have full names from several cultures, companies have names that sound like

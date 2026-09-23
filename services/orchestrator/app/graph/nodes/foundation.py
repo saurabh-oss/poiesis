@@ -17,6 +17,7 @@ from typing import Any
 from ...agents.base import DATA_DESIGNER, FOUNDATION
 from ...config import pack
 from ...events import emit
+from ...llm import ReplyTruncated, UnparseableReply
 from ...workspace import repo
 from ...workspace.checks import validate_init_sql
 from ...workspace.interface import excerpt, EDITABLE
@@ -25,6 +26,7 @@ from ...workspace.seeding import (
     SEED_SCRIPT,
     quality_issues,
     rows_to_sql,
+    size_issue,
     run_seed_script,
     summary,
     tables_in,
@@ -99,7 +101,14 @@ async def lay_foundation(state: RunState) -> RunState:
     # 1. The schema, from the whole backlog at once.
     await emit(run_id, "Designing the data model for every story at once", agent="developer", stage="foundation")
     prompt = _schema_prompt(state, run_id)
-    impl = await remember(run_id, "foundation:schema", lambda: FOUNDATION.json(prompt, max_tokens=14000))
+    try:
+        impl = await remember(run_id, "foundation:schema", lambda: FOUNDATION.json(prompt, max_tokens=14000))
+    except (ReplyTruncated, UnparseableReply) as exc:
+        await emit(run_id, f"The data model reply could not be read ({type(exc).__name__}); asking again, shorter",
+                   agent="developer", stage="foundation", level="warn")
+        impl = await remember(run_id, "foundation:schema:retry", lambda: FOUNDATION.json(
+            prompt + "\n\nYour previous reply was too long or unreadable. Keep every file compact: no "
+                     "docstrings beyond one line, no comments except the allowed-values ones.", max_tokens=14000))
     written, sha, refused = await _apply(run_id, state, "S0", impl.get("files", {}),
                                          impl.get("commit_message") or "feat(foundation): data model")
     rejected = [r for r in refused if "REJECTED" in r]
@@ -124,11 +133,24 @@ async def lay_foundation(state: RunState) -> RunState:
     seed_sql = ""
     problems: list[str] = []
     for attempt in range(SEED_REPAIRS + 1):
-        reply = await remember(run_id, f"foundation:seed:{attempt}", lambda: DATA_DESIGNER.json(
-            base_prompt + feedback, max_tokens=14000))
+        try:
+            reply = await remember(run_id, f"foundation:seed:{attempt}", lambda: DATA_DESIGNER.json(
+                base_prompt + feedback, max_tokens=9000))
+        except (ReplyTruncated, UnparseableReply) as exc:
+            # A reply that does not fit is the rows written out as literals.
+            reply = {"files": {}, "reasoning": ""}
+            problems = [f"your reply could not be used ({type(exc).__name__}): it was too long to finish. "
+                        f"{SEED_SCRIPT} must be a generator of at most 300 lines, never the rows as literals"]
+            await emit(run_id, f"Demonstration data, attempt {attempt + 1}: " + problems[0][:200],
+                       agent="data_designer", stage="foundation", level="warn")
+            feedback = "\n\nYOUR PREVIOUS REPLY WAS CUT OFF: " + problems[0] + "\nReturn a short generator."
+            continue
         script = (reply.get("files") or {}).get(SEED_SCRIPT)
         if not isinstance(script, str) or not script.strip():
             problems = [f"the reply contained no {SEED_SCRIPT}"]
+        elif size_issue(script):
+            problems = [size_issue(script)]
+            rows = None
         else:
             repo.write_files(run_id, {SEED_SCRIPT: script})
             rows, error = await run_seed_script(run_id)

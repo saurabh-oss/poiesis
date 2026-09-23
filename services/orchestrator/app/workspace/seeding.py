@@ -22,6 +22,10 @@ from .repo import workspace_path
 from .runner import ExecResult, run_in_sandbox
 
 SEED_SCRIPT = "db/seed.py"
+# A generator is a few hundred lines. Past that it is the rows written out as
+# literals, which is what the reply budget cannot hold and the check refuses.
+MAX_SEED_LINES = 450
+MAX_SEED_CHARS = 32000
 SEED_MARKER = "-- ==== DEMONSTRATION DATA — generated from db/seed.py by the platform; this section is rewritten ===="
 MAX_ROWS_PER_TABLE = 5000
 _CHUNK = 50
@@ -47,7 +51,21 @@ THE CONTRACT FOR {SEED_SCRIPT}:
   3–6 rows describing the same problem in different words. Never number the copies
   ("Payment failed #1", "#2"); never repeat one sentence 25 times.
 - Fast: it runs in well under ten seconds and prints nothing.
+- SHORT: at most 300 lines. That is the size of a generator. A file of literal rows is
+  thousands of lines, is cut off before it ends, and is refused without being run. Write
+  catalogues (lists of 30-40 subjects, of names, of companies) and loops that combine them.
 """
+
+
+def size_issue(script: str) -> str:
+    """Why a script is a dump of literals rather than a generator, or ''."""
+    lines = script.count("\n") + 1
+    if lines <= MAX_SEED_LINES and len(script) <= MAX_SEED_CHARS:
+        return ""
+    return (f"{SEED_SCRIPT} is {lines} lines / {len(script):,} characters: that is the rows written out as "
+            f"literals, not a generator, and the reply was cut off before the file ended. Write at most "
+            f"{MAX_SEED_LINES // 1.5:.0f} lines: catalogues of 30-40 distinct subjects, names and companies, "
+            "a seeded random.Random, and loops that combine them into the counts the brief asks for.")
 
 
 def _sql_value(value: Any) -> str:
