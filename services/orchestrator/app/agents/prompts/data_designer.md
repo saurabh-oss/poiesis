@@ -70,5 +70,7 @@ Output `files` first:
   "reasoning": "2-3 sentences on what the data shows"
 }
 
-Escape every double quote inside the file as \" and every newline as \n. Prefer single
-quotes for Python strings. One unescaped quote makes the whole reply unreadable.
+Write every Python string literal with double quotes (`"Charged twice for the March invoice"`)
+and escape each of those quotes as \" inside the JSON reply, with newlines as \n. Never use
+single-quoted Python strings: customer text is full of apostrophes ("hasn't", "customer's"),
+and one apostrophe inside a single-quoted string is a syntax error that fails the whole file.

@@ -56,12 +56,28 @@ THE CONTRACT FOR {SEED_SCRIPT}:
   incident_id is left None on a real share of rows (10-40%), so a queue has untriaged
   tickets, an "assign" flow has unassigned ones, and a board has rows in every column.
 - Fast: it runs in well under ten seconds and prints nothing.
-- Text with an apostrophe ("hasn't", "customer's") goes in double-quoted Python strings;
-  an apostrophe inside a single-quoted string is the syntax error that fails the whole file.
+- Every Python string literal is double-quoted. Customer text is full of apostrophes
+  ("hasn't", "customer's"), and one apostrophe inside a single-quoted string is the syntax
+  error that fails the whole file. No single-quoted strings anywhere.
 - SHORT: at most 300 lines. That is the size of a generator. A file of literal rows is
   thousands of lines, is cut off before it ends, and is refused without being run. Write
   catalogues (lists of 30-40 subjects, of names, of companies) and loops that combine them.
 """
+
+
+def syntax_issue(script: str) -> str:
+    """The exact line a script fails to parse on, or '' — cheaper and clearer than the sandbox."""
+    import ast
+    try:
+        ast.parse(script)
+        return ""
+    except SyntaxError as exc:
+        line = (script.splitlines()[exc.lineno - 1] if exc.lineno and exc.lineno <= script.count("\n") + 1 else "").strip()
+        hint = ""
+        if "'" in line and line.count("'") % 2 == 1 or "unterminated" in str(exc.msg):
+            hint = (" — an apostrophe inside a single-quoted string. Write every Python string with double "
+                    "quotes (escaped as \\\" in the JSON), never single quotes.")
+        return f"{SEED_SCRIPT} does not parse: line {exc.lineno}: {exc.msg}: {line[:160]}{hint}"
 
 
 def size_issue(script: str) -> str:

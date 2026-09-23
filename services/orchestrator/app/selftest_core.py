@@ -670,6 +670,10 @@ async def test_foundation() -> None:
     expect("a criterion's minimum count is checked", any("at least 150 tickets" in i for i in q), str(q))
     expect("varied data passes", seeding.quality_issues(rows, ["at least 25 tickets"]) == [],
            str(seeding.quality_issues(rows, ["at least 25 tickets"])))
+    bad = "SUBJECTS = [\n    ('Charged twice', 'The customer's card was charged twice'),\n]\n"
+    expect("an apostrophe in a single-quoted string is named with its line and the fix",
+           "line 2" in seeding.syntax_issue(bad) and "double" in seeding.syntax_issue(bad), seeding.syntax_issue(bad))
+    expect("a script that parses has no syntax issue", seeding.syntax_issue("def rows():\n    return {}\n") == "")
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

@@ -31,6 +31,7 @@ from ...workspace.seeding import (
     rows_to_sql,
     run_seed_script,
     size_issue,
+    syntax_issue,
     strip_seed_section,
     summary,
     tables_in,
@@ -132,6 +133,8 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
             problems = [f"the reply contained no {SEED_SCRIPT}"]
         elif size_issue(script):
             problems = [size_issue(script)]
+        elif syntax_issue(script):
+            problems = [syntax_issue(script)]
         else:
             repo.write_files(run_id, {SEED_SCRIPT: script})
             rows, error = await run_seed_script(run_id)
