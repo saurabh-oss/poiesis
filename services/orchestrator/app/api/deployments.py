@@ -44,9 +44,11 @@ async def get_deployment(run_id: str):
         return runtime.as_row(row) if row else None
 
 
-async def _deploy_and_announce(run_id: str) -> None:
-    await emit(run_id, "Starting the application on request", agent="release", stage="deploy")
-    outcome = await runtime.deploy(run_id)
+async def _deploy_and_announce(run_id: str, fresh: bool = False) -> None:
+    await emit(run_id, "Starting the application on request"
+                       + (" with a fresh database (init.sql runs again)" if fresh else ""),
+               agent="release", stage="deploy")
+    outcome = await runtime.deploy(run_id, fresh=fresh)
     if outcome.status == "running":
         await emit(run_id, f"Running at {outcome.url} — checking every screen in a browser",
                    agent="release", stage="deploy", data=outcome.as_dict())
@@ -64,7 +66,9 @@ async def _deploy_and_announce(run_id: str) -> None:
 
 
 @router.post("/api/runs/{run_id}/deploy", status_code=202)
-async def deploy_run(run_id: str):
+async def deploy_run(run_id: str, fresh: bool = False):
+    """Start (or restart) the run's application. `fresh=true` drops its database volume
+    first, so regenerated demonstration data in db/init.sql is what it opens with."""
     with session() as s:
         if s.get(Run, run_id) is None:
             raise HTTPException(404, "run not found")
@@ -73,8 +77,8 @@ async def deploy_run(run_id: str):
                                  "application itself before the release decision.")
     job = _jobs.get(run_id)
     if job is None or job.done():
-        _jobs[run_id] = asyncio.create_task(_deploy_and_announce(run_id))
-    return {"status": "starting"}
+        _jobs[run_id] = asyncio.create_task(_deploy_and_announce(run_id, fresh))
+    return {"status": "starting", "fresh": fresh}
 
 
 @router.get("/api/runs/{run_id}/shots/{name}")
