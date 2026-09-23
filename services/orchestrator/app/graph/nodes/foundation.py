@@ -123,12 +123,12 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
                        agent="data_designer", stage=stage, level="warn")
             feedback = "\n\nYOUR PREVIOUS REPLY WAS CUT OFF: " + problems[0] + "\nReturn a shorter spec."
             continue
-        rows, problems = expand_spec(reply, tables)
+        rows, problems, derived = expand_spec(reply, tables)
         if rows and not problems:
             import json as _json
             repo.write_files(run_id, {SPEC_FILE: _json.dumps(reply, indent=1)})
             seed_sql, problems = rows_to_sql(rows, tables)
-            problems += quality_issues(rows, criteria, tables)
+            problems += quality_issues(rows, criteria, tables, derived)
             if not problems:
                 write_seed_section(run_id, seed_sql)
                 check = await validate_init_sql(run_id)

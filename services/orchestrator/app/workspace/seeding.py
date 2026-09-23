@@ -172,7 +172,8 @@ def _texty(values: list[Any]) -> bool:
 
 
 def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: list[str],
-                   tables: dict[str, dict[str, bool]] | None = None) -> list[str]:
+                   tables: dict[str, dict[str, bool]] | None = None,
+                   derived: set[tuple[str, str]] | None = None) -> list[str]:
     """Is this data a demonstration someone would believe?
 
     `tables` (checks._table_columns) says which columns are optional: an optional
@@ -204,6 +205,8 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
                         issues.append(f"{table}.{key} is optional but set on every row — leave it None on a real "
                                       "share (10-40%) so the flow that sets it has something to act on")
         for key in keys:
+            if (str(table).lower(), key) in (derived or set()):
+                continue  # a look-up or a generated name repeats honestly
             values = [r.get(key) for r in rows if isinstance(r, dict)]
             if not _texty(values):
                 continue

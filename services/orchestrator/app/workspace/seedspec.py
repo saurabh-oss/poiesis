@@ -196,11 +196,14 @@ class _Expander:
         self.rows: dict[str, list[dict[str, Any]]] = {}
         self.issues: list[str] = []
         self.specs: dict[str, dict[str, dict[str, Any]]] = {}
+        # Columns whose values are mechanical (a look-up, a weighted choice, a
+        # generated name): the prose-variety checks do not apply to them.
+        self.derived: set[tuple[str, str]] = set()
 
-    def run(self) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    def run(self) -> tuple[dict[str, list[dict[str, Any]]], list[str], set[tuple[str, str]]]:
         for entry in self.spec.get("tables") or []:
             self._table(entry)
-        return self.rows, list(dict.fromkeys(self.issues))
+        return self.rows, list(dict.fromkeys(self.issues)), self.derived
 
     def _table(self, entry: dict[str, Any]) -> None:
         name = str(entry.get("table") or "").lower()
@@ -209,8 +212,17 @@ class _Expander:
             return
         count = int(entry.get("count") or 0)
         records = [r for r in (entry.get("records") or []) if isinstance(r, dict)]
-        columns: dict[str, dict[str, Any]] = {k: v for k, v in (entry.get("columns") or {}).items() if isinstance(v, dict)}
+        # `id` is the database's; a spec for it is ignored rather than argued with.
+        columns: dict[str, dict[str, Any]] = {k: v for k, v in (entry.get("columns") or {}).items()
+                                              if isinstance(v, dict) and k != "id"}
         self.specs[name] = columns
+        for col, cspec in columns.items():
+            prose = str(cspec.get("kind")) in ("catalogue", "text") and len(cspec.get("values") or []) >= 12
+            if not prose:
+                self.derived.add((name, col))
+        if count >= 60 and len(records) < 30:
+            self.issues.append(f"{name}: {count} rows over {len(records)} record(s) read as copies — write at "
+                               "least 30 distinct records for it, each with its own wording")
         spec_cols = self.tables[name]
         for col in list(columns) + [k for r in records for k in r]:
             if col.lower() not in spec_cols and col != "id":
@@ -347,8 +359,8 @@ class _Expander:
 
 
 def expand_spec(spec: dict[str, Any], tables: dict[str, dict[str, bool]], seed: int = 42,
-                ) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
-    """Rows per table from a spec, and what is wrong with the spec."""
+                ) -> tuple[dict[str, list[dict[str, Any]]], list[str], set[tuple[str, str]]]:
+    """Rows per table from a spec, what is wrong with the spec, and the mechanical columns."""
     if not isinstance(spec, dict) or not isinstance(spec.get("tables"), list):
-        return {}, ["the spec must be an object with a `tables` list"]
+        return {}, ["the spec must be an object with a `tables` list"], set()
     return _Expander(spec, tables, seed).run()
