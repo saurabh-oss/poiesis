@@ -265,6 +265,43 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
     return list(dict.fromkeys(issues))
 
 
+def fill_required(rows_by_table: dict[str, list[dict[str, Any]]],
+                  tables: dict[str, dict[str, bool]]) -> list[str]:
+    """Fill NOT NULL gaps in place, so a nearly-right data set still loads.
+
+    Used only on the last attempt: 29 employees without an email once made
+    Postgres reject the whole seed, and the app opened with no data at all.
+    Returns notes on what was filled.
+    """
+    notes: list[str] = []
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    for table, rows in rows_by_table.items():
+        spec = tables.get(str(table).lower(), {})
+        if not isinstance(rows, list):
+            continue
+        for col, required in spec.items():
+            if not required:
+                continue
+            holes = [r for r in rows if isinstance(r, dict) and r.get(col) is None]
+            if not holes:
+                continue
+            for i, r in enumerate(holes):
+                name = r.get("full_name") or r.get("name") or " ".join(
+                    str(r.get(k)) for k in ("first_name", "last_name") if r.get(k)) or f"{table} {i + 1}"
+                c = col.lower()
+                if "email" in c:
+                    local = re.sub(r"[^a-z]+", ".", str(name).lower()).strip(".") or f"user{i + 1}"
+                    r[col] = f"{local}@example.com"
+                elif c.endswith(("_at", "_date", "date")) or c in ("created", "updated"):
+                    r[col] = now.isoformat()
+                elif c.endswith(("_id", "count", "qty", "quantity", "seats", "cost", "price", "amount", "total")):
+                    r[col] = 0 if not c.endswith("_id") else 1
+                else:
+                    r[col] = "Unspecified"
+            notes.append(f"{table}.{col}: filled {len(holes)} empty required value(s)")
+    return notes
+
+
 def strip_seed_section(sql: str) -> str:
     i = sql.find(SEED_MARKER)
     return sql if i < 0 else sql[:i].rstrip() + "\n"

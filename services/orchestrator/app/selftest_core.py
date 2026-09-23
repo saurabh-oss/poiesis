@@ -750,6 +750,11 @@ async def test_foundation() -> None:
     titles = {"agent": [{"name": ["Senior Accountant", "Warehouse Supervisor", "IT Technician"][i % 3]} for i in range(60)]}
     expect("short categorical text (job titles) may repeat", seeding.quality_issues(titles, []) == [],
            str(seeding.quality_issues(titles, []))[:200])
+    gappy = {"employee": [{"full_name": "Ines Costa", "email": None}, {"full_name": "Kwame Mensah", "email": "k@x.io"}]}
+    notes = seeding.fill_required(gappy, {"employee": {"id": False, "full_name": True, "email": True}})
+    expect("a last-attempt data set gets its required gaps filled",
+           gappy["employee"][0]["email"] == "ines.costa@example.com" and gappy["employee"][1]["email"] == "k@x.io"
+           and notes == ["employee.email: filled 1 empty required value(s)"], str(notes))
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

@@ -154,12 +154,25 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
                     + "\n".join(f"- {p}" for p in problems[:12])
                     + "\nReturn the whole corrected spec.")
     else:
-        # The seed never met the bar; whatever the last run produced is still better than nothing.
+        # The seed never met the bar; whatever the last attempt produced is still better
+        # than an empty app, once its required gaps are filled.
+        if rows:
+            from ...workspace.seeding import fill_required
+            filled = fill_required(rows, tables)
+            seed_sql, _ = rows_to_sql(rows, tables)
+            if filled:
+                await emit(run_id, "Demonstration data: " + "; ".join(filled[:6]),
+                           agent="data_designer", stage=stage, level="warn")
         if rows and seed_sql:
             write_seed_section(run_id, seed_sql)
-            if not (await validate_init_sql(run_id)).ok:
+            check = await validate_init_sql(run_id)
+            if not check.ok:
                 write_seed_section(run_id, "")
                 seed_sql = ""
+                rows = None
+                await emit(run_id, "Demonstration data rejected by Postgres; the app starts empty: "
+                                   + check.stdout.strip()[-300:],
+                           agent="data_designer", stage=stage, level="error")
         await emit(run_id, "The demonstration data still has problems; carrying on with what runs",
                    agent="data_designer", stage=stage, level="error", data={"problems": problems})
 
