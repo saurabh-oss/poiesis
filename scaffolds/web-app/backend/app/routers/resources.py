@@ -37,7 +37,7 @@ from ..db import Base, get_session
 
 router = APIRouter()
 
-_RESERVED = {"q", "sort", "limit", "offset"}
+_RESERVED = {"q", "sort", "limit", "offset", "page", "_"}
 
 
 def plural(table: str) -> str:
@@ -101,8 +101,13 @@ def _register(cls: type) -> None:
         if q and text_columns:
             query = query.filter(or_(*[c.ilike(f"%{q}%") for c in text_columns]))
         for key in params.keys():
-            if key in _RESERVED or key not in by_key:
+            if key in _RESERVED:
                 continue
+            if key not in by_key:
+                # Ignoring it returned every row: a "leavers" screen once listed all 125
+                # employees. Saying so is what gets the screen fixed.
+                raise HTTPException(status_code=422, detail=(
+                    f"{key} is not a column of {table}; filter on one of: {', '.join(by_key)}"))
             values = [_coerce(by_key[key], v) for v in params.getlist(key)]
             query = query.filter(by_key[key].in_(values)) if len(values) > 1 else query.filter(by_key[key] == values[0])
         sort = params.get("sort") or f"-{pk.key}"

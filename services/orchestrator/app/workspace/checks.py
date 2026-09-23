@@ -169,7 +169,15 @@ def _normalise(path: str) -> str:
 # A screen that needs an id and gives up without one: `const id = params[0]; if (!id) { ...; return; }`
 # before any api() call. The navigation opens every screen without parameters.
 _PARAM_ID = re.compile(r"\bparams\s*(?:\[\s*0\s*\]|\?\.\[\s*0\s*\])|\bparams\s*\)|\[\s*\w+\s*\]\s*=\s*params")
-_GUARD_OPEN = re.compile(r"if\s*\(\s*!\s*[\w.$]+\s*\)\s*\{")
+_GUARD_OPEN = re.compile(r"if\s*\(([^{};]*)\)\s*\{")
+
+
+def _is_id_guard(cond: str) -> bool:
+    """`!id`, `!params || params.length === 0`, `params.length < 1`, `!ticketId`…"""
+    c = cond.replace(" ", "")
+    negative = "!" in c.replace("!=", "") or re.search(r"length(===?|<)(0|1)", c)
+    about_id = re.search(r"params|id\b|Id\b|_id", cond)
+    return bool(negative and about_id)
 
 
 def _gives_up_without_id(code: str) -> tuple[int, str] | None:
@@ -181,6 +189,8 @@ def _gives_up_without_id(code: str) -> tuple[int, str] | None:
     for m in _GUARD_OPEN.finditer(code):
         if "api(" in code[:m.start()]:
             return None  # data was loaded first; a later guard is a real branch
+        if not _is_id_guard(m.group(1)):
+            continue
         depth, i, n = 1, m.end(), len(code)
         while i < n and depth:
             ch = code[i]

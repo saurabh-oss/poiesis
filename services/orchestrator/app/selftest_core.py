@@ -809,6 +809,17 @@ async def test_foundation() -> None:
             "export default { title: 'Ticket', story: 'S1', async render(root, { api, h, params, ui }) {"
             " const id = params[0]; if (!id) { root.append(ui.empty('No ticket selected')); return; }"
             " const t = await api(`/tickets/${id}`); root.append(h('p', {}, t.subject)); } };\n", encoding="utf-8")
+        (root / "frontend" / "screens" / "ticket_detail.js").write_text(
+            "export default { title: 'Ticket', story: 'S1', async render(root, { api, h, params, ui }) {"
+            " if (!params || params.length === 0) { root.append(ui.empty('No ticket selected')); return; }"
+            " const t = await api(`/tickets/${params[0]}`); root.append(h('p', {}, t.subject)); } };\n", encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, set())
+        expect("a `!params || params.length === 0` guard is caught too",
+               any("ticket_detail.js" in i and "opened without an id" in i for i in static), str(static)[:300])
+        (root / "frontend" / "screens" / "ticket_detail.js").write_text(
+            "export default { title: 'Ticket', story: 'S1', async render(root, { api, h, params, ui }) {"
+            " const id = params[0]; if (!id) { root.append(ui.empty('No ticket selected')); return; }"
+            " const t = await api(`/tickets/${id}`); root.append(h('p', {}, t.subject)); } };\n", encoding="utf-8")
         static = checks.static_issues(rid, "S1", True, set())
         expect("a screen that gives up without an id is caught before deploy",
                any("ticket_detail.js" in i and "opened without an id" in i for i in static), str(static)[:300])

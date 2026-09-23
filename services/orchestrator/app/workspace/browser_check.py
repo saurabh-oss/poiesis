@@ -161,7 +161,12 @@ with sync_playwright() as p:
             problems.append(
                 "The screen never called the API and has no controls: it shows only text it "
                 "had built in. Load the story's data in render() and show it.")
-        for c in calls:
+        # A screen that shows rows (a table, a list, cards) has displayed data, even
+        # when it aggregates or filters what it fetched: a licence register shows
+        # utilisation per title, not the 450 seats it counted.
+        shown = page.evaluate(
+            "() => document.querySelectorAll('#app tbody tr, #app li, #app .card, #app .bar').length")
+        for c in ([] if shown else calls):
             if c["count"] == 0 or not c["sample"]:
                 continue
             # A dashboard that fetched 150 rows and shows "150" has displayed them too.
