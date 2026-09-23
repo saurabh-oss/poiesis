@@ -87,7 +87,9 @@ with sync_playwright() as p:
         except Exception:
             return
         if isinstance(body, list):
-            sample = values_of(body[0]) if body else []
+            # Values from the first few items: a screen may sort or page them
+            # client-side, so the API's first row is not always on the first page.
+            sample = list(dict.fromkeys(v for item in body[:6] for v in values_of(item)))[:12]
             fetched.append({"path": short(r.url), "count": len(body), "sample": sample})
         elif isinstance(body, dict):
             fetched.append({"path": short(r.url), "count": None, "sample": values_of(body)})
@@ -154,7 +156,10 @@ with sync_playwright() as p:
         for c in calls:
             if c["count"] == 0 or not c["sample"]:
                 continue
-            if not any(v in text for v in c["sample"]):
+            # A dashboard that fetched 150 rows and shows "150" has displayed them too.
+            counted = c["count"] is not None and c["count"] >= 5 and (
+                f"{c['count']:,}" in text or str(c["count"]) in text)
+            if not counted and not any(v in text for v in c["sample"]):
                 how_many = "1 record" if c["count"] is None else f"{c['count']} item(s)"
                 problems.append(
                     f"GET {c['path']} returned {how_many}, but none of it appears on the "

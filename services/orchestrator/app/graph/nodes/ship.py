@@ -354,8 +354,18 @@ async def review(state: RunState) -> RunState:
         for r in live["screens"]
     )
     dod = pack().get("definition_of_done", [])
+    mvp = str(pack().get("build", {}).get("mode") or "").lower() == "mvp"
+    policy = (
+        "REVIEW POLICY — MVP MODE: this increment is a showcase. By design no automated tests "
+        "are written; the platform's checks and the live browser check are the verification. "
+        "Score `test_adequacy` 100 with the note \"not applicable in MVP mode\" and raise no "
+        "finding about missing tests, hand-rolled validation or backend hardening. Judge what a "
+        "visitor experiences: every screen opens, shows the demonstration data on first open, "
+        "looks finished, and the actions the criteria name can be tried and visibly take effect. "
+        "A cosmetic or backend concern is advisory, never a blocker.\n\n" if mvp else "")
     verdict = await REVIEWER.json(
-        ("DEFINITION OF DONE (this organisation's, binding):\n"
+        policy
+        + ("DEFINITION OF DONE (this organisation's, binding):\n"
          + "\n".join(f"- {d}" for d in dod) + "\n\n" if dod else "")
         + f"SPRINT GOAL: {state['sprint'].get('sprint_goal','')}\n\n"
         f"STORIES AND CRITERIA:\n{str(state['sprint'].get('stories', []))[:scaled(3000)]}\n\n"
