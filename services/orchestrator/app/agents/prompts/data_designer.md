@@ -44,6 +44,10 @@ What real data looks like:
   customers, products and dates so hundreds of rows stay distinct.
 - Distributions are uneven: a few agents carry most of the load, most tickets are P3, a
   handful are P1, most incidents are resolved, a couple are live.
+- Every screen has work to do on day one: a triage queue needs a good share of tickets
+  still untriaged and unassigned (30-40%), an assign flow needs unassigned rows, a status
+  board needs rows in every status, a resolve action needs open incidents with linked
+  tickets. Leave optional references None on a real share of rows.
 - Time is spread: created_at over the period the brief names (use `datetime.now()` minus a
   random number of hours so it stays recent), triage a few minutes to hours after
   arrival, resolution only on resolved rows.

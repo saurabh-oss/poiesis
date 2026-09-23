@@ -960,7 +960,11 @@ async def build(state: RunState) -> RunState:
                 break
             continue
 
-        if impl.get("blocked_reason"):
+        blocked = impl.get("blocked_reason")
+        if isinstance(blocked, str) and blocked.strip().lower() in ("", "null", "none", "n/a", "no", "false"):
+            blocked = None  # a model wrote the word, not a reason
+            impl = {**impl, "blocked_reason": None}
+        if blocked:
             await emit(run_id, f"{story['id']} blocked: {impl['blocked_reason']}",
                        agent="developer", stage="build", level="error")
             results.append({"story_id": story["id"], "status": "blocked",

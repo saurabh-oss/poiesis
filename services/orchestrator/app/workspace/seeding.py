@@ -51,6 +51,10 @@ THE CONTRACT FOR {SEED_SCRIPT}:
   priorities, plans and dates. Where the brief wants near-duplicates, write clusters of
   3–6 rows describing the same problem in different words. Never number the copies
   ("Payment failed #1", "#2"); never repeat one sentence 25 times.
+- Every state represented, in believable proportions: a status column with 20+ rows has
+  every allowed value, none above 70%; a nullable reference such as assignee_id or
+  incident_id is left None on a real share of rows (10-40%), so a queue has untriaged
+  tickets, an "assign" flow has unassigned ones, and a board has rows in every column.
 - Fast: it runs in well under ten seconds and prints nothing.
 - SHORT: at most 300 lines. That is the size of a generator. A file of literal rows is
   thousands of lines, is cut off before it ends, and is refused without being run. Write
@@ -138,14 +142,38 @@ def _texty(values: list[Any]) -> bool:
     return len(strings) >= len(values) * 0.8 and strings and sum(len(s) for s in strings) / len(strings) >= 12
 
 
-def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: list[str]) -> list[str]:
-    """Is this data a demonstration someone would believe?"""
+def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: list[str],
+                   tables: dict[str, dict[str, bool]] | None = None) -> list[str]:
+    """Is this data a demonstration someone would believe?
+
+    `tables` (checks._table_columns) says which columns are optional: an optional
+    reference that every row fills leaves the flow that fills it nothing to do.
+    """
     issues: list[str] = []
     counts = {str(t).lower(): len(r) for t, r in rows_by_table.items() if isinstance(r, list)}
     for table, rows in rows_by_table.items():
         if not isinstance(rows, list) or len(rows) < 12:
             continue
         keys = dict.fromkeys(k for r in rows if isinstance(r, dict) for k in r)
+        spec = (tables or {}).get(str(table).lower(), {})
+        if len(rows) >= 20:
+            for key in keys:
+                values = [r.get(key) for r in rows if isinstance(r, dict)]
+                strings = [v for v in values if isinstance(v, str)]
+                if len(strings) == len(values) and strings and sum(len(s) for s in strings) / len(strings) <= 20:
+                    distinct = {s.strip().lower() for s in strings}
+                    if 1 < len(distinct) <= 12:
+                        top = max(sum(1 for s in strings if s.strip().lower() == d) for d in distinct)
+                        if top > len(strings) * 0.8:
+                            issues.append(f"{table}.{key}: {top} of {len(strings)} rows share one value — "
+                                          "give every state a believable share so each screen has rows to show")
+                    elif len(distinct) == 1 and key.lower() in ("status", "state", "stage", "priority", "severity"):
+                        issues.append(f"{table}.{key}: every row is '{strings[0]}' — represent every allowed value")
+                if key.lower().endswith("_id") and key.lower() in spec and not spec[key.lower()]:
+                    empty = sum(1 for v in values if v is None)
+                    if empty == 0:
+                        issues.append(f"{table}.{key} is optional but set on every row — leave it None on a real "
+                                      "share (10-40%) so the flow that sets it has something to act on")
         for key in keys:
             values = [r.get(key) for r in rows if isinstance(r, dict)]
             if not _texty(values):

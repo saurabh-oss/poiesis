@@ -341,10 +341,11 @@ export function table(opts = {}) {
     if (none && query) emptyEl.replaceChildren(h("strong", {}, "No matches"), `Nothing matches "${query}".`);
     else if (none) emptyEl.replaceChildren(h("strong", {}, (opts.empty && opts.empty.title) || "Nothing to show"), (opts.empty && opts.empty.hint) || "");
     count.textContent = none ? "" : `${start + 1}–${Math.min(rows.length, start + pageSize)} of ${number(rows.length)}`;
-    pager.replaceChildren(
-      pages > 1 ? h("button", { class: "ghost", disabled: page === 0, onclick: () => { page -= 1; selected = -1; draw(); } }, "‹ Prev") : null,
-      pages > 1 ? h("span", { class: "faint" }, `Page ${page + 1} of ${pages}`) : null,
-      pages > 1 ? h("button", { class: "ghost", disabled: page >= pages - 1, onclick: () => { page += 1; selected = -1; draw(); } }, "Next ›") : null);
+    pager.replaceChildren(...(pages > 1 ? [
+      h("button", { class: "ghost", disabled: page === 0, onclick: () => { page -= 1; selected = -1; draw(); } }, "‹ Prev"),
+      h("span", { class: "faint" }, `Page ${page + 1} of ${pages}`),
+      h("button", { class: "ghost", disabled: page >= pages - 1, onclick: () => { page += 1; selected = -1; draw(); } }, "Next ›"),
+    ] : []));
     return slice;
   }
 

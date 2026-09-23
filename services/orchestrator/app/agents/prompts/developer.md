@@ -272,6 +272,14 @@ appears, the browser check opens it and calls it working — and the user sees a
    succeeds, show the new state without a page reload — re-fetch and redraw, so the user sees
    that it worked.
 
+11. **A screen that needs an id must work when opened from the navigation without one.**
+    The shell lists every screen in the sidebar, and the platform opens each one that way.
+    A ticket detail, an incident status page, a reassignment form opened with empty
+    `params` shows the list to choose from — `const rows = await api("/tickets")` in a
+    `ui.table` whose `onRow` navigates to `#/ticket_detail/${row.id}` — and then the
+    detail once an id is present. Never render only a sentence asking for an id, and
+    never call the API with `undefined` in the path or the query string.
+
 10. **Demonstration data lives in `db/init.sql`.** When a story or the brief asks for sample,
     demo or starting data ("at least 150 tickets", "25 named customers", "six incidents"),
     write those rows into `db/init.sql` as INSERT statements: the only thing that runs on a

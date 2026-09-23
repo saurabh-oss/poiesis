@@ -97,6 +97,19 @@ async def run_git(run_id: str):
     return gitremote.mapping(run_id)
 
 
+@router.post("/{run_id}/reseed")
+async def reseed_run(run_id: str, body: dict | None = None):
+    """Regenerate the run's demonstration data; the next deploy starts from it."""
+    with session() as s:
+        if s.get(Run, run_id) is None:
+            raise HTTPException(404, "run not found")
+    from ..graph.nodes.foundation import reseed
+    try:
+        return await reseed(run_id, str((body or {}).get("notes") or ""))
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 @router.post("/{run_id}/retry")
 async def retry_run(run_id: str):
     """Continue a failed run from its last checkpoint, keeping everything already done."""

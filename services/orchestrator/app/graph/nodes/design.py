@@ -101,7 +101,9 @@ async def plan_sprint(state: RunState) -> RunState:
         f"CAPACITY: at most {capacity} stories this sprint.\n"
         "Cut sprint one."
     ))
-    sprint["stories"] = sprint.get("stories", [])[:capacity]
+    known = {s.get("id") for s in state["backlog"].get("stories", [])}
+    # The Planner once cut an "S11" into a ten-story backlog: a story nobody wrote.
+    sprint["stories"] = [e for e in sprint.get("stories", []) if e.get("id") in known][:capacity]
     await save_artifact(run_id, "sprint", "sprint", sprint)
     await emit(
         run_id,
@@ -126,7 +128,7 @@ async def plan_sprint(state: RunState) -> RunState:
             f"BINDING SCOPE CHANGE FROM STAKEHOLDER:\n{response['notes']}\n"
             f"CAPACITY: at most {capacity} stories."
         ))
-        sprint["stories"] = sprint.get("stories", [])[:capacity]
+        sprint["stories"] = [e for e in sprint.get("stories", []) if e.get("id") in known][:capacity]
         await save_artifact(run_id, "sprint", "sprint", sprint)
 
     await tracker.on_sprint(run_id, state, sprint)
