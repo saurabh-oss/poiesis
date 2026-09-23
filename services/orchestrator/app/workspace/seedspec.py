@@ -92,6 +92,7 @@ def spec_schema(tables: list[str]) -> dict[str, Any]:
         "via": {"type": "string"}, "field": {"type": "string"},
         "days_back": {"type": "number"}, "after": {"type": "string"},
         "hours_min": {"type": "number"}, "hours_max": {"type": "number"},
+        "days_min": {"type": "number"}, "days_max": {"type": "number"},
         "min": {"type": "number"}, "max": {"type": "number"}, "decimals": {"type": "integer"},
         "true_share": {"type": "number"}, "null_share": {"type": "number"},
         "value": {"type": ["string", "number", "boolean", "null"]},
@@ -132,6 +133,7 @@ customers, other dates), so 40 records make 150 distinct-looking rows. Near-dupl
   lookup        {"kind":"lookup","via":"customer_id","field":"name"}                     copy a field from the row a ref column points at
   time          {"kind":"time","days_back":30}                                           a timestamp in the last N days, spread evenly
                 {"kind":"time","after":"arrival_time","hours_min":0.2,"hours_max":8}     a timestamp after another column of the same row
+                {"kind":"date","after":"purchase_date","days_min":1095,"days_max":1460}  a date 3-4 years after another (warranty, renewal)
   date          {"kind":"date","days_back":90}                                           a date
   int / float   {"kind":"int","min":1,"max":5}  {"kind":"float","min":0,"max":100,"decimals":2}
   bool          {"kind":"bool","true_share":0.15}
@@ -217,6 +219,8 @@ class _Expander:
             return
         count = int(entry.get("count") or 0)
         records = [r for r in (entry.get("records") or []) if isinstance(r, dict)]
+        self._record_keys = getattr(self, "_record_keys", {})
+        self._record_keys[name] = {k for r in records for k in r}
         # `id` is the database's; a spec for it is ignored rather than argued with.
         columns: dict[str, dict[str, Any]] = {k: v for k, v in (entry.get("columns") or {}).items()
                                               if isinstance(v, dict) and k != "id"}
@@ -343,6 +347,9 @@ class _Expander:
             return True, rows[int(ref_id) - 1].get(field)
         if kind in ("time", "date"):
             after = spec.get("after")
+            specced = set(self.specs.get(table, {})) | set(self._record_keys.get(table, set()))
+            if after and after not in row and after not in specced:
+                after = None  # anchored on a column nothing fills: use the window instead
             if after:
                 if after not in row:
                     return False, None
@@ -355,8 +362,13 @@ class _Expander:
                     return True, None
                 if base.tzinfo is None:
                     base = base.replace(tzinfo=dt.timezone.utc)
-                hours = rng.uniform(float(spec.get("hours_min", 0.1)), float(spec.get("hours_max", 24)))
-                t = base + dt.timedelta(hours=hours)
+                if spec.get("days_min") is not None or spec.get("days_max") is not None:
+                    lo = float(spec.get("days_min", 0))
+                    hi = float(spec.get("days_max", lo + 30))
+                    t = base + dt.timedelta(days=rng.uniform(min(lo, hi), max(lo, hi)))
+                else:
+                    hours = rng.uniform(float(spec.get("hours_min", 0.1)), float(spec.get("hours_max", 24)))
+                    t = base + dt.timedelta(hours=hours)
             else:
                 days = float(spec.get("days_back", 30))
                 t = self.now - dt.timedelta(hours=rng.uniform(0, days * 24))

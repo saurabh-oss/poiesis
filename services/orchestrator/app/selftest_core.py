@@ -726,6 +726,18 @@ async def test_foundation() -> None:
            any("colour" in i for i in bad_issues) and any("subject" in i and "NOT NULL" in i for i in bad_issues), str(bad_issues)[:300])
     expect("the reply schema constrains the table names and kinds",
            seedspec.spec_schema(["ticket"])["properties"]["tables"]["items"]["properties"]["table"]["enum"] == ["ticket"])
+    volume = "Data set | Volume | Characteristics\nEmployees | at least 120 | 6 departments\nLicence seats | at least 400 | x"
+    q2 = seeding.quality_issues({"employee": [{"name": f"P{i}"} for i in range(25)],
+                                 "license_seat": [{"x": 1}] * 10}, [volume])
+    expect("a BRD volume table is enforced as a minimum count",
+           any("120" in i and "`employee`" in i for i in q2) and any("400" in i and "`license_seat`" in i for i in q2), str(q2)[:300])
+    dated, _, _ = seedspec.expand_spec({"tables": [{"table": "ticket", "count": 3,
+        "records": [{"subject": "s", "body": "b", "product_line": "x", "customer_id": 1, "customer_name": "c",
+                     "priority": "P3", "arrival_time": "2025-01-01T00:00:00+00:00"}],
+        "columns": {"triaged_at": {"kind": "time", "after": "arrival_time", "days_min": 1095, "days_max": 1095},
+                    "status": {"kind": "time", "after": "missing_col", "days_back": 5}}}]}, spec_tables)
+    expect("days_min/days_max offset a date, and an anchor nothing fills falls back to the window",
+           dated["ticket"][0]["triaged_at"].startswith("2028-01-01") and dated["ticket"][0]["status"] is not None)
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

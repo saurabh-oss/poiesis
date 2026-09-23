@@ -69,7 +69,7 @@ def _schema_prompt(state: RunState, run_id: str) -> str:
         f"- {s.get('id')}: {s.get('title')}\n" + "\n".join(f"    · {c}" for c in s.get("acceptance_criteria") or [])
         for s in _stories(state))
     return (
-        _brief_text(state, 12000)
+        _brief_text(state, 40000)
         + f"\n\nARCHITECT'S DATA MODEL (a starting point; complete it from the stories):\n{arch.get('data_model', [])}\n"
         + f"\nEVERY STORY AND ITS ACCEPTANCE CRITERIA (each one needs its columns):\n{stories}\n"
         + excerpt(run_id, EDITABLE)
@@ -84,7 +84,7 @@ def _seed_prompt(state: RunState, run_id: str) -> str:
                   if any(w in c.lower() for w in ("at least", "demonstration", "sample", "demo", "seed", "realistic", "loaded"))]
     screens = "\n".join(f"- {s.get('id')}: {s.get('title')}" for s in _stories(state))
     return (
-        _brief_text(state, 12000)
+        _brief_text(state, 40000)
         + "\n\nWHAT THE STORIES EXPECT TO FIND ON FIRST OPEN:\n"
         + "\n".join(f"- {c}" for c in data_lines[:25])
         + "\n\nTHE SCREENS THAT WILL SHOW THIS DATA — each must open with something to show and something "
@@ -104,7 +104,7 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
     """
     tables = tables_in(run_id)
     base_prompt = _seed_prompt(state, run_id) + extra_feedback
-    criteria = _criteria(state) + [str(state.get("brief") or "")[:6000]]
+    criteria = _criteria(state) + [str(state.get("brief") or "")]
     schema = spec_schema(sorted(t for t in tables if t != "example"))
     feedback = ""
     rows: dict[str, list[dict[str, Any]]] | None = None

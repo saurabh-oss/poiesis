@@ -158,6 +158,7 @@ def rows_to_sql(rows_by_table: dict[str, list[dict[str, Any]]], tables: dict[str
 _ARRIVAL = re.compile(r"^(created|arriv|opened|submitted|received|started|reported|logged)|^date$|_date$", re.I)
 
 
+_VOLUME_ROW = re.compile(r"(?m)^\s*([A-Za-z][A-Za-z ]{2,30}?)(?:\s*\([^)|]*\))?\s*\|\s*(?:at least|minimum|min\.?|>=|≥)\s*(\d+)", re.I)
 _DATEISH = re.compile(r"^\d{4}-\d{2}-\d{2}")
 
 
@@ -230,21 +231,31 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
             if len(rows) >= 20 and len(days) < 5:
                 issues.append(f"{table}.{key}: {len(rows)} rows fall on only {len(days)} distinct day(s) — "
                               "spread them over the period the brief describes")
+    wanted: list[tuple[str, str]] = []
     for crit in criteria:
-        for n, noun in _AT_LEAST.findall(str(crit)):
+        wanted += [(n, noun) for n, noun in _AT_LEAST.findall(str(crit))]
+        # A volume table in a requirements document: "Employees | at least 120 | ..."
+        wanted += [(n, noun) for noun, n in _VOLUME_ROW.findall(str(crit))]
+    for n, noun in dict.fromkeys(wanted):
+        if True:
             need = int(n)
-            word = noun.lower().replace("-", "_")
+            word = noun.strip().lower().replace("-", "_").replace(" ", "_")
             if need < 5 or word in _NOT_DATA:
                 continue
-            stems = {word, word.rstrip("s"), word[:-3] + "y" if word.endswith("ies") else word,
-                     word[:-2] if word.endswith("es") else word}
-            table = next((t for t in counts if t in stems or t.rstrip("s") in stems), None)
-            if table is None:
-                table = next((t for t in counts if any(s and (s in t or t in s) for s in stems if len(s) > 3)), None)
+            table = None
+            for cand in dict.fromkeys([word, word.split("_")[-1]]):
+                stems = {cand, cand.rstrip("s"), cand[:-3] + "y" if cand.endswith("ies") else cand,
+                         cand[:-2] if cand.endswith("es") else cand}
+                table = next((t for t in counts if t in stems or t.rstrip("s") in stems), None)
+                if table is None:
+                    table = next((t for t in counts if any(s and (s in t or t in s) for s in stems if len(s) > 3)), None)
+                if table is not None:
+                    break
             if table is None:
                 continue
             if counts[table] < need:
-                issues.append(f"the brief asks for at least {need} {word}; rows() returns {counts[table]} for `{table}`")
+                issues.append(f"the brief asks for at least {need} {noun.strip().lower()}; the spec produces "
+                              f"{counts[table]} rows for `{table}` — raise its count to {need} or more")
     return list(dict.fromkeys(issues))
 
 
