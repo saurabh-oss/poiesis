@@ -39,6 +39,7 @@ from ..store import save_artifact, set_stage
 from .build import _apply, _refused_note
 
 SEED_REPAIRS = 4
+_SOFT = __import__("re").compile(r"is not a column of its CREATE TABLE|do not exist in its CREATE TABLE")
 
 
 def enabled() -> bool:
@@ -124,10 +125,18 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
             feedback = "\n\nYOUR PREVIOUS REPLY WAS CUT OFF: " + problems[0] + "\nReturn a shorter spec."
             continue
         rows, problems, derived = expand_spec(reply, tables)
+        # A column the table does not have is dropped when the rows are rendered; say
+        # so, but it is no reason to throw away an otherwise good data set.
+        dropped = [p for p in problems if _SOFT.search(p)]
+        problems = [p for p in problems if not _SOFT.search(p)]
+        if dropped:
+            await emit(run_id, "Demonstration data: ignored " + "; ".join(d[:120] for d in dropped[:4]),
+                       agent="data_designer", stage=stage, level="info")
         if rows and not problems:
             import json as _json
             repo.write_files(run_id, {SPEC_FILE: _json.dumps(reply, indent=1)})
             seed_sql, problems = rows_to_sql(rows, tables)
+            problems = [p for p in problems if not _SOFT.search(p)]
             problems += quality_issues(rows, criteria, tables, derived)
             if not problems:
                 write_seed_section(run_id, seed_sql)

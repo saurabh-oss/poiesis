@@ -747,6 +747,9 @@ async def test_foundation() -> None:
         "columns": {}}]}, spec_tables)
     expect("a short catalogue of models reused over many rows is not called copies",
            not any("copies" in i for i in estate_issues) and len(models["agent"]) == 320, str(estate_issues)[:200])
+    titles = {"agent": [{"name": ["Senior Accountant", "Warehouse Supervisor", "IT Technician"][i % 3]} for i in range(60)]}
+    expect("short categorical text (job titles) may repeat", seeding.quality_issues(titles, []) == [],
+           str(seeding.quality_issues(titles, []))[:200])
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

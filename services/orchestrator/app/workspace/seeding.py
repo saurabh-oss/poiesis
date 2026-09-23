@@ -170,7 +170,9 @@ def _texty(values: list[Any]) -> bool:
         return False
     if sum(1 for v in strings if _DATEISH.match(v)) > len(strings) * 0.5:
         return False
-    return sum(len(v) for v in strings) / len(strings) >= 12
+    # Prose only: job titles, models and plan names repeat honestly; ticket
+    # subjects and bodies copied five times do not.
+    return sum(len(v) for v in strings) / len(strings) >= 30
 
 
 def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: list[str],
