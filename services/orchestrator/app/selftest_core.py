@@ -776,6 +776,14 @@ async def test_foundation() -> None:
         static = checks.static_issues(rid, "S1", True, set())
         expect("a screen using params and navigate without receiving them is caught",
                any("status.js" in i and "`params`" in i and "`navigate`" in i for i in static), str(static)[:300])
+        (root / "backend" / "app" / "routers" / "broken.py").write_text(
+            "from fastapi import Depends\n\n\n@router.get('/broken')\ndef broken():\n    return []\n", encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, {"backend/app/routers/broken.py"})
+        expect("a router file that never creates its router is caught statically",
+               any("broken.py" in i and "never creates the router" in i for i in static), str(static)[:300])
+        expect("an import failure is attributed to the file the traceback names",
+               list(checks.smoke_failures_by_file(rid, [{"path": "(import)", "status": 500, "file": "backend/app/routers/broken.py"}]))
+               == ["backend/app/routers/broken.py"])
         expect("the smoke failures map to the router that serves the path",
                list(checks.smoke_failures_by_file(rid, [{"path": "/api/tickets", "status": 500}])) == ["backend/app/routers/resources.py"])
         (root / "backend" / "app" / "routers" / "metrics.py").write_text(

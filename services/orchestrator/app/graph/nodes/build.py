@@ -911,8 +911,10 @@ async def _smoke_round(
             if not r:
                 continue
             story = _story(state, r["story_id"])
-            text = ("=== API SMOKE: these GET endpoints raise a server error against a seeded database ===\n"
-                    + "\n".join(f"GET {f['path']} -> {f['status']}\n{f.get('detail', '')}" for f in fails))
+            text = ("=== API SMOKE: the API was started against a seeded database and these fail ===\n"
+                    + "\n".join((f"importing the API fails because of this file:\n{f.get('detail', '')}"
+                                  if f["path"] == "(import)" else
+                                  f"GET {f['path']} -> {f['status']}\n{f.get('detail', '')}") for f in fails))
             await emit(run_id, f"{story['id']}: its endpoint answers 500 — one repair",
                        agent="developer", stage="build", level="warn", data={"stdout": text[:3000]})
             ok, _, fixed = await _repair_once(

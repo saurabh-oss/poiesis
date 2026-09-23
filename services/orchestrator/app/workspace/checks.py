@@ -425,6 +425,11 @@ def static_issues(
         rel = path.relative_to(root).as_posix()
         if own_files is not None and rel not in own_files:
             continue
+        src = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"@router\.", src) and not re.search(r"^\s*router\s*=\s*APIRouter\s*\(", src, re.M):
+            issues.append(f"{rel}: uses `@router.get(...)` but never creates the router — `NameError: name "
+                          "'router' is not defined` at import, which takes the whole API down. Add "
+                          "`from fastapi import APIRouter` and `router = APIRouter()` above the endpoints.")
         issues += _seeding_issues(run_id, path, rel)
 
     return list(dict.fromkeys(issues))  # one line per problem, however many calls repeat it
@@ -1532,7 +1537,12 @@ async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
     if marker not in result.stdout:
         err = (result.stderr or result.stdout).strip()
         lines = [l for l in err.splitlines() if l.strip() and "site-packages" not in l][-16:]
-        return [], "the API could not be started for the smoke check:\n" + "\n".join(lines)
+        text = "the API could not be started for the smoke check:\n" + "\n".join(lines)
+        # An import error names the story file: that is a failure of that file, not of the check.
+        hit = re.search(r"/work/(backend/app/routers/[A-Za-z0-9_]+\.py)", "\n".join(lines))
+        if hit and hit.group(1).split("/")[-1] not in (EXAMPLE_ROUTER, GENERIC_ROUTER):
+            return [{"path": "(import)", "status": 500, "detail": text, "file": hit.group(1)}], ""
+        return [], text
     try:
         rows = json.loads(result.stdout.split(marker, 1)[1])
     except json.JSONDecodeError:
@@ -1545,6 +1555,9 @@ def smoke_failures_by_file(run_id: str, failures: list[dict]) -> dict[str, list[
     routes = [(r["method"], _route_pattern(r["path"]), r["file"]) for r in declared_routes(run_id)]
     out: dict[str, list[dict]] = {}
     for f in failures:
+        if f.get("file"):
+            out.setdefault(f["file"], []).append(f)
+            continue
         path = _normalise(str(f.get("path", "")))
         owner = next((file for m, p, file in routes if m == "GET" and p.match(path)), "")
         out.setdefault(owner, []).append(f)
