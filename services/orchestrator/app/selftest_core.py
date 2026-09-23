@@ -784,6 +784,12 @@ async def test_foundation() -> None:
         expect("an import failure is attributed to the file the traceback names",
                list(checks.smoke_failures_by_file(rid, [{"path": "(import)", "status": 500, "file": "backend/app/routers/broken.py"}]))
                == ["backend/app/routers/broken.py"])
+        (root / "backend" / "app" / "routers" / "incidents.py").write_text(
+            "from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.get('/tickets')\ndef mine():\n    return []\n",
+            encoding="utf-8")
+        expect("a story router that shadows a generic path owns its failure",
+               list(checks.smoke_failures_by_file(rid, [{"path": "/api/tickets", "status": 500}])) == ["backend/app/routers/incidents.py"])
+        (root / "backend" / "app" / "routers" / "incidents.py").unlink()
         expect("the smoke failures map to the router that serves the path",
                list(checks.smoke_failures_by_file(rid, [{"path": "/api/tickets", "status": 500}])) == ["backend/app/routers/resources.py"])
         (root / "backend" / "app" / "routers" / "metrics.py").write_text(

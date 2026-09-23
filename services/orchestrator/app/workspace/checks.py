@@ -1552,7 +1552,10 @@ async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
 
 def smoke_failures_by_file(run_id: str, failures: list[dict]) -> dict[str, list[dict]]:
     """Which router file serves each failing path."""
-    routes = [(r["method"], _route_pattern(r["path"]), r["file"]) for r in declared_routes(run_id)]
+    # A story router that declares the same path as the generic data API is the
+    # one FastAPI serves, so it is the one a failure belongs to: story routes first.
+    declared = sorted(declared_routes(run_id), key=lambda r: r.get("generic") is not None)
+    routes = [(r["method"], _route_pattern(r["path"]), r["file"]) for r in declared]
     out: dict[str, list[dict]] = {}
     for f in failures:
         if f.get("file"):
