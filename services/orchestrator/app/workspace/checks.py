@@ -205,6 +205,36 @@ def _gives_up_without_id(code: str) -> tuple[int, str] | None:
     return None
 
 
+_QUERY_KEY = re.compile(r"[?&]([A-Za-z_][A-Za-z0-9_]*)=")
+_GENERIC_RESERVED = {"q", "sort", "limit", "offset", "page", "_"}
+
+
+def _generic_filter_issue(run_id: str, rel: str, raw: str, called: str, routes: list[dict]) -> str:
+    """A query filter on the generic data API that names a column the table lacks.
+
+    The API answers 422 to it; before that it ignored the filter, and a "leavers"
+    screen listed every employee.
+    """
+    if "?" not in raw:
+        return ""
+    serving = [r for r in routes if r["method"] == "GET" and _route_pattern(r["path"]).match(called)]
+    if not serving or any(r.get("generic") is None for r in serving):
+        return ""  # a story router serves it and reads its own parameters
+    table = next((r["generic"] for r in serving if r.get("generic")), "")
+    if not table:
+        return ""
+    from .interface import model_tables
+    columns = set(model_tables(run_id).get(table, []))
+    if not columns:
+        return ""
+    unknown = sorted({k for k in _QUERY_KEY.findall(raw) if k not in columns and k not in _GENERIC_RESERVED})
+    if not unknown:
+        return ""
+    return (f"{rel}: filters {called} on {', '.join(unknown)}, which `{table}` does not have — the API answers "
+            f"422. Its columns: {', '.join(sorted(columns))}. Filter on one of those (or fetch the list and "
+            "filter in the screen).")
+
+
 def _idless_issue(rel: str, code: str) -> str:
     """Why a screen would show nothing when opened from the navigation, or ''."""
     if not _PARAM_ID.search(code):
@@ -413,6 +443,9 @@ def static_issues(
         for call in _API_CALL.finditer(code):
             method = (call.group(2) or "").upper()
             called = _normalise(call.group(4))
+            bad_filter = _generic_filter_issue(run_id, rel, call.group(4), called, routes)
+            if bad_filter:
+                issues.append(bad_filter)
             ok = any(p.match(called) and (not method or m == method) for m, p in patterns)
             if not ok:
                 issues.append(f"{rel}: calls {method + ' ' if method else ''}{called}, which the API does not "

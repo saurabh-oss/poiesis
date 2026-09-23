@@ -793,6 +793,14 @@ async def test_foundation() -> None:
         static = checks.static_issues(rid, "S1", True, set())
         expect("a screen calling the generic API passes the route check",
                not any("does not serve" in i for i in static), str(static)[:300])
+        (root / "frontend" / "screens" / "leavers.js").write_text(
+            "export default { title: 'Leavers', story: 'S1', async render(root, { api, ui }) {"
+            " const rows = await api('/tickets?status=leaver&sort=-id'); root.append(ui.table({ rows, columns: [] })); } };\n",
+            encoding="utf-8")
+        static = checks.static_issues(rid, "S1", True, set())
+        expect("a generic-API filter on a column the table lacks is caught",
+               any("leavers.js" in i and "status" in i and "422" in i for i in static), str(static)[:300])
+        (root / "frontend" / "screens" / "leavers.js").unlink()
         (root / "frontend" / "screens" / "ticket_detail.js").write_text(
             "export default { title: 'Ticket', story: 'S1', async render(root, { api, h, params, ui }) {"
             " const id = params[0]; if (!id) { root.append(ui.empty('No ticket selected')); return; }"
