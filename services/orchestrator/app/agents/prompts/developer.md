@@ -53,56 +53,36 @@ in the navigation and renders:
 export default {
   title: "Leave requests",              // sidebar label AND the page heading
   subtitle: "Request time off and track approvals",   // optional, sits under the heading
+  icon: "calendar",                     // optional menu icon (see the playbook's list)
   story: "S1",                          // the story id(s) this screen delivers
-  async render(root, { api, h, navigate, params, actions }) {
-    const rows = await api("/leave-requests");
-    actions.append(h("button", { onclick: () => navigate("#/leave-requests/new") }, "New request"));
+  async render(root, { api, h, navigate, params, actions, ui }) {
+    const [requests, people] = await Promise.all([api("/leave-requests?limit=2000"), api("/employees?limit=2000")]);
+    const P = Object.fromEntries(people.map((p) => [p.id, p]));
+    const rows = requests.map((r) => ({ ...r, person: P[r.employee_id]?.full_name }));
+    actions.append(ui.button("New request", { icon: "plus", onclick: () => ui.formModal({ title: "New request",
+      fields: [{ name: "reason", label: "Reason", required: true }],
+      onsubmit: async (v) => { await api("/leave-requests", { method: "POST", body: v }); return "Request sent"; } }) }));
     root.append(
-      h("section", { class: "panel stack" },
-        h("div", { class: "between" },
-          h("h2", {}, "All requests"),
-          h("span", { class: "badge" }, `${rows.length} total`)),
-        rows.length
-          ? h("div", { class: "table-wrap" }, h("table", {},
-              h("thead", {}, h("tr", {}, h("th", {}, "Reason"), h("th", {}, "Status"))),
-              h("tbody", {}, rows.map((r) => h("tr", {},
-                h("td", {}, r.reason),
-                h("td", {}, h("span", { class: "badge badge-ok" }, r.status)))))))
-          : h("div", { class: "empty-state" },
-              h("strong", {}, "No requests yet"), "Submit the first one to see it here.")),
+      ui.stats([{ label: "Pending", value: rows.filter((r) => r.status === "pending").length, icon: "clock", tone: "warn" },
+                { label: "Approved", value: rows.filter((r) => r.status === "approved").length, icon: "check-circle", tone: "ok" }]),
+      ui.section("All requests", { icon: "list" }, ui.table({
+        columns: [{ key: "person", label: "Employee", render: (r) => ui.person(r.person) },
+                  { key: "status", label: "Status", badge: true }, { key: "created_at", label: "Requested", format: "ago" }],
+        rows, search: true, keyboard: true, filters: [{ key: "status" }],
+        drawer: (r) => ({ title: r.person, subtitle: r.reason, content: ui.kv([{ label: "Status", value: ui.badge(r.status) }]) }),
+        empty: { title: "No requests yet", hint: "New requests appear here." } })),
     );
   },
 };
 ```
 
-## The UI kit — what makes a screen look finished
+## The UI kit and the UX playbook
 
-`render()` also receives `ui`, a component kit built on the design system. Compose it;
-never draw a table, a badge or a chart by hand when the kit has one. Every part is
-already themed, animated, keyboard-friendly and dark-mode aware.
-
-| Need | Call |
-|---|---|
-| Headline numbers | `ui.stats([{ label: "Open tickets", value: 42, hint: "+6 today", tone: "warn" }])` |
-| A data table with search, sort, paging and keyboard navigation | `ui.table({ columns: [{ key: "subject", label: "Subject", render: (t) => h("strong", {}, t.subject) }, { key: "priority", label: "Priority", render: (t) => ui.badge(t.priority) }], rows, search: true, keyboard: true, pageSize: 25, sort: { key: "created_at", dir: "desc" }, onRow: (t) => navigate(`#/tickets/${t.id}`), onSelect: (t) => showDetail(t), empty: { title: "No tickets", hint: "…" } })` — returns the element; `table.update(rows)` redraws after a change |
-| A status pill, coloured by its word | `ui.badge("P1")`, `ui.badge("resolved")`, `ui.badge(text, "warn")` to force a tone |
-| A person | `ui.avatar(name)`, `ui.person(name, "Billing team")` |
-| Dates | `ui.timeAgo(iso)` ("3h ago"), `ui.date(iso)`, `ui.dateTime(iso)` |
-| Label/value details | `ui.kv([{ label: "Customer", value: t.customer_name }, { label: "Arrived", value: ui.timeAgo(t.created_at) }])` |
-| A section with a heading (and something on its right) | `ui.section("Open incidents", { right: ui.badge(`${n} open`) }, ...children)` |
-| List beside a detail panel | `ui.split([mainSections], [sideSections])` |
-| A row of controls | `ui.toolbar(ui.search({ oninput }), ui.select({ options: ["All", "P1", "P2"], onchange }), ui.button("New", { onclick }))` |
-| A form | `ui.form({ fields: [{ name: "title", label: "Title", required: true }, { name: "priority", label: "Priority", type: "select", options: ["P1","P2","P3","P4"], value: "P3" }, { name: "body", label: "Details", type: "textarea" }], submit: "Create", onsubmit: async (values) => { await api("/tickets", { method: "POST", body: values }); return "Created."; } })` |
-| Buttons | `ui.button("Assign", { onclick, tone: "secondary" \| "danger" \| "ghost", kbd: "A" })` |
-| Charts | `ui.bars([{ label: "P1", value: 4, tone: "down" }])` for categories; `ui.timeseries([{ label: "Mar 1", value: 12 }, …])` for a series over time |
-| Feedback | `ui.toast("Ticket assigned", "ok")`, `ui.notice("…", "warn")`, `ui.empty("No matches", "Clear the filters.")` |
-
-The recipe for a list screen: `ui.stats` above the fold, then `ui.split` with the
-`ui.table` on the left and a detail panel (`ui.kv` + action buttons) on the right that
-follows `onSelect`. For a dashboard: `ui.stats`, then `ui.bars` and `ui.timeseries` in
-`grid-2` cards. For a detail screen: `ui.kv` in one panel, related rows in a `ui.table` in
-another, the actions in the header. Every action re-fetches and redraws (`table.update`,
-or rebuild the panel) and confirms with `ui.toast`.
+`render()` also receives `ui`, a component kit built on the design system: animated stats,
+charts, tables with drawers, boards, timelines, dialogs, toasts. **The UX PLAYBOOK at the end
+of these instructions is binding**: it lists every component, the recipe for each kind of
+screen, and the bar every screen must clear. Compose the kit; never draw a table, a chart,
+a badge or a dialog by hand.
 
 **The shell already drew the page.** The sidebar, the page heading and the subtitle come
 from `title` and `subtitle` above — so never render your own `<h1>`, app title, nav or
@@ -158,42 +138,19 @@ content story with a form asking the visitor to type it, and never with an empty
 fresh deployment — an `empty-state` block where real content belongs is exactly that failure
 with a nicer border. Forms are for stories where the user creates or changes data.
 
-Never call `fetch` directly. Never use `alert`, `confirm` or `prompt`. Never touch
+Never call `fetch` directly. Never use `alert`, `confirm` or `prompt` — use `ui.toast`,
+`ui.confirm` and `ui.formModal`. Never touch
 `document.getElementById("app")`, `document.body`, `window.onload` or `DOMContentLoaded`.
 Never import packages, and never put code at the top level of the module outside the
 export. Never leave placeholder text or TODO comments. A heading with nothing under it is not
 a screen.
 
-**The application must look like a finished, professional product, not a wireframe.** A full
-design system already exists in styles.css — colour, elevation, motion, all of it — so a
-polished screen costs you nothing extra: it costs choosing the right existing class over a
-plain `<div>`. Never write inline styles or a `<style>` tag; everything below is already
-themed, animated and dark-mode aware.
-
-| Need | Class |
-|---|---|
-| A content section (the default building block) | `panel` |
-| A tile inside a grid | `card` (`card interactive` if clickable — it lifts on hover) |
-| Vertical spacing between children | `stack` |
-| A heading with something pushed to the right | `between` |
-| A horizontal, wrapping group | `row` |
-| A responsive grid | `grid` (tiles ≥260px) or `grid-2` (two-up, ≥300px) |
-| A row of headline numbers | `stats` wrapping `stat` > `stat-label` + `stat-value` |
-| Tabular data | `table-wrap` wrapping a plain `<table>` with `<thead>`/`<tbody>` — already styled, scrolls on narrow screens |
-| A form field | `field` wrapping `<label>`, the input, and an optional `span.hint`; group fields in `form-grid`; buttons in `form-actions` |
-| A status pill | `badge`, or `badge-ok` / `badge-warn` / `badge-down` |
-| An inline banner | `notice`, `notice-ok`, `notice-warn` |
-| Nothing to show yet | `empty-state` with a `<strong>` headline and a line telling them what to do next |
-| Loading | a `spinner` next to a label, or a `skeleton` block sized to what it replaces |
-| Secondary / destructive / quiet button | `button.secondary`, `button.danger`, `button.ghost` |
-| De-emphasised text | `muted`, or `faint` for small print like timestamps and ids |
-
-Screens animate in on navigation and list rows animate on render — you do not add that
-yourself. What you control is information design, and it is judged: the real data above the
-fold, one obvious primary action (in the header via `actions`), a table rather than a wall of
-divs when the data is tabular, an `empty-state` that says what to do next rather than a blank
-panel, and errors shown on the page rather than thrown. Two or three well-separated `panel`
-sections beat one crowded one.
+**The application must look like a finished, professional product, not a wireframe.** The
+design system and the kit already carry colour, elevation, motion and dark mode, so a
+polished screen costs you nothing extra: it costs choosing the kit component over a plain
+`<div>`. Never write inline styles or a `<style>` tag. Plain layout classes are there when
+you need them: `panel`, `card`, `stack`, `row`, `between`, `grid`, `grid-2`, `grid-3`,
+`muted`, `faint`, `mono`.
 
 For a `web-app`, a story is only implemented when a user can reach it. Every story needs a
 screen, either its own or its id added to the screen it extends.

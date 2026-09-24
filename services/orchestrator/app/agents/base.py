@@ -29,7 +29,9 @@ class Agent:
 
     @property
     def system(self) -> str:
-        return (PROMPT_DIR / self.prompt_file).read_text(encoding="utf-8")
+        # "a.md+b.md": a role prompt followed by shared references (the UX playbook).
+        return "\n\n".join((PROMPT_DIR / name).read_text(encoding="utf-8")
+                             for name in self.prompt_file.split("+"))
 
     async def json(self, user: str, *, max_tokens: int = 6000,
                    schema: dict[str, Any] | None = None) -> Any:
@@ -59,7 +61,7 @@ ANALYST = Agent("Analyst", "reasoning", "analyst.md", 0.3, schemas.ANALYSIS, "an
 PRODUCT_OWNER = Agent("Product Owner", "reasoning", "product_owner.md", 0.3, None, "product_owner")
 ARCHITECT = Agent("Architect", "reasoning", "architect.md", 0.2, schemas.ARCHITECTURE, "architect")
 PLANNER = Agent("Planner", "fast", "planner.md", 0.1, schemas.SPRINT, "planner")
-DEVELOPER = Agent("Developer", "coding", "developer.md", 0.1, schemas.IMPLEMENTATION, "developer")
+DEVELOPER = Agent("Developer", "coding", "developer.md+ux_playbook.md", 0.1, schemas.IMPLEMENTATION, "developer")
 TESTER = Agent("Tester", "coding", "tester.md", 0.1, schemas.TESTS, "tester")
 # The foundation stage: the whole data model, then a generator for the demonstration data.
 FOUNDATION = Agent("Foundation Developer", "coding", "foundation.md", 0.1, schemas.IMPLEMENTATION, "developer")

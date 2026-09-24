@@ -22,7 +22,7 @@ router = APIRouter()
 def create_example(payload: ExampleCreate, db: Session = Depends(get_session)):
     # FastAPI has already validated `payload`: a missing or mistyped field never
     # reaches this line; the client gets a 422 instead.
-    row = Example(label=payload.label)
+    row = Example(**payload.model_dump())
     db.add(row)
     db.commit()
     db.refresh(row)

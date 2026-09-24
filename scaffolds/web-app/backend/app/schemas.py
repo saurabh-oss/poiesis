@@ -20,6 +20,9 @@ class ExampleCreate(BaseModel):
     """What a client sends. Every field is validated; a bad value is a 422."""
 
     label: str = Field(min_length=1, max_length=200)
+    status: str = "open"
+    owner: str | None = None
+    amount: float = 0
 
 
 class ExampleOut(BaseModel):
@@ -29,4 +32,7 @@ class ExampleOut(BaseModel):
 
     id: int
     label: str
+    status: str = "open"
+    owner: str | None = None
+    amount: float = 0
     created_at: dt.datetime

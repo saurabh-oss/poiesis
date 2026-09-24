@@ -165,7 +165,8 @@ with sync_playwright() as p:
         # when it aggregates or filters what it fetched: a licence register shows
         # utilisation per title, not the 450 seats it counted.
         shown = page.evaluate(
-            "() => document.querySelectorAll('#app tbody tr, #app li, #app .card, #app .bar').length")
+            "() => document.querySelectorAll('#app tbody tr, #app li, #app .card, #app .bar, #app .kanban-card, "
+            "#app .legend-item, #app .stat').length")
         for c in ([] if shown else calls):
             if c["count"] == 0 or not c["sample"]:
                 continue

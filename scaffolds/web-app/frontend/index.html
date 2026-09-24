@@ -3,29 +3,42 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>{{project_name}}</title>
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Before first paint, so a chosen theme never flashes the other one.
+    try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    try { if (localStorage.getItem("sidebar") === "collapsed") document.documentElement.dataset.sidebar = "collapsed"; } catch (e) {}
+  </script>
 </head>
 <body>
-  <div class="app">
+  <div class="progress" id="progress"></div>
+  <div class="app" id="shell">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark" id="brand-mark">·</span>
-        <span>{{project_name}}</span>
+        <span class="brand-name">{{project_name}}</span>
       </div>
+      <button class="search-trigger" id="search-trigger" type="button" aria-label="Search (Ctrl K)"></button>
       <nav class="nav" id="nav" aria-label="Sections"></nav>
       <div class="sidebar-foot">
-        <span id="status" class="status" data-state="checking">checking API…</span>
+        <span id="status" class="status" data-state="checking"><span class="status-text">checking API…</span></span>
+        <button class="icon-btn" id="collapse-toggle" type="button" aria-label="Collapse the sidebar"></button>
+        <button class="icon-btn" id="theme-toggle" type="button" aria-label="Switch theme"></button>
       </div>
     </aside>
 
     <div class="content">
       <header class="page-head">
-        <div>
-          <h1 id="page-title">{{project_name}}</h1>
-          <p id="page-subtitle" hidden></p>
+        <div class="crumbs" id="crumbs"></div>
+        <div class="page-title-row">
+          <div>
+            <h1 id="page-title">{{project_name}}</h1>
+            <p id="page-subtitle" hidden></p>
+          </div>
+          <div class="page-actions" id="page-actions"></div>
         </div>
-        <div class="page-actions" id="page-actions"></div>
       </header>
 
       <!-- The shell (app.js) renders the story screens from frontend/screens/ here. -->

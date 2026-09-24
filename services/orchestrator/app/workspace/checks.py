@@ -125,8 +125,8 @@ _API_CALL = re.compile(
     r"""\bapi\(\s*(?:(['"])(GET|POST|PUT|PATCH|DELETE)\1\s*,\s*)?(['"`])([^'"`]*)\3""", re.I
 )
 _BANNED: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(alert|confirm|prompt)\s*\("),
-     "calls {0}() — a dialog is not an interface. Show results and errors on the page, inside root"),
+    (re.compile(r"(?<![\w$])(?<!ui\.)(alert|confirm|prompt)\s*\("),
+     "calls {0}() — the browser's dialog, not an interface. Use ui.confirm(), ui.formModal() or ui.toast()"),
     (re.compile(r"\bfetch\s*\("),
      "calls fetch() directly — use the api() render() receives: it adds /api, sends JSON and reports failures"),
     (re.compile(r"""getElementById\(\s*['"]app['"]\s*\)|querySelector\(\s*['"]#app['"]\s*\)|document\.body"""),

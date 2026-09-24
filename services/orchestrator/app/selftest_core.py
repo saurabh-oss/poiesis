@@ -755,6 +755,13 @@ async def test_foundation() -> None:
     expect("a last-attempt data set gets its required gaps filled",
            gappy["employee"][0]["email"] == "ines.costa@example.com" and gappy["employee"][1]["email"] == "k@x.io"
            and notes == ["employee.email: filled 1 empty required value(s)"], str(notes))
+    from .agents.base import DEVELOPER as _DEV
+    expect("the Developer reads the UX playbook after its own instructions",
+           "UX PLAYBOOK" in _DEV.system and _DEV.system.index("You are the Developer") < _DEV.system.index("UX PLAYBOOK"))
+    banned = [pat for pat, _ in checks._BANNED if "alert|confirm|prompt" in pat.pattern][0]
+    expect("ui.confirm() is allowed and a bare confirm() is not",
+           not banned.search("await ui.confirm('Delete?')") and banned.search("if (confirm('Delete?'))")
+           and banned.search("window.confirm('x')"))
     expect("plural mirrors the generic router",
            (plural("ticket"), plural("incident_audit_entry"), plural("status"), plural("agents")) ==
            ("tickets", "incident-audit-entries", "status", "agents"))

@@ -362,6 +362,10 @@ async def review(state: RunState) -> RunState:
         "finding about missing tests, hand-rolled validation or backend hardening. Judge what a "
         "visitor experiences: every screen opens, shows the demonstration data on first open, "
         "looks finished, and the actions the criteria name can be tried and visibly take effect. "
+        "Judge the experience against the UX playbook: a hero or stats row first, at least one chart "
+        "where there is anything to count, rows that open a drawer or a detail screen, actions in "
+        "dialogs with a toast, names instead of ids. Screens that only list text score lower on "
+        "`acceptance_criteria_met`; say which screen and what it should add, as an advisory. "
         "A cosmetic or backend concern is advisory, never a blocker.\n\n" if mvp else "")
     verdict = await REVIEWER.json(
         policy

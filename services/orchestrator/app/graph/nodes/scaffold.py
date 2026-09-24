@@ -72,7 +72,7 @@ PLATFORM_FILES = ("tests/test_platform_endpoints.py", "frontend/ui.js", "backend
 # Platform-owned files stories may not edit, so the platform may rewrite them when
 # the template changes: an in-flight run gets the fixed shell on its next round.
 PLATFORM_SHELL = ("frontend/app.js", "frontend/ui.js", "frontend/styles.css", "frontend/screens/example.js",
-                  "frontend/Dockerfile", "frontend/nginx.conf", "docker-compose.yml",
+                  "frontend/Dockerfile", "frontend/nginx.conf", "frontend/index.html", "docker-compose.yml",
                   "backend/app/routes.py", "tests/test_platform_endpoints.py",
                   "backend/app/routers/__init__.py", "backend/app/routers/resources.py", "tests/conftest.py")
 
