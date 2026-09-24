@@ -198,7 +198,9 @@ def quality_issues(rows_by_table: dict[str, list[dict[str, Any]]], criteria: lis
                     distinct = {s.strip().lower() for s in strings}
                     if 1 < len(distinct) <= 12:
                         top = max(sum(1 for s in strings if s.strip().lower() == d) for d in distinct)
-                        if top > len(strings) * 0.8:
+                        # Two values split 80/20 is often the brief's own ask (48 Residential,
+                        # 12 Business); only a lopsided binary column is suspicious.
+                        if top > len(strings) * (0.9 if len(distinct) == 2 else 0.8):
                             issues.append(f"{table}.{key}: {top} of {len(strings)} rows share one value — "
                                           "give every state a believable share so each screen has rows to show")
                     elif len(distinct) == 1 and key.lower() in ("status", "state", "stage", "priority", "severity"):

@@ -138,6 +138,11 @@ _BANNED: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+def _defines(code: str, name: str) -> bool:
+    """True when the screen declares its own function or variable called `name`."""
+    return bool(re.search(rf"\bfunction\s*\*?\s*{name}\s*\(|\b(?:const|let|var)\s+{name}\s*=", code))
+
+
 def _is_bare(path: str) -> bool:
     """A route at the root of /api: "/api/" itself, or "/api/{param}...".
 
@@ -431,6 +436,11 @@ def static_issues(
                 break
         for pattern, message in _BANNED:
             hit = pattern.search(code)
+            if hit and hit.groups() and _defines(code, hit.group(1)):
+                # The screen's own `async function confirm(id)` (a review queue's
+                # Confirm button) is not the browser's dialog. Flagging it once
+                # made a correct story red after three repairs nobody could satisfy.
+                hit = None
             if hit:
                 issues.append(f"{rel}: " + message.format(hit.group(1) if hit.groups() else ""))
         issues += _screen_shell_issues(rel, code)
