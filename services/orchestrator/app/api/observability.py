@@ -11,7 +11,7 @@ from .. import llm, telemetry
 from ..config import settings
 from ..db import Event, LLMCall, Run, Span, now, session
 from ..graph import engine
-from ..integrations import gitremote, tracker
+from ..integrations import gitremote, plane, tracker
 
 router = APIRouter(tags=["observability"])
 
@@ -132,6 +132,35 @@ async def run_integrations(run_id: str):
     return {"jira": tracker.mapping(run_id), "git": gitremote.mapping(run_id)}
 
 
+def _activity(since: dt.datetime, hours: int, buckets: int = 24) -> dict[str, Any]:
+    """Model activity over the window in equal buckets, and call latency percentiles."""
+    with session() as s:
+        rows = (s.query(LLMCall.started_at, LLMCall.duration_ms, LLMCall.completion_tokens, LLMCall.status)
+                .filter(LLMCall.started_at >= since).all())
+    width = hours * 3600 / buckets
+    series = [{"at": since + dt.timedelta(seconds=i * width), "calls": 0, "errors": 0,
+               "tokens": 0, "seconds": 0.0} for i in range(buckets)]
+    for at, ms, tok, status in rows:
+        i = min(buckets - 1, max(0, int((at - since).total_seconds() // width)))
+        b = series[i]
+        b["calls"] += 1
+        b["errors"] += 1 if status == "error" else 0
+        b["tokens"] += tok or 0
+        b["seconds"] += (ms or 0) / 1000
+    durations = sorted((ms or 0) / 1000 for _, ms, _, _ in rows)
+
+    def pct(q: float) -> float:
+        return round(durations[min(len(durations) - 1, int(q * len(durations)))], 1) if durations else 0.0
+    busy = sum(durations)
+    return {
+        "series": [{**b, "seconds": round(b["seconds"], 1)} for b in series],
+        "bucket_seconds": width,
+        "latency": {"p50": pct(0.5), "p90": pct(0.9), "p99": pct(0.99), "max": durations[-1] if durations else 0},
+        # One local model serves one call at a time, so this is how busy the GPU was.
+        "gpu_busy_pct": round(100 * busy / (hours * 3600), 1),
+    }
+
+
 @router.get("/api/observability/summary")
 async def summary(hours: int = Query(24, ge=1, le=24 * 30)):
     since = now() - dt.timedelta(hours=hours)
@@ -141,16 +170,21 @@ async def summary(hours: int = Query(24, ge=1, le=24 * 30)):
                          .order_by(Event.at.desc()).limit(12).all())
         recent_runs = s.query(Run).order_by(Run.updated_at.desc()).limit(8).all()
         run_titles = {r.id: r.title for r in recent_runs}
+        run_status = {r.id: r.status for r in recent_runs}
         per_run = (s.query(LLMCall.run_id, func.count(LLMCall.id),
                            func.sum(LLMCall.completion_tokens), func.sum(LLMCall.duration_ms))
                    .filter(LLMCall.started_at >= since).group_by(LLMCall.run_id).all())
+        missing = [rid for rid, *_ in per_run if rid and rid not in run_titles]
+        for r in s.query(Run).filter(Run.id.in_(missing)).all() if missing else []:
+            run_titles[r.id], run_status[r.id] = r.title, r.status
     s_ = settings()
     return {
         "window_hours": hours,
         "runs_by_status": runs,
         "engine": engine.stats(),
         "usage": _usage(None, since),
-        "per_run": [{"run_id": rid, "title": run_titles.get(rid, ""), "calls": n,
+        "activity": _activity(since, hours),
+        "per_run": [{"run_id": rid, "title": run_titles.get(rid, ""), "status": run_status.get(rid, ""), "calls": n,
                      "completion_tokens": int(tok or 0), "model_seconds": round((ms or 0) / 1000, 1)}
                     for rid, n, tok, ms in per_run if rid],
         "recent_errors": [{"run_id": e.run_id, "at": e.at, "stage": e.stage, "agent": e.agent,
@@ -159,11 +193,12 @@ async def summary(hours: int = Query(24, ge=1, le=24 * 30)):
                          "updated_at": r.updated_at} for r in recent_runs],
         "models": await llm.health(),
         "integrations": {
-            "jira": tracker.configured(), "git": gitremote.configured(),
+            "jira": tracker.configured(), "git": gitremote.configured(), "plane": plane.configured(),
             "otlp": bool(s_.otel_exporter_otlp_endpoint), "vectors": s_.poiesis_vectors,
         },
         "links": {"jaeger": "http://localhost:16686", "grafana": "http://localhost:3030",
-                  "prometheus": "http://localhost:9090", "neo4j": "http://localhost:7474"},
+                  "prometheus": "http://localhost:9090", "neo4j": "http://localhost:7474",
+                  **({"plane": s_.plane_url} if s_.plane_url else {})},
     }
 
 

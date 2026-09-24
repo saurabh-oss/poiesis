@@ -289,3 +289,19 @@ button { transition: background-color 130ms ease-out, border-color 130ms ease-ou
 @keyframes kanban-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
 .kanban-in { animation: kanban-in 360ms cubic-bezier(.2,.7,.3,1) both; }
 @media (prefers-reduced-motion: reduce) { .kanban-in { animation: none; } }
+
+/* ---- charts (Observability, Portfolio) ----------------------------------------- */
+@keyframes chart-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.chart-draw { stroke-dasharray: 1; animation: chart-draw 1100ms cubic-bezier(.2,.7,.3,1) both; }
+@keyframes chart-fade { from { opacity: 0; } to { opacity: 1; } }
+.chart-fade { animation: chart-fade 900ms 300ms ease-out both; }
+@keyframes col-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.col-grow { transform-origin: bottom; animation: col-grow 620ms cubic-bezier(.2,.7,.3,1) both; }
+@keyframes donut-in { from { opacity: 0; stroke-width: 2; } to { opacity: 1; } }
+.donut-seg { animation: donut-in 700ms cubic-bezier(.2,.7,.3,1) both; transition: stroke-width 180ms ease; }
+.donut-seg:hover { stroke-width: 28; }
+@keyframes bubble-in { 0% { transform: scale(0); } 70% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.bubble-in { animation: bubble-in 520ms cubic-bezier(.2,.7,.3,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .chart-draw, .chart-fade, .col-grow, .donut-seg, .bubble-in { animation: none; stroke-dasharray: none; }
+}

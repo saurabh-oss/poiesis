@@ -84,11 +84,16 @@ export type Summary = {
   window_hours: number; runs_by_status: Record<string, number>;
   engine: { active: string[]; queued: string[]; limit: number };
   usage: Usage;
-  per_run: { run_id: string; title: string; calls: number; completion_tokens: number; model_seconds: number }[];
+  per_run: { run_id: string; title: string; status?: string; calls: number; completion_tokens: number; model_seconds: number }[];
+  activity?: {
+    series: { at: string; calls: number; errors: number; tokens: number; seconds: number }[];
+    bucket_seconds: number; gpu_busy_pct: number;
+    latency: { p50: number; p90: number; p99: number; max: number };
+  };
   recent_errors: { run_id: string; at: string; stage: string; agent: string; message: string }[];
   recent_runs: RunSummary[];
   models: { profile: string; models: Record<string, string>; ok: boolean; missing?: string[]; num_ctx?: number; think_roles?: string };
-  integrations: { jira: boolean; git: boolean; otlp: boolean; vectors: boolean };
+  integrations: { jira: boolean; git: boolean; otlp: boolean; vectors: boolean; plane?: boolean };
   links: Record<string, string>;
 };
 
