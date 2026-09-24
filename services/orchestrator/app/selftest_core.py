@@ -898,6 +898,55 @@ async def test_foundation() -> None:
         shutil.rmtree(repo.workspace_path(rid), ignore_errors=True)
 
 
+async def test_codemap(tmp: Path) -> None:
+    """The ArchiLens code map: pictures Mermaid can draw, from what the code says."""
+    from .workspace import codemap
+    if not codemap.available():
+        expect("ArchiLens is installed in the image", False)
+        return
+    from archilens.models import FlowStep, ProcessFlow
+
+    flow = ProcessFlow(id="flow:x", name="Resolve", trigger="POST /api/incidents/{id}/resolve", steps=[
+        FlowStep(order=1, actor="Front-end (browser)", action="POST /resolve; id=3", target="Database (ticket table)"),
+        FlowStep(order=2, actor="Database (ticket table)", action="rows <updated>", target="Front-end (browser)",
+                 condition="if #tickets > 0"),
+    ])
+    seq = codemap._sequence(flow)
+    participants = [line.split()[1] for line in seq.splitlines() if line.strip().startswith("participant")]
+    expect("flow participants become ids Mermaid parses", all(p.replace("_", "").isalnum() for p in participants), seq)
+    expect("flow messages open no activation that never closes", "->>+" not in seq and "->>" in seq)
+    expect("flow labels lose characters that end a Mermaid statement", ";" not in seq and "#" not in seq and "<" not in seq)
+
+    tables = {"agent": [], "customer": [], "ticket": []}
+    expect("customer_id points at customer", codemap._implied_reference("customer_id", "ticket", tables) == "customer")
+    expect("resolved_by_agent_id points at agent", codemap._implied_reference("resolved_by_agent_id", "ticket", tables) == "agent")
+    expect("assignee_id names no table, so no link is invented", codemap._implied_reference("assignee_id", "ticket", tables) == "")
+
+    root = tmp / "cm"
+    (root / "db").mkdir(parents=True)
+    (root / "frontend").mkdir()
+    (root / "db" / "init.sql").write_text(
+        "CREATE TABLE customer (id SERIAL PRIMARY KEY, name VARCHAR(80) NOT NULL);\n"
+        "CREATE TABLE ticket (id SERIAL PRIMARY KEY, subject TEXT, customer_id INTEGER REFERENCES customer(id),"
+        " owner_customer_id INTEGER);\n", encoding="utf-8")
+    er = codemap._er_view(root)
+    expect("the data model draws declared keys solid", "customer ||--o{ ticket" in er, er)
+    expect("and *_id columns naming a table dashed", "customer ||..o{ ticket" in er, er)
+    (root / "docker-compose.yml").write_text(
+        "services:\n  db: {image: postgres}\n  backend:\n    environment:\n"
+        "      DATABASE_URL: postgresql+psycopg://a:b@db:5432/app\n"
+        "  data:\n    environment: {DATABASE_URL: 'postgresql+psycopg://a:b@db:5432/app'}\n"
+        "  frontend:\n    ports: ['8081:80']\n", encoding="utf-8")
+    (root / "frontend" / "nginx.conf").write_text(
+        "set $api_upstream http://backend:8000;\nset $data_upstream http://data:8000;\n", encoding="utf-8")
+    topo = codemap._topology(root, "T")
+    expect("the topology starts at the visitor's browser", "visitor -->|HTTP| svc_frontend" in topo, topo)
+    expect("the gateway routes /api to the api service", "svc_frontend -->|/api| svc_backend" in topo, topo)
+    expect("and falls back to the data service", "svc_frontend -.->|fallback| svc_data" in topo, topo)
+    expect("both Python services talk SQL to the database",
+           "svc_backend ==>|SQL| svc_db" in topo and "svc_data ==>|SQL| svc_db" in topo, topo)
+
+
 async def test_api(rid: str) -> None:
     print("\n[7] observability API")
     from .main import app
@@ -937,6 +986,7 @@ async def main() -> int:
         await test_vectors()
         await test_failures()
         await test_foundation()
+        await test_codemap(tmp)
         await test_api(rid)
     finally:
         llm.use_transport(None)

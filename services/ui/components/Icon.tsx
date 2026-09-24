@@ -27,6 +27,7 @@ const PATHS: Record<string, ReactNode> = {
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.6 2.6M15.4 15.4 18 18M6 18l2.6-2.6M15.4 8.6 18 6" />,
   external: <><path d="M14 4h6v6M20 4l-9 9" /><path d="M18 14v6H4V6h6" /></>,
   flask: <><path d="M9 3h6M10 3v6l-5.5 9.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3" /><path d="M7.5 15h9" /></>,
+  map: <><path d="m3 6 6-2.5 6 2.5 6-2.5v15L15 21l-6-2.5L3 21z" /><path d="M9 3.5v15M15 6v15" /></>,
   wrench: <path d="M14.5 5.5a4 4 0 0 0 5 5L12 18a2.1 2.1 0 0 1-3-3l7.5-7.5a4 4 0 0 0-2-2z" />,
   users: <><circle cx="9" cy="8" r="3.2" /><path d="M3 20c.6-3.4 3-5.3 6-5.3s5.4 1.9 6 5.3" /><path d="M16 5a3 3 0 0 1 0 6M18 14.8c1.8.7 2.8 2.4 3 5.2" /></>,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,

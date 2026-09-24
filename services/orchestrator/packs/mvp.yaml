@@ -27,6 +27,9 @@ build:
   sandbox_image: python:3.12-slim
   test_timeout_seconds: 600
 
+codemap:
+  ai: true                      # after the run goes idle, the local model adds summaries, flows, patterns
+
 review:
   ship_threshold: 60
   release_requires_working_app: true

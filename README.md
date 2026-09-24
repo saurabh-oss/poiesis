@@ -230,6 +230,37 @@ generated app runs with no internet access. Stories compose it (`panel`, `card`,
 `empty-state`, `spinner`, …) rather than writing their own CSS, so every generated app looks
 like a finished product on day one, not a wireframe.
 
+### Codebase maps (ArchiLens)
+
+Every generated codebase is drawn by [ArchiLens](https://github.com/saurabh-oss/archilens)
+(`archilens` on PyPI) at http://localhost:3000/codebases, and each run page links to its
+own map. A map has four views:
+
+- **Runtime topology**, read from `docker-compose.yml` and the gateway's `nginx.conf`.
+- **Modules & stories**: every screen and story API grouped by the story it delivers, with
+  the HTTP calls between them. Click a box for its endpoints, its calls and its source files;
+  calls to endpoints nobody serves are flagged.
+- **Data model**, drawn from `db/init.sql`: declared foreign keys are solid lines, and
+  `*_id` columns that name a table are dashed.
+- **Request flows**: sequence diagrams from each story endpoint down to the database.
+
+ArchiLens on its own groups files by their top two folders. Poiesis hands it the app's real
+shape instead (`app/workspace/codemap.py`), and ArchiLens does the analysis and draws the
+module, component (L2) and flow (L3) diagrams.
+
+Its AI features (module summaries, request flows, pattern detection) run on the platform's
+local model, through the same one-call-at-a-time gate as every agent. No hosted model is
+called.
+
+When maps are drawn:
+
+- The static map is redrawn after every deploy, which takes seconds.
+- The model's explanations wait until the run goes idle. They take about 6 minutes for a
+  10-story app. They are turned on by `codemap.ai` in `packs/mvp.yaml` and can be run from
+  the map page with **Explain with local AI**.
+- Explanations of modules whose code has not changed are reused.
+- The raw ArchiLens snapshot is served at `/api/runs/{id}/codemap/snapshot`.
+
 ## Jira
 
 Set `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` and `JIRA_PROJECT_KEY` in `.env`

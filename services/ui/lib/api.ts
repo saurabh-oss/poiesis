@@ -114,7 +114,41 @@ export type Recall = {
   decisions: { title: string; decision: string; rationale: string; score: number }[];
 };
 
+export type CodemapStats = {
+  files: number; loc: number; modules: number; screens: number; endpoints: number;
+  story_endpoints: number; tables: number; classes: number; unserved_calls?: number;
+  languages: Record<string, number>;
+};
+export type CodemapModule = {
+  id: string; mid: string; name: string; kind: string; files: string[]; loc: number;
+  capability?: string; stories?: string[]; subtitle?: string; summary?: string; responsibility?: string;
+  endpoints?: string[]; tables?: string[]; flows?: string[]; l2?: string | null;
+  calls?: { method: string; path: string; route: string | null }[];
+};
+export type CodemapFlow = {
+  id: string; name: string; trigger: string; description: string; module: string; steps: number; mermaid: string;
+};
+export type CodemapAI = { status: string; model?: string; finished_at?: string; error?: string };
+export type Codemap = {
+  run_id: string; title: string; generated_at: string; git_ref: string; engine: string;
+  ai: CodemapAI; stats: CodemapStats;
+  views: { topology: string; modules: string; data: string };
+  modules: CodemapModule[]; capabilities: Record<string, string[]>;
+  flows: CodemapFlow[]; patterns: string[];
+};
+export type CodemapJob = { stage?: string; error?: string; running: boolean };
+export type CodebaseRow = {
+  run_id: string; title: string; status: string; created_at: string; analysed: boolean;
+  generated_at?: string; git_ref?: string; engine?: string; ai?: CodemapAI; stats?: CodemapStats;
+  preview?: string; patterns?: string[]; flows?: number; job: CodemapJob;
+};
+
 export const api = {
+  codebases: () => json<{ available: boolean; codebases: CodebaseRow[] }>("/api/codemaps"),
+  codemap: (id: string) =>
+    json<{ run_id: string; available: boolean; job: CodemapJob; map: Codemap | null }>(`/api/runs/${id}/codemap`),
+  drawCodemap: (id: string, ai: boolean) =>
+    json<{ status: string }>(`/api/runs/${id}/codemap?ai=${ai}`, { method: "POST" }),
   retryRun: (id: string) => json<{ id: string }>(`/api/runs/${id}/retry`, { method: "POST" }),
   cancelRun: (id: string) => json<{ id: string; outcome: string }>(`/api/runs/${id}/cancel`, { method: "POST" }),
   traces: (id: string) => json<{ calls: LLMCallRow[]; spans: SpanRow[] }>(`/api/runs/${id}/traces`),

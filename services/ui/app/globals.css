@@ -223,3 +223,46 @@ button { transition: background-color 130ms ease-out, border-color 130ms ease-ou
 }
 .tape::-webkit-scrollbar-thumb:hover { background: var(--spectrum-gray-600); }
 .tape::-webkit-scrollbar-track { background: transparent; }
+
+/* ---- code maps (ArchiLens diagrams) ------------------------------------------ */
+.canvas-grid {
+  background-color: #fff;
+  background-image: radial-gradient(circle, rgba(2, 101, 220, 0.13) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+.mmd-stage { will-change: transform; }
+.mmd-stage svg { overflow: visible; }
+.mmd-cursor-grab, .cursor-grab { touch-action: none; }
+.mmd-grabbing { cursor: grabbing !important; }
+@keyframes mmd-in { from { opacity: 0; filter: blur(3px); } to { opacity: 1; filter: none; } }
+.mmd-ready svg g.node, .mmd-ready svg g.cluster, .mmd-ready svg .actor, .mmd-ready svg g[id^="entity-"] {
+  animation: mmd-in 520ms cubic-bezier(.2,.7,.3,1) both;
+}
+.mmd-ready svg .edgePaths, .mmd-ready svg .edgeLabels { animation: mmd-in 700ms 260ms ease-out both; }
+.mmd svg g.node rect, .mmd svg g.node circle, .mmd svg g.node path, .mmd svg g.node polygon {
+  rx: 8px; transition: filter 180ms ease, opacity 220ms ease, stroke-width 180ms ease;
+}
+.mmd svg g.cluster rect { rx: 12px; }
+.mmd svg g.cluster .nodeLabel, .mmd svg g.cluster span { font-weight: 600; color: #4B4B4B; font-size: 12.5px; }
+.mmd svg g.node .nodeLabel small, .mmd svg g.node span small { opacity: .8; font-size: 11px; }
+.mmd svg g.node.mmd-clickable { cursor: pointer; }
+.mmd svg g.node.mmd-clickable:hover rect, .mmd svg g.node.mmd-clickable:hover path,
+.mmd svg g.node.mmd-clickable:hover circle, .mmd svg g.node.mmd-clickable:hover polygon {
+  filter: drop-shadow(0 6px 12px rgba(2, 101, 220, 0.35)) brightness(1.08);
+}
+/* Mermaid styles nodes inline with !important, so selection glows rather than re-strokes. */
+@keyframes mmd-pulse { 0%,100% { filter: drop-shadow(0 0 2px #EB1000) drop-shadow(0 0 7px rgba(235,16,0,.55)); }
+                       50% { filter: drop-shadow(0 0 3px #EB1000) drop-shadow(0 0 14px rgba(235,16,0,.35)); } }
+.mmd svg g.node.mmd-selected { animation: mmd-pulse 1.6s ease-in-out infinite !important; opacity: 1; }
+.mmd svg .mmd-dim { opacity: .18; transition: opacity 220ms ease; }
+@keyframes mmd-dash { to { stroke-dashoffset: -24; } }
+.mmd svg path.edge-pattern-dotted { stroke: #4046CA !important; stroke-dasharray: 5 4 !important; animation: mmd-dash 1.1s linear infinite; }
+.mmd svg path.edge-thickness-thick { stroke: #F68511 !important; stroke-dasharray: 10 6 !important; animation: mmd-dash 0.9s linear infinite; }
+.mmd svg path.mmd-edge-on { stroke: #0265DC !important; stroke-width: 2.6px !important; opacity: 1 !important; }
+.mmd svg .edgeLabel, .mmd svg .edgeLabel p { font-size: 11.5px; color: #4B4B4B; background: #fff; }
+@keyframes panel-in { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+.panel-in { animation: panel-in 320ms cubic-bezier(.2,.7,.3,1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .mmd-ready svg g.node, .mmd-ready svg g.cluster, .mmd-ready svg .edgePaths, .mmd-ready svg .edgeLabels,
+  .mmd svg path.edge-pattern-dotted, .mmd svg path.edge-thickness-thick, .panel-in { animation: none !important; }
+}

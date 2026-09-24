@@ -31,3 +31,5 @@ opentelemetry-api==1.29.0
 opentelemetry-sdk==1.29.0
 opentelemetry-exporter-otlp-proto-http==1.29.0
 jsonschema==4.23.0
+# Draws every generated codebase (module, component and flow diagrams).
+archilens==0.2.0

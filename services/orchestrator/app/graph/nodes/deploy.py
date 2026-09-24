@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from ... import telemetry
 from ...events import emit
-from ...workspace import browser_check
+from ...workspace import browser_check, codemap
 from ...workspace import deployment as runtime
 from ..state import RunState
 from ..store import save_artifact, set_stage
@@ -69,4 +69,8 @@ async def deploy_increment(state: RunState) -> RunState:
                    agent="release", stage="deploy", level="error", data=outcome.as_dict())
 
     await save_artifact(run_id, "deployment", "deploy", record)
+    # Redraw the codebase map for this round (seconds); the local model's
+    # explanations wait until the run goes idle, so they never slow the build.
+    if codemap.available():
+        codemap.schedule(run_id, ai=codemap.ai_wanted())
     return {"deployment": record}
