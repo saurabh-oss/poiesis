@@ -423,9 +423,10 @@ th.sortable:hover { color: var(--ink); }
 .sort-mark { color: var(--accent); }
 th.right, td.right { text-align: right; }
 td.check, th.check { width: 38px; padding-right: 0; }
-.row-go { width: 32px; color: var(--faint); opacity: 0; transition: opacity .15s, transform .15s var(--ease); }
+.row-go { width: 32px; padding-left: 0; padding-right: 10px; color: var(--faint); }
+td.row-go { opacity: 0; transition: opacity .15s, transform .15s var(--ease); }
 .row-go svg { width: 16px; height: 16px; }
-tbody tr:hover .row-go { opacity: 1; transform: translateX(3px); color: var(--accent); }
+tbody tr:hover td.row-go { opacity: 1; transform: translateX(3px); color: var(--accent); }
 .pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .pager:empty { display: none; }
 
