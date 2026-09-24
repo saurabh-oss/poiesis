@@ -22,7 +22,7 @@ gates:
 build:
   mode: mvp                     # screens over the generic data API; no Tester, no pytest
   foundation: true              # whole data model + demonstration data before any story
-  max_repair_attempts: 1         # the Developer fixes everything a check found in one go
+  max_repair_attempts: 3         # up to three repairs per story, each told to fix everything listed
   max_rework_rounds: 1           # one browser test round, one fix pass, then the release gate
   sandbox_image: python:3.12-slim
   test_timeout_seconds: 600

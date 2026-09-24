@@ -101,6 +101,56 @@ p.name }))`) → PATCH → toast → redraw. Show the assignee as `ui.person` ev
 A `ui.bars` or a table whose column renders `ui.meter(used, total, { auto: true })`, sorted by
 the tightest first; a `ui.ring` of the overall percentage in the header row.
 
+## Logic the story asks for — make it real, keep it simple
+
+The MVP must *work*, not only look good: when a criterion says the app suggests, detects,
+calculates, links or cascades, build that logic in a story router and call it from the
+screen. Plain Python over ORM rows is enough; never fake it with a random number or a
+constant. Recipes that work:
+
+```python
+# A suggestion from rules (priority from keywords and plan)
+KEYWORDS = {"outage": 3, "down": 3, "data loss": 3, "cannot log in": 2, "charged twice": 2, "error": 1}
+PLAN = {"Enterprise": 1, "Business": 0, "Free": -1}
+def suggest_priority(subject: str, body: str, plan: str) -> str:
+    text = f"{subject} {body}".lower()
+    score = max((w for k, w in KEYWORDS.items() if k in text), default=0) + PLAN.get(plan, 0)
+    return "P1" if score >= 3 else "P2" if score == 2 else "P3" if score == 1 else "P4"
+
+# Likely duplicates: same group, recent, similar wording
+from difflib import SequenceMatcher
+def similarity(a: str, b: str) -> float:
+    wa, wb = set(a.lower().split()), set(b.lower().split())
+    return 0.6 * SequenceMatcher(None, a.lower(), b.lower()).ratio() + 0.4 * (len(wa & wb) / max(1, len(wa | wb)))
+
+@router.get("/tickets/{ticket_id}/duplicates")
+def duplicates(ticket_id: int, db: Session = Depends(get_session)) -> list[dict]:
+    t = db.get(Ticket, ticket_id)
+    if t is None:
+        raise HTTPException(404, "ticket not found")
+    since = t.created_at - dt.timedelta(days=14)
+    rows = db.query(Ticket).filter(Ticket.id != t.id, Ticket.product_line == t.product_line, Ticket.created_at >= since).all()
+    scored = sorted(((similarity(f"{t.subject} {t.body}", f"{r.subject} {r.body}"), r) for r in rows), key=lambda x: -x[0])
+    return [{"id": r.id, "subject": r.subject, "customer_name": r.customer_name, "score": round(s, 2)} for s, r in scored[:5] if s >= 0.3]
+
+# A cascade in one transaction (resolving an incident resolves its tickets)
+@router.post("/incidents/{incident_id}/resolve")
+def resolve(incident_id: int, payload: ResolveIn, db: Session = Depends(get_session)) -> dict:
+    inc = db.get(Incident, incident_id)
+    if inc is None:
+        raise HTTPException(404, "incident not found")
+    now = dt.datetime.now(dt.timezone.utc)
+    inc.status, inc.resolved_at, inc.resolved_by = "resolved", now, payload.resolved_by
+    linked = db.query(Ticket).filter(Ticket.incident_id == incident_id).all()
+    for t in linked:
+        t.status = "resolved"
+    db.commit()
+    return {"incident_id": incident_id, "tickets_resolved": len(linked)}
+```
+Aggregates for charts (per day, per status, medians) are computed the same way: load the
+rows, count in Python, return `[{"label": ..., "value": ...}]`. The screen shows the result
+at once and redraws after every action, so the visitor sees the logic work.
+
 ## Joining related data — show names, never ids
 
 Load the related tables once and join in the screen:

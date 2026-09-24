@@ -617,11 +617,10 @@ async def _repair_once(
         + failures.coach(failed.stdout)
         + _failing_test_source(run_id, failed.stdout, scaled(6000))
         + extra
-        + ("\nTHIS IS YOUR ONLY REPAIR. Nothing checks your work again before it ships, so fix "
-           "EVERY problem listed above in this one reply, not just the first: go through the list, "
-           "and for each one change the file it names. Where a screen and its router disagree "
-           "about a path or a field name, change the screen to match what the API serves.\n"
-           if int(pack().get("build", {}).get("max_repair_attempts", 3)) <= 1 else "")
+        + ("\nFix EVERY problem listed above in this one reply, not just the first: go through the "
+           "list and, for each one, change the file it names. Where a screen and its router disagree "
+           "about a path or a field name, change the screen to match what the API serves. A syntax "
+           "error means rewriting that file whole and checking every bracket closes.\n")
         + "\nReturn the corrected implementation files only, each complete. "
         "Do not modify the tests."
     )

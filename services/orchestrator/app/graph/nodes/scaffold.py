@@ -68,7 +68,7 @@ PROTECTED = (
 # existed gets it at the start of its next build round, the way deploy upgrades
 # an old compose file, so an in-flight run benefits from a new check.
 PLATFORM_FILES = ("tests/test_platform_endpoints.py", "frontend/ui.js", "backend/app/routers/resources.py",
-                  "backend/app/data_main.py")
+                  "backend/app/data_main.py", "frontend/fonts/SourceSans3.woff2")
 # Platform-owned files stories may not edit, so the platform may rewrite them when
 # the template changes: an in-flight run gets the fixed shell on its next round.
 PLATFORM_SHELL = ("frontend/app.js", "frontend/ui.js", "frontend/styles.css", "frontend/screens/example.js",
@@ -122,7 +122,8 @@ def refresh_platform_files(run_id: str, state: RunState) -> list[str]:
     added: list[str] = []
     for rel in PLATFORM_FILES:
         source, dest = template_dir / rel, root / rel
-        if source.is_file() and not dest.exists() and dest.parent.is_dir():
+        if source.is_file() and not dest.exists() and (root / rel.split("/")[0]).is_dir():
+            dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, dest)
             added.append(rel)
     # The scaffold's requirements are a floor. A workspace whose file lost the

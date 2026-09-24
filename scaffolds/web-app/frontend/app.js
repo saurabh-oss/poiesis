@@ -352,6 +352,20 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// A soft spotlight that follows the cursor across tiles, cards, panels and the hero.
+let spotFrame = 0;
+document.addEventListener("pointermove", (e) => {
+  if (spotFrame || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  spotFrame = requestAnimationFrame(() => {
+    spotFrame = 0;
+    const el = e.target.closest && e.target.closest(".stat, .card, .kanban-card, .hero, .panel");
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    el.style.setProperty("--mx", `${e.clientX - r.left}px`);
+    el.style.setProperty("--my", `${e.clientY - r.top}px`);
+  });
+}, { passive: true });
+
 // A ripple from where the button was pressed.
 document.addEventListener("pointerdown", (e) => {
   const b = e.target.closest && e.target.closest("button");

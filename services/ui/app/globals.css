@@ -153,10 +153,64 @@ body {
   }
 }
 
+/* ---------------------------------------------------------------------------
+   Polish. The console carries the same Adobe identity as the apps it builds:
+   Spectrum blue, the Adobe-red mark, and motion that answers every hover.
+   ------------------------------------------------------------------------- */
+body {
+  background:
+    radial-gradient(1100px 340px at 8% -140px, rgba(2,101,220,.07), transparent 60%),
+    radial-gradient(900px 300px at 96% -160px, rgba(235,16,0,.045), transparent 60%),
+    #ffffff;
+  background-attachment: fixed;
+}
+.console-header {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(255,255,255,.82);
+  backdrop-filter: saturate(1.6) blur(14px); -webkit-backdrop-filter: saturate(1.6) blur(14px);
+}
+@keyframes hairline { from { background-position: 0 0; } to { background-position: 400px 0; } }
+.console-hairline {
+  height: 2px; background: linear-gradient(90deg, #0265dc, #5258e4, #eb1000, #5258e4, #0265dc);
+  background-size: 400px 100%; animation: hairline 6s linear infinite; opacity: .85;
+}
+.brand-mark { transition: transform .5s cubic-bezier(.34,1.56,.64,1), box-shadow .3s; box-shadow: 0 4px 12px -4px rgba(235,16,0,.6); }
+a:hover > .brand-mark { transform: rotate(-8deg) scale(1.08); }
+.nav-link { position: relative; }
+.nav-link::after {
+  content: ""; position: absolute; left: 12px; right: 12px; bottom: 3px; height: 2px; border-radius: 2px;
+  background: #0265dc; transform: scaleX(0); transform-origin: left; transition: transform .3s cubic-bezier(.16,1,.3,1);
+}
+.nav-link:hover::after { transform: scaleX(1); }
+
+/* Pages rise in, section by section. */
+@keyframes page-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+main > *, main > * > * { animation: page-rise .5s cubic-bezier(.16,1,.3,1) both; }
+main > * > *:nth-child(2) { animation-delay: .05s; }
+main > * > *:nth-child(3) { animation-delay: .1s; }
+main > * > *:nth-child(4) { animation-delay: .15s; }
+main > * > *:nth-child(n+5) { animation-delay: .2s; }
+
+/* Cards and panels lift and catch a soft light under the cursor. */
+main :is(section, article, a, li)[class*="border"][class*="rounded"] {
+  --mx: 50%; --my: 50%;
+  transition: box-shadow .25s cubic-bezier(.16,1,.3,1), transform .25s cubic-bezier(.16,1,.3,1), border-color .25s;
+  background-image: radial-gradient(420px circle at var(--mx) var(--my), rgba(2,101,220,.06), transparent 45%);
+  background-size: 0 0; background-repeat: no-repeat;
+}
+main :is(section, article, a, li)[class*="border"][class*="rounded"]:hover {
+  box-shadow: 0 10px 24px -12px rgba(0,0,0,.18), 0 2px 6px -2px rgba(0,0,0,.06);
+  background-size: 100% 100%;
+}
+main a[class*="border"][class*="rounded"]:hover { transform: translateY(-2px); border-color: #b3b3b3; }
+button:active:not(:disabled) { transform: scale(.97); }
+button { transition: background-color 130ms ease-out, border-color 130ms ease-out, transform 120ms ease-out, box-shadow 200ms; }
+
 @media (prefers-reduced-motion: reduce) {
   .enter, .enter-row, .pop, .spin, .node-spin::after, .station-gate, .gate-attention, .flow,
   .skeleton, .typing > span, .caret::after, .bar-grow, .pulse-soft, .agent-live, .agent-orbit,
-  .live-dot, .travel, .travel-line, .burst > i, .ring-draw, .drop-active {
+  .live-dot, .travel, .travel-line, .burst > i, .ring-draw, .drop-active, .console-hairline,
+  main > *, main > * > * {
     animation: none !important;
   }
   .burst { display: none; }

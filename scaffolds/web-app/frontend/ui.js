@@ -326,7 +326,7 @@ export function hero(opts = {}) {
       return h("div", { class: "hero-stat" }, b, h("span", {}, st.label));
     }))
     : null;
-  return h("section", { class: "hero" },
+  return h("section", { class: "hero" }, h("span", { class: "hero-glow" }),
     h("div", { class: "hero-body" },
       h("div", {},
         opts.eyebrow ? h("div", { class: "hero-eyebrow" }, icon(opts.icon || "sparkles"), opts.eyebrow) : null,
@@ -606,7 +606,7 @@ export function celebrate(from) {
   if (reduced() || typeof document === "undefined") return;
   const r = from && from.getBoundingClientRect ? from.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight * 0.3, width: 0, height: 0 };
   const x = r.left + r.width / 2, y = r.top + r.height / 2;
-  const colors = ["#5b5bf6", "#a855f7", "#ec4899", "#f79009", "#16b364", "#2e90fa"];
+  const colors = ["#0265dc", "#eb1000", "#0fb5ae", "#f68511", "#de3d82", "#7e84fa", "#72e06a"];
   for (let i = 0; i < 46; i++) {
     const angle = Math.random() * Math.PI * 2, dist = 90 + Math.random() * 180;
     const p = h("span", { class: "confetti" });

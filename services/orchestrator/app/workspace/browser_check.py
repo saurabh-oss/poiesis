@@ -184,6 +184,50 @@ with sync_playwright() as p:
 
         shot = f"{s['id']}.png"
         page.screenshot(path=f"{out}/shots/{shot}", full_page=True)
+
+        # Use the screen the way a visitor would: open a row, switch tabs, open the
+        # "New ..." dialog. A screen that renders but throws when touched is not working.
+        tried, before = [], len(errors)
+        try:
+            row = page.query_selector("#app tbody tr.clickable")
+            if row:
+                row.click()
+                page.wait_for_timeout(700)
+                tried.append("opening a table row")
+                if page.query_selector(".drawer, .modal"):
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(400)
+                elif page.evaluate("() => location.hash") != s["hash"]:
+                    for _ in range(40):
+                        cur = page.evaluate("() => window.__poiesis && window.__poiesis.current")
+                        if cur and cur.get("done"):
+                            break
+                        page.wait_for_timeout(200)
+                    detail = page.inner_text("#app")
+                    if page.query_selector("#app .poiesis-error"):
+                        problems.append("Opening a row led to a screen that shows an error: " + detail[:200])
+                    page.evaluate("h => { location.hash = h; }", s["hash"])
+                    page.wait_for_timeout(900)
+            for tab in page.query_selector_all("#app .tabs button")[1:3]:
+                tab.click()
+                page.wait_for_timeout(450)
+                tried.append("switching tabs")
+            for b in page.query_selector_all("#page-actions button, #app .hero-actions button"):
+                label = (b.inner_text() or "").strip()
+                if re.match(r"(?i)^(new|add|create|log|raise|record|register|assign|check.?out)\b", label):
+                    b.click()
+                    page.wait_for_timeout(700)
+                    tried.append(f'pressing "{label}"')
+                    if page.query_selector(".modal, .drawer"):
+                        page.keyboard.press("Escape")
+                        page.wait_for_timeout(400)
+                    break
+        except Exception as e:  # noqa: BLE001 — a control that cannot be used is the finding
+            problems.append(f"Using the screen's controls failed: {str(e).splitlines()[0][:200]}")
+        touched = list(dict.fromkeys(errors[before:]))
+        if touched:
+            problems.append("Using the screen (" + ", ".join(dict.fromkeys(tried)) + ") raised: " + "; ".join(t[:220] for t in touched[:3]))
+        del errors[before:]
         result["screens"].append({
             "id": s["id"], "title": s.get("title"), "story": s.get("story", ""),
             "example": bool(s.get("example")), "ok": not problems, "problems": problems,
