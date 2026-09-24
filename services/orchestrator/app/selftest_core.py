@@ -947,6 +947,36 @@ async def test_codemap(tmp: Path) -> None:
            "svc_backend ==>|SQL| svc_db" in topo and "svc_data ==>|SQL| svc_db" in topo, topo)
 
 
+async def test_check_rules() -> None:
+    """Checks that once flagged what no Developer could change (docs/CHECKS.md, 'When a check was wrong')."""
+    import re
+    from .workspace import checks, seeding
+
+    own = 'async function confirm(id) { await api(`/review-queue/${id}/confirm`); }\nui.button("Confirm", { onclick: () => confirm(r.id) })'
+    native = 'if (confirm("Delete this ticket?")) remove();'
+    banned = checks._BANNED[0][0]
+    for label, code, flagged in (("a screen's own confirm() is allowed", own, False),
+                                 ("the browser's confirm() is still flagged", native, True)):
+        hit = banned.search(code)
+        expect(label, (bool(hit) and not checks._defines(code, hit.group(1))) == flagged)
+
+    missing = {"status": 422, "detail": json.dumps({"detail": [
+        {"type": "missing", "loc": ["query", "subject"], "msg": "Field required"},
+        {"type": "missing", "loc": ["query", "product_area"], "msg": "Field required"}]})}
+    stray = {"status": 422, "detail": json.dumps({"detail": [{"type": "int_parsing", "loc": ["path", "item_id"]}]})}
+    expect("a GET that only lacks query parameters needs input, not a fix", checks._needs_query(missing))
+    expect("a 422 from a stray root route is still a failure", not checks._needs_query(stray))
+    expect("a 500 is never excused", not checks._needs_query({"status": 500, "detail": "boom"}))
+
+    def lopsided(split: tuple[int, int, int]) -> bool:
+        values = ["Residential"] * split[0] + ["Business"] * split[1] + ["Wholesale"] * split[2]
+        rows = [{"id": i, "segment": v} for i, v in enumerate(values)]
+        return any(re.search(r"customer\.segment:.*share one value", x) for x in seeding.quality_issues({"customer": rows}, []))
+    expect("a two-value column may split 80/20 (48 Residential, 12 Business)", not lopsided((48, 12, 0)))
+    expect("a two-value column split 95/5 is still lopsided", lopsided((57, 3, 0)))
+    expect("a three-value column over 80% one value is still lopsided", lopsided((51, 5, 4)))
+
+
 async def test_plane() -> None:
     """The Plane mirror's pure parts: keys that never collide, safe HTML, sane priorities."""
     from .integrations import plane
@@ -1009,6 +1039,7 @@ async def main() -> int:
         await test_failures()
         await test_foundation()
         await test_codemap(tmp)
+        await test_check_rules()
         await test_plane()
         await test_api(rid)
     finally:
