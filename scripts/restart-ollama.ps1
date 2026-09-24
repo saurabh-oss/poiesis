@@ -30,6 +30,9 @@ $psi.CreateNoWindow = $true
 $psi.EnvironmentVariables["OLLAMA_HOST"] = "0.0.0.0:11434"
 $psi.EnvironmentVariables["OLLAMA_KEEP_ALIVE"] = "30m"
 $psi.EnvironmentVariables["OLLAMA_MAX_LOADED_MODELS"] = "1"
+# Leave 1.5 GB of VRAM to the display driver. With the GPU filled to the brim the
+# driver bugchecked twice (0x116, STATUS_INSUFFICIENT_RESOURCES) during long runs.
+$psi.EnvironmentVariables["OLLAMA_GPU_OVERHEAD"] = "1610612736"
 $proc = [System.Diagnostics.Process]::Start($psi)
 
 for ($i = 0; $i -lt 30; $i++) {
