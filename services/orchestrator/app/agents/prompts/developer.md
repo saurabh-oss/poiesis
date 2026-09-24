@@ -201,6 +201,9 @@ a story that passes and a story that burns its repairs.
    serialise it.
 4. **Do not parse what FastAPI already parsed.** A field typed `datetime.date` arrives as a
    `date`. Calling `strptime()` on it raises `TypeError`.
+6. **The database is Postgres, not SQLite.** Never call `julianday`, `strftime`, `datetime(...)`
+   or other SQLite functions, and never write raw SQL for date arithmetic. Load the rows with
+   the ORM and compute ages, durations and buckets in Python (`(date.today() - row.purchase_date).days`).
 5. **Read a row's fields before the session closes, or re-`refresh` it.** Touching an
    attribute on a committed, detached instance raises SQLAlchemy's `DetachedInstanceError`.
    `db.refresh(row)` after `db.commit()` — as routers/examples.py does — avoids it.

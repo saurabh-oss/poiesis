@@ -359,7 +359,8 @@ function deltaEl(delta) {
 
 /** Headline numbers: [{ label, value, hint, tone, icon, delta: 12 | "-3%", spark: [numbers], onClick }]. */
 export function stats(items) {
-  return h("div", { class: "stats" }, (items || []).map((it) => {
+  return h("div", { class: "stats" }, (items || []).map((raw) => {
+    const it = { ...raw, label: raw.label ?? raw.name ?? raw.title ?? "", value: raw.value ?? raw.count ?? raw.total };
     const value = h("div", { class: "stat-value" });
     countUp(value, typeof it.value === "number" ? number(it.value) : (it.value ?? "—"));
     const iconName = it.icon === undefined ? guessIcon(it.label) : it.icon;
@@ -416,12 +417,23 @@ export function meter(value, max = 100, opts = {}) {
     opts.hideLabel ? null : h("span", { class: "faint" }, `${Math.round(pct)}%`));
 }
 
+/** An item's label and value, whatever the model called them: {label,value}, {category,count}, {name,total}… */
+function lv(it) {
+  if (it === null || typeof it !== "object") return { label: String(it ?? ""), value: 0 };
+  const lab = it.label ?? it.name ?? it.title ?? it.key ?? it.category ?? it.status ?? it.type ?? it.date ?? it.day ?? it.week ?? it.month
+    ?? Object.values(it).find((v) => typeof v === "string") ?? "";
+  const val = it.value ?? it.count ?? it.total ?? it.amount ?? it.qty ?? it.n
+    ?? Object.values(it).find((v) => typeof v === "number") ?? 0;
+  return { ...it, label: lab, value: Number(val) || 0 };
+}
+
 const PALETTE = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-7)", "var(--chart-8)"];
 const TONE_COLOR = { ok: "var(--ok-2)", warn: "var(--warn-2)", down: "var(--down-2)", info: "var(--info-2)" };
 
 /** A donut with a legend: ui.donut([{ label: "Laptop", value: 175 }, …], { center: "320", sub: "assets" }). */
 export function donut(items, opts = {}) {
-  const list = (items || []).filter((i) => Number(i.value) > 0);
+  const list = (Array.isArray(items) ? items : Object.entries(items || {}).map(([label, value]) => ({ label, value })))
+    .map(lv).filter((i) => Number(i.value) > 0);
   const total = list.reduce((a, i) => a + Number(i.value), 0) || 1;
   const size = 168, r = 62, c = 2 * Math.PI * r;
   let start = 0;
@@ -453,7 +465,7 @@ export function donut(items, opts = {}) {
 
 /** Horizontal bars: [{ label, value, tone? }], the longest bar fills the width; opts.onClick(item). */
 export function bars(items, opts = {}) {
-  const list = items || [];
+  const list = (Array.isArray(items) ? items : Object.entries(items || {}).map(([label, value]) => ({ label, value }))).map(lv);
   const max = opts.max || Math.max(1, ...list.map((i) => Number(i.value) || 0));
   return h("div", { class: "bars" }, list.map((it, i) => {
     const v = Number(it.value) || 0;
@@ -485,7 +497,7 @@ function chartTip(wrap) {
 export function timeseries(points, opts = {}) {
   if (opts.type === "line") return line(points, opts);
   ensureDefs();
-  const pts = points || [];
+  const pts = (points || []).map(lv);
   const W = 640, H = opts.height || 180, pad = 8, base = H - 18;
   const max = Math.max(1, ...pts.map((p) => Number(p.value) || 0));
   const n = Math.max(1, pts.length), gap = n > 40 ? 1 : 3;
@@ -513,7 +525,7 @@ export function timeseries(points, opts = {}) {
 /** A line and area chart: [{ label, value }]. */
 export function line(points, opts = {}) {
   ensureDefs();
-  const pts = points || [];
+  const pts = (points || []).map(lv);
   const W = 640, H = opts.height || 180, pad = 10, base = H - 18;
   const vals = pts.map((p) => Number(p.value) || 0);
   const max = Math.max(1, ...vals);

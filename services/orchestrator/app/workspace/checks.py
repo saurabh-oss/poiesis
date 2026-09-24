@@ -1604,15 +1604,21 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from app import models  # noqa: F401
 from app.db import Base, get_session
+import os
 from app.main import app
-try:
-    from tests.conftest import seed_from_init_sql
-except Exception:  # noqa: BLE001
-    seed_from_init_sql = None
-engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-Base.metadata.create_all(engine)
-if seed_from_init_sql:
-    seed_from_init_sql(engine)
+if os.environ.get("SMOKE_DATABASE_URL"):
+    # The real thing: Postgres, loaded from db/init.sql exactly as a deployment is.
+    engine = create_engine(os.environ["SMOKE_DATABASE_URL"], pool_pre_ping=True)
+    Base.metadata.create_all(engine)   # what the app's lifespan does for tables init.sql lacks
+else:
+    try:
+        from tests.conftest import seed_from_init_sql
+    except Exception:  # noqa: BLE001
+        seed_from_init_sql = None
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    if seed_from_init_sql:
+        seed_from_init_sql(engine)
 S = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 app.dependency_overrides[get_session] = lambda: S()
 from fastapi.routing import APIRoute
@@ -1663,7 +1669,17 @@ async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
     tools = root / ".poiesis"
     tools.mkdir(exist_ok=True)
     (tools / "api_smoke.py").write_text(SMOKE_SCRIPT, encoding="utf-8", newline="\n")
-    result = await run_in_sandbox(run_id, SMOKE_COMMAND, timeout=timeout, network=True)
+    pg = await _smoke_postgres(run_id)
+    try:
+        if pg:
+            result = await run_in_sandbox(run_id, SMOKE_COMMAND, timeout=timeout, network_name=pg,
+                                          env={"SMOKE_DATABASE_URL": "postgresql+psycopg://postgres:poiesis@smoke-db:5432/poiesis"})
+        else:
+            result = await run_in_sandbox(run_id, SMOKE_COMMAND, timeout=timeout, network=True)
+    finally:
+        if pg:
+            await _proc("docker", "rm", "-f", f"{pg}-db", timeout=30)
+            await _proc("docker", "network", "rm", pg, timeout=30)
     marker = "POIESIS_SMOKE_JSON\n"
     if marker not in result.stdout:
         err = (result.stderr or result.stdout).strip()
@@ -1681,6 +1697,40 @@ async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
     # A GET with no parameters that answers 4xx is wrong too: a 422 on /api/metrics is
     # how a stray root route in another router shows itself.
     return [r for r in rows if int(r.get("status", 0)) >= (500 if r.get("parametrised") else 400)], ""
+
+
+async def _smoke_postgres(run_id: str) -> str | None:
+    """A throwaway Postgres on its own network, loaded from db/init.sql. Returns the network name.
+
+    The smoke used to run on SQLite, and an endpoint using SQLite's julianday()
+    passed it, then answered 500 on the deployed Postgres. None when Docker
+    cannot provide it; the smoke then falls back to SQLite.
+    """
+    init = workspace_path(run_id) / "db" / "init.sql"
+    if not init.is_file():
+        return None
+    net = f"poiesis-smoke-{run_id}"
+    await _proc("docker", "rm", "-f", f"{net}-db", timeout=30)
+    await _proc("docker", "network", "rm", net, timeout=30)
+    code, _ = await _proc("docker", "network", "create", net, timeout=30)
+    if code != 0:
+        return None
+    code, _ = await _proc(
+        "docker", "run", "-d", "--name", f"{net}-db", "--network", net, "--network-alias", "smoke-db",
+        "-e", "POSTGRES_PASSWORD=poiesis", "-e", "POSTGRES_DB=poiesis",
+        "-v", f"{mount_source(run_id)}/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro",
+        SQL_IMAGE, timeout=60)
+    if code != 0:
+        await _proc("docker", "network", "rm", net, timeout=30)
+        return None
+    for _ in range(120):
+        code, _ = await _proc("docker", "exec", f"{net}-db", "pg_isready", "-h", "127.0.0.1", "-U", "postgres", timeout=10)
+        if code == 0:
+            return net
+        await asyncio.sleep(0.5)
+    await _proc("docker", "rm", "-f", f"{net}-db", timeout=30)
+    await _proc("docker", "network", "rm", net, timeout=30)
+    return None
 
 
 def smoke_failures_by_file(run_id: str, failures: list[dict]) -> dict[str, list[dict]]:

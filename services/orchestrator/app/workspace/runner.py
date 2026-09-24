@@ -85,18 +85,25 @@ async def run_in_sandbox(
     memory: str = "2g",
     cpus: str = "2",
     shell: str = "bash",
+    network_name: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> ExecResult:
-    """`shell` is "sh" for Alpine images such as node:20-alpine, which have no bash."""
+    """`shell` is "sh" for Alpine images such as node:20-alpine, which have no bash.
+
+    `network_name` joins a named Docker network (a throwaway database's), with egress.
+    """
     host_path = mount_source(run_id)
     docker_cmd = [
         "docker", "run", "--rm",
-        "--network", "bridge" if network else "none",
+        "--network", network_name or ("bridge" if network else "none"),
         "--memory", memory, "--cpus", cpus,
         "--pids-limit", "512",
         "-v", f"{host_path}:/work",
         "-w", "/work",
-        image or sandbox_image(), shell, "-lc", command,
     ]
+    for k, v in (env or {}).items():
+        docker_cmd += ["-e", f"{k}={v}"]
+    docker_cmd += [image or sandbox_image(), shell, "-lc", command]
     proc = await asyncio.create_subprocess_exec(
         *docker_cmd,
         stdout=asyncio.subprocess.PIPE,
