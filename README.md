@@ -6,6 +6,24 @@ Poiesis takes whatever a business stakeholder already has (a document, a whitebo
 
 The thing that makes Poiesis different from every "prompt to app" tool is the **Portfolio Knowledge Graph**. Before any agent designs or writes anything, it must ask the graph what already exists. Reuse is enforced by architecture, not encouraged by a prompt.
 
+## Documentation
+
+| Document | Read it to |
+|---|---|
+| [docs/SETUP-WINDOWS.md](docs/SETUP-WINDOWS.md) | Install and start Poiesis on a Windows laptop with a GPU |
+| [docs/FIRST-RUN.md](docs/FIRST-RUN.md) | Take one brief from submission to a running app, and know where to look |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Start everything after a reboot, run the self-tests, find logs, fix what breaks |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Understand the design positions, the graph and the components |
+| [docs/AGENTS.md](docs/AGENTS.md) | See what each agent reads, produces and refuses to do |
+| [docs/CHECKS.md](docs/CHECKS.md) | Know how an increment is verified, and why a story went red |
+| [docs/API.md](docs/API.md) | Script the platform: runs, gates, deployments, maps, boards, knowledge, observability |
+| [docs/CODEMAPS.md](docs/CODEMAPS.md) | Understand the ArchiLens codebase maps |
+| [docs/PLANE.md](docs/PLANE.md) | Set up and understand the Plane boards |
+| [docs/CASE-STUDY-DUPEGUARD.md](docs/CASE-STUDY-DUPEGUARD.md) | Read one full run: what the platform built, what it got wrong, what changed |
+
+Sample briefs: [docs/samples/](docs/samples/) — BRD-ITAM-2026-014 (AssetHub, IT asset management)
+and BRD-SUP-2026-021 (DupeGuard, duplicate-ticket auto-triage).
+
 ---
 
 ## Business capabilities
@@ -17,12 +35,13 @@ The thing that makes Poiesis different from every "prompt to app" tool is the **
 | Traceable product definition | Every story traces to a captured stakeholder statement; every commit traces to a story | Product Owner agent + KG |
 | Enforced reuse | New work is checked against an indexed portfolio before it is designed | Portfolio Knowledge Graph |
 | Governed autonomy | Agents run unattended between gates; gates are typed, logged, and reversible | Orchestrator interrupts |
-| Verified, not just tested | Every increment is deployed and opened in a real browser before a human ever sees the release decision; the release gate cannot offer "release" for an app that is not proven working | `deploy` stage, headless-browser check |
+| Verified, not just tested | Every increment is deployed and opened in a real browser — every screen opened, a row opened, tabs switched, its "New…" dialog pressed — before a human ever sees the release decision; the release gate cannot offer "release" for an app that is not proven working | `deploy` stage, `workspace/browser_check.py`, [docs/CHECKS.md](docs/CHECKS.md) |
 | A guaranteed base to hand off | Rework and human rebuilds are bounded; if the increment still isn't fully working when that budget runs out, the release gate can ship a smaller *base app* — dropping only what's broken — instead of ending in pure iteration | `approve_release` gate |
 | Evidence-backed release | A release verdict is a computed artifact, not an opinion | Reviewer + Release agents |
 | Full local sovereignty, or hosted quality | `local` keeps every brief and every line of generated code on your machine, on models whose replies are constrained to each agent's schema; `cloud` routes the agents to a hosted model when that matters more than sovereignty | `llm.py`: native Ollama client, LiteLLM for hosted profiles |
 | Compounding memory | Every finished run adds what it built, decided and learned; the next run's Architect and Developer are shown the components, decisions and lessons that apply, by word and by meaning | Neo4j graph + Qdrant vector index |
-| Work tracked where the organisation tracks it | Initiative, epics, stories and sprint in Jira; branch, tag and pull request on the Git remote, as the run goes | `integrations/tracker.py`, `integrations/gitremote.py` |
+| Work tracked where the organisation tracks it | Every idea becomes its own project and board in a self-hosted Plane (modules, work items, a sprint cycle, cards moving as stories pass or fail); the same in Jira Cloud when configured; branch, tag and pull request on the Git remote, as the run goes | `integrations/plane.py`, `integrations/tracker.py`, `integrations/gitremote.py` |
+| Every codebase readable as pictures | ArchiLens draws each generated app's runtime topology, modules grouped by story, data model and request flows, explained by the local model; a reviewer sees what was built without opening a file | `workspace/codemap.py`, `/codebases` |
 | Explainable, measurable | Every model call kept with its prompt and reply; every stage, sandbox run and deploy timed; traces to Jaeger, metrics to Prometheus and Grafana | `telemetry.py`, `/api/runs/{id}/traces`, `/metrics` |
 | A demonstrable MVP in one sitting | Under the `mvp` pack the platform lays the whole data model and generated, believable demonstration data first, serves every table through a generic data API, and has the Developer build only polished screens on a UI kit; no test loop, verification is the real browser | `packs/mvp.yaml`, `foundation` stage, `routers/resources.py`, `frontend/ui.js` |
 
@@ -53,10 +72,11 @@ visitor can be impressed by within an hour on local models:
 4. **No Tester and no pytest.** A story is implemented, compiled, checked statically (a
    screen that gives up without an id, a render argument never taken, a router without a
    router, a stray root route, a call to a path nothing serves), then every GET is answered
-   against a seeded in-memory database before deploy, and the app is opened in a real
-   browser. Three repairs per story, two automatic rework rounds, every gate but the
-   release auto-approved. The Reviewer is told tests are absent by design and judges what
-   a visitor sees.
+   against a throwaway Postgres loaded from the app's own `init.sql` before deploy, and the
+   app is opened — and used — in a real browser. Three repairs per story, each told to fix
+   everything listed; one automatic rework round; every gate but the release
+   auto-approved. The Reviewer is told tests are absent by design and judges what a visitor
+   sees. [docs/CHECKS.md](docs/CHECKS.md) lists every check.
 
 **The same service topology for every generated app.** A gateway (nginx) serves the UI
 and routes /api; an api service runs the story endpoints plus the generic data API; a data
@@ -81,6 +101,12 @@ example screen uses every recipe on seeded rows. Before deploy, every GET is exe
 throwaway Postgres loaded from the app's own `init.sql`.
 
 Switch to `packs/default.yaml` for the full build: Tester, repair loops, regressions.
+
+**A lesson from the DupeGuard run** ([case study](docs/CASE-STUDY-DUPEGUARD.md)): every
+screen worked and the Reviewer scored it 90.8, yet three stories had each implemented the
+BRD's duplicate-scoring rule differently, because each story is built in its own context.
+Screens are verified; business rules that several stories share are not yet. A shared
+domain module written by the foundation stage is the proposed fix.
 
 ## Architecture at a glance
 
@@ -117,7 +143,10 @@ Switch to `packs/default.yaml` for the full build: Tester, repair loops, regress
   spans  ──► Postgres (spans, llm_calls) ──► run page "Model traces"
          └─► OTLP ──► Jaeger            metrics ──► /metrics ──► Prometheus ──► Grafana
   harvest ──► Neo4j (stories, decisions, lessons) + Qdrant (the same, by meaning)
-  build   ──► Jira (initiative, epics, stories, sprint) + Git remote (branch, tag, PR)
+  build   ──► Plane (project, modules, work items, cycle) · Jira (initiative, epics,
+              stories, sprint) · Git remote (branch, tag, PR)
+  deploy  ──► the app as its own compose project (gateway, api, data, db) on 127.0.0.1:81xx
+          └─► ArchiLens code map (topology, modules, data model, flows; local-model notes)
 
   (MinIO is in the compose file but not yet used — see
    "Deliberately not built yet" in docs/ARCHITECTURE.md)
@@ -130,10 +159,15 @@ See `docs/SETUP-WINDOWS.md`. Short version:
 ```powershell
 git clone <this repo> poiesis; cd poiesis
 copy .env.example .env      # set POIESIS_LLM_PROFILE and POIESIS_WORKSPACE_HOST_ROOT
+powershell -ExecutionPolicy Bypass -File scripts\restart-ollama.ps1   # Ollama with the settings Poiesis needs
 docker compose up -d
-.\scripts\bootstrap.ps1     # builds the poiesis-* models, indexes your portfolio
+.\scripts\bootstrap.ps1     # pulls the models, indexes your portfolio
 start http://localhost:3000
 ```
+
+Optional, for the Boards page: start Plane and run `python scripts\plane-bootstrap.py`
+([docs/PLANE.md](docs/PLANE.md)). After a reboot, follow the start order in
+[docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 Two settings decide whether the first run works. `POIESIS_WORKSPACE_HOST_ROOT` must be the
 absolute path to this repo's `workspaces` folder as **Windows** sees it — the test sandbox
@@ -141,6 +175,20 @@ is a sibling container, so the Docker daemon resolves that bind mount on the hos
 inside the orchestrator. And the repo URLs in `services/indexer/portfolio.yaml` must be
 real, or the knowledge graph stays empty and every architecture verdict comes back
 "build new".
+
+## The control room
+
+http://localhost:3000, in the Adobe Spectrum look shared by every generated app.
+
+| Page | What it is for |
+|---|---|
+| **Runs** (home) | Describe a problem, attach documents and links, start a run; the eight agents as tiles; the value stream; recent runs |
+| **A run** (`/runs/<id>`) | The stage rail, the open gate and its decision, the running app with its screenshots, the board and codebase-map cards, integrations, model traces, the activity feed |
+| **Apps** | Every generated app with its address and status; start, redeploy, stop |
+| **Boards** | Every idea's Plane project: progress per state, sprint, release; a Kanban board per run at `/runs/<id>/board` |
+| **Codebases** | Every generated codebase drawn by ArchiLens; a full map per run at `/runs/<id>/codebase` |
+| **Portfolio** | What the knowledge graph knows: recall by word and meaning, projects and their capabilities, lessons learned, the house stack |
+| **Observability** | Dependency health, model calls and tokens over time, response times, GPU busy, model time by agent, where the time goes, runs, recent errors |
 
 ## Models
 
@@ -170,8 +218,11 @@ its whole budget thinking is asked again without.
 Every model call is kept — prompt, reply, thinking, tokens, duration, the agent that asked
 and the memo step it was for — and every stage, sandbox run, platform check, deploy,
 browser check and integration call is timed. The run page shows them under **Model
-traces**; `/observability` shows the platform: dependency health, calls, tokens, where the
-time goes, recent errors. The same spans go to Jaeger over OTLP and the same counters to
+traces**; `/observability` shows the platform: a health strip with each dependency's
+latency; model calls, tokens and model time with a trend line each; median, p90 and p99
+response time; how busy the GPU was; model activity over the window; model time by agent;
+where the time goes by kind of work; runs with their status; and recent errors grouped by
+run. The window is 6 hours to 7 days and the page refreshes every 15 seconds. The same spans go to Jaeger over OTLP and the same counters to
 Prometheus, with a Grafana dashboard provisioned:
 
 | URL | What |
@@ -232,6 +283,8 @@ like a finished product on day one, not a wireframe.
 
 ### Codebase maps (ArchiLens)
 
+Details: [docs/CODEMAPS.md](docs/CODEMAPS.md).
+
 Every generated codebase is drawn by [ArchiLens](https://github.com/saurabh-oss/archilens)
 (`archilens` on PyPI) at http://localhost:3000/codebases, and each run page links to its
 own map. A map has four views:
@@ -262,6 +315,8 @@ When maps are drawn:
 - The raw ArchiLens snapshot is served at `/api/runs/{id}/codemap/snapshot`.
 
 ## Plane boards (self-hosted, open source)
+
+Details and troubleshooting: [docs/PLANE.md](docs/PLANE.md).
 
 Every idea gets its own project in [Plane](https://plane.so), an open-source tracker that
 works like Jira and runs on this machine. The console's **Boards** page
@@ -330,16 +385,33 @@ docker compose exec orchestrator python -m app.selftest_core                    
 ## Repository layout
 
 ```
-services/orchestrator   FastAPI + LangGraph agent value stream
-  app/llm.py            Native Ollama client (schema-constrained), LiteLLM for hosted profiles
-  app/telemetry.py      Spans, model-call traces, Prometheus metrics, OTLP export
-  app/integrations/     Jira (tracker.py) and Git remote (gitremote.py)
-  app/kg/               Neo4j client and the Qdrant vector index
-services/indexer        Portfolio scanner → knowledge graph
-services/ui             Next.js control room
-observability/          Prometheus config, Grafana datasource and dashboard
-packs/                  Domain packs: gates, DoD, agent policy
-docs/                   Setup, architecture decisions, agent contracts
+services/orchestrator        FastAPI + LangGraph agent value stream
+  app/main.py                API assembly, startup recovery
+  app/api/                   HTTP routes: runs, gates, uploads, deployments, codemap, plane, knowledge, observability
+  app/graph/                 The value stream: nodes (discovery … ship), engine, checkpoint memo
+  app/agents/                Agent classes; prompts/ (one file per agent, plus ux_playbook.md); schemas.py
+  app/ingest/                PDF, DOCX (tables in order), images, audio, URLs → cited fragments
+  app/workspace/             Per-run repository, sandbox runner, checks, seeding, deployment,
+                             browser check, codemap (ArchiLens)
+  app/integrations/          Plane (plane.py), Jira (jira.py, tracker.py), Git remote (gitremote.py)
+  app/kg/                    Neo4j client and the Qdrant vector index
+  app/llm.py                 Native Ollama client (schema-constrained, one call at a time), LiteLLM for hosted profiles
+  app/telemetry.py           Spans, model-call traces, Prometheus metrics, OTLP export
+  app/selftest*.py           Self-tests: build-time checks; engine, model client, maps, Plane
+services/indexer             Portfolio scanner → knowledge graph
+services/ui                  Next.js control room
+infra/plane/                 Self-hosted Plane (compose file, env example)
+scripts/                     restart-ollama.ps1, bootstrap.ps1, plane-bootstrap.py, index-local.ps1,
+                             fetch-model.py, raise-gpu-timeout.ps1
+observability/               Prometheus config, Grafana datasource and dashboard
+scaffolds/web-app/           What every generated app starts from: gateway, api, data, db, UI kit
+                             (ui.js), shell (app.js), design system (styles.css)
+packs/                       Domain packs: gates, build and review policy, definition of done
+                             (both are mounted into the orchestrator by the compose file; the copies
+                             under services/orchestrator/ are what its image carries without the mount —
+                             keep them in step)
+docs/                        Setup, operations, architecture, agents, checks, API, maps, boards, case study
+workspaces/                  One git repository per run (not committed)
 ```
 
 ## The name

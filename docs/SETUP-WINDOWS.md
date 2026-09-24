@@ -37,6 +37,18 @@ from the system tray** and relaunch, then confirm:
 If containers still cannot reach it, allow `ollama.exe` through Windows Firewall on private
 networks. `scripts\bootstrap.ps1` checks all of this and tells you which half is wrong.
 
+**From now on, start Ollama with the script, not the tray app:**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\restart-ollama.ps1
+```
+
+It stops the tray app and any orphaned model runners (each keeps a share of GPU memory and
+slows the next load badly), starts `ollama serve` bound to `0.0.0.0:11434` without the tray
+app's KV-cache and flash-attention settings (both slow the Qwen3.6 hybrid model), keeps one
+model loaded, and leaves 1.5 GB of VRAM to the display driver, which stopped a series of
+driver crashes during long runs. See `OPERATIONS.md` for the details.
+
 ## 2. Clone and configure
 
 ```powershell
@@ -68,6 +80,7 @@ A practical pattern: develop the pipeline on `groq`, run stakeholder work on `lo
 ## 3. Start
 
 ```powershell
+powershell -ExecutionPolicy Bypass -File scripts\restart-ollama.ps1
 docker compose up -d
 .\scripts\bootstrap.ps1
 ```
@@ -87,6 +100,19 @@ Add anything not on GitHub yet:
 .\scripts\index-local.ps1 -Path C:\src\meridian -Name "Meridian"
 ```
 
+**Optional: Plane boards.** For the Boards page (every idea as a project and board in a
+self-hosted tracker), start Plane and connect it. It needs about 3–4 GB more of Docker's
+memory:
+
+```powershell
+copy infra\plane\plane.env.example infra\plane\plane.env    # set the two secret keys
+docker compose -f infra/plane/docker-compose.yml --env-file infra/plane/plane.env -p plane up -d
+python scripts\plane-bootstrap.py                           # prints the sign-in for http://localhost:8200
+docker compose up -d orchestrator
+```
+
+See `PLANE.md`.
+
 ## 4. Use it
 
 Open http://localhost:3000 and submit a brief. You will be interrupted roughly five times
@@ -97,8 +123,10 @@ Other endpoints:
 
 | URL | What |
 |---|---|
-| http://localhost:3000 | The control room |
-| http://localhost:8080/docs | Orchestrator API |
+| http://localhost:3000 | The control room: Runs, Apps, Boards, Codebases, Portfolio, Observability |
+| http://localhost:8100–8199 | Generated applications, one port per run (the Apps page lists them) |
+| http://localhost:8200 | Plane, if started — `admin@poiesis.local`, password in `infra/plane/plane.env` |
+| http://localhost:8080/docs | Orchestrator API (grouped reference in `API.md`) |
 | http://localhost:7474 | Neo4j browser — `neo4j` / `poiesisdev` |
 | http://localhost:3000/observability | Health of every dependency, model usage, where the time goes |
 | http://localhost:16686 | Jaeger — traces per run, stage and model call |
@@ -111,9 +139,12 @@ Other endpoints:
 
 The defaults are for a 12 GB GPU with 32 GB of system RAM: Qwen3.6 35B-A3B is a
 mixture-of-experts model whose 23 GB of weights split across the card and RAM, and because
-only 3B parameters are active per token it still generates at a usable speed. Expect a
-story (Developer, Tester, checks, repairs) to take on the order of ten minutes, and a
-sprint of ten stories a couple of hours. The quality is what the wait buys.
+only 3B parameters are active per token it still generates at a usable speed. Measured on an
+RTX 5070 Ti laptop (12 GB) under the `mvp` pack, the DupeGuard run (a 4,000-word BRD, ten
+stories) took 1 hour 52 minutes from submission to the release gate: about 10 minutes of
+planning, 40 of data model and demonstration data, 40 of building, and half an hour of API
+checks, browser checks, review and one rework round. The `default` pack adds a Tester and
+pytest to every story and takes several times longer. The quality is what the wait buys.
 
 On a 24 GB card the same models fit whole and run several times faster. On 8 GB, point all
 three roles at `gemma4:12b` (fits, 256K context, fast) and set
@@ -158,7 +189,7 @@ client is restarted (the CLI only re-attaches to the server's transfer). Fetch t
 from the registry directly instead; it resumes, retries and verifies:
 
 ```powershell
-python scriptsetch-model.py qwen3.6 35b-a3b-coding 6
+python scripts\fetch-model.py qwen3.6 35b-a3b-coding 6
 ```
 
 **On a slow link, one model is enough.** Set all three `POIESIS_MODEL_*` roles to
@@ -179,9 +210,24 @@ Set-ExecutionPolicy -Scope Process Bypass; .\scripts\raise-gpu-timeout.ps1
 On a Legion, also set Lenovo Vantage / Legion Space to Performance mode while a run is
 going (Balanced throttles the GPU under sustained load), and keep the NVIDIA driver current.
 
+**The bugcheck reports STATUS_INSUFFICIENT_RESOURCES.** The GPU ran out of memory for the
+display driver itself. Start Ollama with `scripts\restart-ollama.ps1`, which reserves 1.5 GB
+for it (`OLLAMA_GPU_OVERHEAD`); the tray app does not. After any bugcheck, start Docker
+Desktop by hand (it does not start on its own), then follow the start order in
+`OPERATIONS.md`, and retry any run left `failed`: `POST /api/runs/<id>/retry` continues from
+its last checkpoint without repeating model calls.
+
+**Prompt processing is suddenly an order of magnitude slower, or the model will not load.**
+Orphaned `llama-server` processes from an earlier Ollama are holding GPU memory. Run
+`scripts\restart-ollama.ps1`; it will not start while one survives.
+
 **Something is slow and you want to know what.** The run page's "Model traces" timeline
 shows every stage, model call, sandbox run and deploy with its duration; the Observability
 page shows where the time goes across runs; Jaeger has the same as a trace tree.
+
+**A story is red although its screen works.** Read the reason on the run page's build
+stage. If the finding names something the Developer could not change, it is a check's false
+positive: `CHECKS.md` lists the ones found so far and how to add a self-test with the fix.
 
 **Neo4j will not start.** Usually a stale volume. `docker compose down` then delete
 `data\neo4j`.

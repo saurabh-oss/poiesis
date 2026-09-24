@@ -80,14 +80,16 @@ isn't ready," or "hold."
 | Model layer | Role-to-model mapping; on `local`, a native Ollama client with schema-constrained decoding, per-role thinking, streaming with an idle timeout; LiteLLM for hosted profiles | `llm.py`, Ollama, LiteLLM |
 | Telemetry | Every model call and every stage, sandbox run, deploy and integration call as a stored span; Prometheus metrics; OTLP export | `telemetry.py`, Postgres, Jaeger, Prometheus, Grafana |
 | Vector index | Components, past stories, decisions and lessons, recalled by meaning alongside the graph's word match | Qdrant, `nomic-embed-text` |
-| Integrations | Jira mirror of the plan and progress; Git remote with branch per run, tag and pull request at release | `integrations/` |
+| Integrations | A project per idea in self-hosted Plane and, when configured, the same in Jira Cloud: the plan and its progress as they happen; Git remote with branch per run, tag and pull request at release | `integrations/plane.py`, `tracker.py`, `gitremote.py`; [PLANE.md](PLANE.md) |
+| Code maps | Every generated codebase drawn at four levels — runtime topology, modules by story, data model, request flows — with module summaries and flows written by the local model | ArchiLens 0.2.0, `workspace/codemap.py`, Mermaid; [CODEMAPS.md](CODEMAPS.md) |
+| Verification | Static checks, `init.sql` on Postgres, an API smoke run on a throwaway Postgres, a Node check of every screen, and a real browser that opens and uses every screen | `workspace/checks.py`, `browser_check.py`, Playwright; [CHECKS.md](CHECKS.md) |
 | Intake | Documents, images, audio, URLs and text into cited evidence fragments | pypdf, python-docx, faster-whisper, vision model |
 | Portfolio graph | Projects, components, capabilities, technologies, decisions, reuse edges | Neo4j |
 | Indexer | Repository → component-level graph nodes | tree-sitter, GitPython |
 | Workspace | Per-run git repository; commits are the build audit trail | GitPython |
 | Sandbox runner | Isolated execution of generated code and tests | Docker |
 | Event bus | Agent narration to the live tape and the audit log | Redis pub/sub, Postgres |
-| Control room | Value stream visualisation, artifact rendering, gate resolution | Next.js 14 |
+| Control room | Briefs and runs, gates, running apps, boards, codebase maps, the portfolio and observability | Next.js 14, Tailwind in the Spectrum palette, Mermaid |
 
 ## The graph
 
@@ -113,7 +115,9 @@ by the generic data API. A rework round returns to `build`, never to `foundation
 `deploy` starts the increment as its own Compose project on the host — every automated pass
 resets its database to a fresh volume first, since `db/init.sql` only ever runs against an
 empty one and a stale schema from an earlier round would otherwise survive silently — then
-opens every screen in a real browser before `review` ever sees the diff.
+opens every screen in a real browser before `review` ever sees the diff. It also redraws the
+run's codebase map; the local model's explanations of it wait until the run is idle, so they
+never compete with a build for the GPU.
 
 Gates, and what each actually decides:
 
@@ -158,18 +162,24 @@ competitor cannot copy by writing better prompts.
 
 ## Where the work is tracked
 
-The plan and its progress are mirrored where the organisation already looks: Jira
-(initiative, epics, stories with acceptance criteria and points, a started sprint, stories
-moving to Done as they go green) and a Git remote (branch `run/<id>` pushed after the
-scaffold and every story, tag at release, pull request on GitHub). Both follow the same
-two rules: never stop a run — an outage is a warning in the log — and never duplicate,
-however many times a gate replays a node.
+The plan and its progress are mirrored where the organisation already looks:
+
+- **Plane**, self-hosted and open source: every idea its own project and board — epics as
+  modules, stories as work items with acceptance criteria, points and priority, sprint one as
+  a cycle, cards moving to In Progress and Done as stories are built and go green, red ones
+  labelled with the failure. See [PLANE.md](PLANE.md).
+- **Jira Cloud**, when configured: initiative, epics, stories, a started sprint.
+- **A Git remote**: branch `run/<id>` pushed after the scaffold and every story, tag at
+  release, pull request on GitHub.
+
+All three follow the same two rules: never stop a run — an outage is a warning in the log —
+and never duplicate, however many times a gate replays a node.
 
 ## Where existing projects plug in
 
 | Project | Role inside Poiesis | Status |
 |---|---|---|
-| ArchiLens | Replace the indexer's AST walker with ArchiLens's parser; use its diagram generation for the architecture artifact | Direct fit |
+| ArchiLens | Draws every generated codebase (module, component and flow diagrams), fed Poiesis's module graph and explained by the local model through its pluggable AI client. Replacing the indexer's AST walker with its parser is still open | **Integrated** — [CODEMAPS.md](CODEMAPS.md) |
 | TestLoom | Replace the Tester agent's generation step; it already does requirements-to-traceable-tests | Direct fit |
 | ForgeAI | The weighted verdict model in `ship.py` is ForgeAI's scoring approach applied to an increment rather than a pipeline | Pattern reused |
 | TraceGuard AI | Replace the inline repair loop with TraceGuard's failure-to-PR remediation | Phase 2 |
@@ -177,7 +187,24 @@ however many times a gate replays a node.
 | SentinelShield | Runtime anomaly detection on released increments | Phase 4 |
 | AgentAxis | Its Domain Pack format is the pattern `packs/` follows | Pattern reused |
 
+## What the DupeGuard run taught
+
+Every screen of the DupeGuard app worked and the Reviewer scored it 90.8, yet three stories
+had each implemented the BRD's duplicate-scoring rule differently
+([case study](CASE-STUDY-DUPEGUARD.md)). Two consequences for the design:
+
+- **Business rules that several stories share need one home.** A story is built in its own
+  context; nothing today makes two stories agree on a rule. The foundation stage already
+  writes the data model for every story at once, and should likewise write the domain module
+  for the rules the brief states, which stories import rather than restate.
+- **A working screen is not a working rule.** The browser check and the Reviewer judge the
+  experience. Acceptance criteria that state numbers and rules ("a score of 85 or more
+  closes the ticket", "precision counts undone closures") should become executable checks
+  against the running app, as they were written by hand for DupeGuard.
+
 ## Deliberately not built yet
+
+- The shared domain module and executable acceptance criteria described above.
 
 - Multi-tenant SaaS. Local first; the seams (workspace root, pack selection, run ownership)
   are placed for it but nothing is multi-tenant today.
