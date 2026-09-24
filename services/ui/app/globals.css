@@ -284,3 +284,8 @@ button { transition: background-color 130ms ease-out, border-color 130ms ease-ou
 .cast-tile:hover .cast-step { color: var(--agent); }
 .cast-role { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .cast-tile, .cast-tile::before, .cast-tile::after, .cast-icon { animation: none; transition: none; } }
+
+/* ---- boards (Plane) ------------------------------------------------------------- */
+@keyframes kanban-in { from { opacity: 0; transform: translateY(6px) scale(.98); } to { opacity: 1; transform: none; } }
+.kanban-in { animation: kanban-in 360ms cubic-bezier(.2,.7,.3,1) both; }
+@media (prefers-reduced-motion: reduce) { .kanban-in { animation: none; } }

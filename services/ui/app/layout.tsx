@@ -34,6 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/apps" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
                 Apps
               </Link>
+              <Link href="/boards" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
+                Boards
+              </Link>
               <Link href="/codebases" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
                 Codebases
               </Link>

@@ -143,7 +143,28 @@ export type CodebaseRow = {
   preview?: string; patterns?: string[]; flows?: number; job: CodemapJob;
 };
 
+export type PlaneRef = { id: string; key?: string; url: string; identifier?: string; name?: string; stories?: string[] };
+export type PlaneCounts = { backlog: number; unstarted: number; started: number; completed: number; cancelled: number };
+export type PlaneIdea = {
+  run_id: string; title: string; status: string; created_at: string;
+  project: PlaneRef | null; sprint: PlaneRef | null; release: PlaneRef | null;
+  stories: number; epics: number; counts: PlaneCounts | null;
+};
+export type PlaneCard = {
+  id: string; key: string; name: string; priority: string | null; module: string | null; url: string;
+  labels: { name: string; color: string | null }[];
+};
+export type PlaneBoard = {
+  enabled: boolean; url: string; project: PlaneRef | null; sprint: PlaneRef | null; release: PlaneRef | null;
+  epics: Record<string, PlaneRef>; stories: Record<string, PlaneRef>; total?: number;
+  columns: { id: string; name: string; group: string; color: string | null; cards: PlaneCard[] }[];
+};
+
 export const api = {
+  planeOverview: () => json<{ enabled: boolean; url: string; syncing: boolean; ideas: PlaneIdea[] }>("/api/plane"),
+  planeBoard: (id: string) => json<PlaneBoard>(`/api/runs/${id}/plane`),
+  planeSync: (id: string) => json<any>(`/api/runs/${id}/plane/sync`, { method: "POST" }),
+  planeSyncAll: () => json<{ status: string }>("/api/plane/sync", { method: "POST" }),
   codebases: () => json<{ available: boolean; codebases: CodebaseRow[] }>("/api/codemaps"),
   codemap: (id: string) =>
     json<{ run_id: string; available: boolean; job: CodemapJob; map: Codemap | null }>(`/api/runs/${id}/codemap`),

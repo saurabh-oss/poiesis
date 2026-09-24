@@ -947,6 +947,26 @@ async def test_codemap(tmp: Path) -> None:
            "svc_backend ==>|SQL| svc_db" in topo and "svc_data ==>|SQL| svc_db" in topo, topo)
 
 
+async def test_plane() -> None:
+    """The Plane mirror's pure parts: keys that never collide, safe HTML, sane priorities."""
+    from .integrations import plane
+    a = plane._identifier("a3a2dd874dcb4106", "AssetHub")
+    b = plane._identifier("a3a282a6f4824f73", "AssetHub")
+    expect("two runs whose ids share four characters get different Plane keys", a != b, f"{a} {b}")
+    expect("a Plane key is upper-case letters and digits, at most 12", all(
+        k.isalnum() and k.isupper() and len(k) <= 12
+        for k in (a, plane._identifier("7fdad83a77e0490b", "Triage Desk & Co. (v2)"))))
+    expect("story value maps to Plane priority",
+           [plane._priority({"value": v}) for v in (9, 7, 5, 2)] == ["urgent", "high", "medium", "low"]
+           and plane._priority({}) == "medium")
+    html = plane._story_html("r1", {"id": "S1", "narrative": "<script>x</script>",
+                                    "acceptance_criteria": ["Given <b> when & then"], "estimate": 3})
+    expect("story text is escaped before it becomes Plane HTML",
+           "<script>" not in html and "&lt;script&gt;" in html and "&amp;" in html)
+    expect("acceptance criteria become a list", "<h3>Acceptance criteria</h3><ul><li>" in html)
+    expect("the Plane mirror is off without a token", not plane.configured())
+
+
 async def test_api(rid: str) -> None:
     print("\n[7] observability API")
     from .main import app
@@ -972,6 +992,8 @@ async def test_api(rid: str) -> None:
 
 
 async def main() -> int:
+    # Runs made here pass through the tracker hooks; keep them out of the real Plane.
+    plane_token, settings().plane_api_token = settings().plane_api_token, ""
     fake = FakeOllama()
     tmp = Path(tempfile.mkdtemp(prefix="poiesis-core-"))
     rid = _run_row("selftest core")
@@ -987,8 +1009,10 @@ async def main() -> int:
         await test_failures()
         await test_foundation()
         await test_codemap(tmp)
+        await test_plane()
         await test_api(rid)
     finally:
+        settings().plane_api_token = plane_token
         llm.use_transport(None)
         _drop_runs([rid, git_id, *engine_ids])
         shutil.rmtree(tmp, ignore_errors=True)

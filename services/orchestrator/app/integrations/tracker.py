@@ -35,6 +35,7 @@ from ..config import settings
 from ..db import Artifact, Event, NodeCache, session
 from ..events import emit
 from ..graph.memo import remember
+from . import plane
 from .jira import Jira, JiraError, adf, bullets, configured, heading, link, para
 
 # Tests swap in a fake Jira here; production leaves it None and talks to the site.
@@ -136,6 +137,7 @@ def _story_body(run_id: str, story: dict[str, Any]) -> dict[str, Any]:
 
 async def on_backlog(run_id: str, state: dict[str, Any], backlog: dict[str, Any]) -> None:
     """The approved backlog becomes an initiative, its epics and its stories."""
+    await plane.on_backlog(run_id, state, backlog)  # Plane mirrors independently of Jira
     async def work(j: Jira) -> None:
         types = await j.issue_types()
         if not types["story"]:
@@ -192,6 +194,7 @@ async def _create(j: Jira, type_id: str, summary: str, body: dict[str, Any], lab
 
 async def on_sprint(run_id: str, state: dict[str, Any], sprint: dict[str, Any]) -> None:
     """The cut sprint becomes a started Jira sprint holding exactly its stories."""
+    await plane.on_sprint(run_id, state, sprint)
     async def work(j: Jira) -> None:
         board = await j.scrum_board()
         if not board:
@@ -232,6 +235,7 @@ def _sprint_days() -> int:
 # --- progress ---------------------------------------------------------------------
 
 async def on_story_started(run_id: str, story_id: str) -> None:
+    await plane.on_story_started(run_id, story_id)
     async def work(j: Jira) -> None:
         known = _known(run_id, story_id)
         if known:
@@ -241,6 +245,7 @@ async def on_story_started(run_id: str, story_id: str) -> None:
 
 async def on_story_result(run_id: str, result: dict[str, Any], rnd: int) -> None:
     """Green moves to Done; red and dropped are labelled and explained, never closed."""
+    await plane.on_story_result(run_id, result, rnd)
     sid, status = result.get("story_id", ""), result.get("status", "")
 
     async def work(j: Jira) -> None:
@@ -269,6 +274,7 @@ async def on_story_result(run_id: str, result: dict[str, Any], rnd: int) -> None
 
 
 async def on_release(run_id: str, state: dict[str, Any], release: dict[str, Any]) -> None:
+    await plane.on_release(run_id, state, release)
     status = release.get("status", "")
     rounds = state.get("human_rebuilds", 0)
 

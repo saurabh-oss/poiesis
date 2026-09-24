@@ -240,6 +240,9 @@ async def disabled(rid: str, fake: FakeJira) -> None:
 
 async def main() -> int:
     saved = _configure(True)
+    # The tracker hooks also mirror into Plane; these made-up runs must not land there.
+    saved["plane_api_token"] = settings().plane_api_token
+    settings().plane_api_token = ""
     try:
         await scenario("full hierarchy", FakeJira(), full_hierarchy)
         await scenario("no Initiative type", FakeJira(initiative=False), no_initiative)

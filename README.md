@@ -261,6 +261,42 @@ When maps are drawn:
 - Explanations of modules whose code has not changed are reused.
 - The raw ArchiLens snapshot is served at `/api/runs/{id}/codemap/snapshot`.
 
+## Plane boards (self-hosted, open source)
+
+Every idea gets its own project in [Plane](https://plane.so), an open-source tracker that
+works like Jira and runs on this machine. The console's **Boards** page
+(http://localhost:3000/boards) shows every idea's board, and each run page has a board card.
+
+The mapping:
+
+| Poiesis | Plane |
+|---|---|
+| The run | a **Project**, which opens as a board grouped by state |
+| Backlog epic | a **Module** |
+| Backlog story (narrative, acceptance criteria, points, priority) | a **Work item** in its module |
+| Sprint one | a dated **Cycle** holding exactly its stories, which move to Todo |
+| Story being built / green / red | **In Progress** / **Done** with what was verified / stays in progress, labelled `poiesis-red`, with the failure |
+| Release | a **Release** work item linked to the running app |
+
+Plane runs as its own compose project on http://localhost:8200:
+
+```bash
+cp infra/plane/plane.env.example infra/plane/plane.env        # then set the two secret keys
+docker compose -f infra/plane/docker-compose.yml --env-file infra/plane/plane.env -p plane up -d
+python scripts/plane-bootstrap.py      # admin, workspace, API token -> .env; prints the sign-in
+docker compose up -d orchestrator
+curl -X POST localhost:8080/api/plane/sync                      # mirror every past run
+```
+
+New runs mirror themselves. Like the Jira mirror, Plane is never a dependency: if it is
+down or refuses a call, the run's log gets a warning and the run carries on. Nothing is
+duplicated when a gate replays a stage, because every object is created once under a
+remembered key, and work items and modules carry an external id that Plane will not
+accept twice.
+
+Plane's API cannot choose how a project opens, so new projects are switched to a board
+through Plane's api container (`PLANE_API_CONTAINER`, default `plane-api-1`).
+
 ## Jira
 
 Set `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` and `JIRA_PROJECT_KEY` in `.env`

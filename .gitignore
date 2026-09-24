@@ -36,3 +36,5 @@ Thumbs.db
 
 # Partial model downloads from scripts/fetch-model.py
 scripts/blobs/
+# Plane's secrets and admin password (scripts/plane-bootstrap.py writes them)
+infra/plane/plane.env

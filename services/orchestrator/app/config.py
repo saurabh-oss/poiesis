@@ -63,6 +63,16 @@ class Settings(BaseSettings):
     jira_initiative_type: str = "Initiative"
     jira_board_id: int = 0             # 0 = the project's first scrum board
     jira_sprint_days: int = 14
+    # Plane (self-hosted, open source): every run becomes its own project there.
+    # scripts/plane-bootstrap.py fills these in. Empty token = mirror off.
+    plane_url: str = ""                # http://localhost:8200 — what the browser opens
+    plane_api_url: str = ""            # http://host.docker.internal:8200 — what we call
+    plane_workspace: str = "poiesis"
+    plane_api_token: str = ""
+    # Plane's REST API cannot set a project's layout; its api container can. New
+    # projects are switched to a board through it (docker exec). Empty = skip.
+    plane_api_container: str = "plane-api-1"
+    plane_admin_email: str = "admin@poiesis.local"
 
     # Local models. The native Ollama client (llm.py) uses these; the hosted
     # profiles ignore them. num_ctx is sent with every request, so the Modelfile
