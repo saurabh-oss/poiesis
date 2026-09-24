@@ -113,7 +113,8 @@ export default function Home() {
   return (
     <div className="space-y-10">
       <section className="space-y-6">
-        <div className="enter max-w-[780px]">
+        <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,600px)]">
+        <div className="enter max-w-[640px]">
           {health && (
             <p className="inline-flex items-center gap-2 rounded-full border border-moss/30 bg-moss/[0.06] px-3 py-1 text-[12px] font-medium text-moss">
               <span className="live-dot live-dot-moss" />
@@ -130,6 +131,8 @@ export default function Home() {
             test it and start it running, and they stop to ask you whenever a decision would change
             the outcome.
           </p>
+        </div>
+        <Cast stages={stages} />
         </div>
         <div className="enter rounded border border-rule bg-paper px-5 pb-4 pt-5 shadow-spectrum" style={{ animationDelay: "80ms" }}>
           <StreamBand stages={stages} />
@@ -236,7 +239,6 @@ export default function Home() {
         </section>
 
         <aside className="space-y-6">
-          <Cast stages={stages} />
           <RecentRuns runs={runs} stages={stages} loaded={loaded} now={now} />
         </aside>
       </div>

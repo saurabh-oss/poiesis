@@ -12,8 +12,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="font-sans antialiased">
         <header className="console-header border-b border-rule">
-          <div className="mx-auto flex max-w-[1400px] items-center gap-6 px-6 py-3">
-            <Link href="/" className="flex items-center gap-2.5">
+          <div className="mx-auto flex max-w-[1400px] items-center gap-4 px-4 py-3 sm:gap-6 sm:px-6">
+            <Link href="/" className="flex shrink-0 items-center gap-2.5">
               {/* Spectrum keeps the brand mark as the only saturated red on the page. */}
               <span
                 aria-hidden
@@ -23,11 +23,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </span>
               <span className="text-[17px] font-semibold tracking-[-0.01em]">Poiesis</span>
             </Link>
-            <span aria-hidden className="h-5 w-px bg-rule" />
-            <p className="text-[13px] text-graphite">
+            <span aria-hidden className="hidden h-5 w-px bg-rule lg:block" />
+            <p className="hidden text-[13px] text-graphite lg:block">
               One brief in. A tested, reviewed increment out.
             </p>
-            <nav className="ml-auto flex gap-1 text-[13px]">
+            <nav className="ml-auto flex min-w-0 gap-1 overflow-x-auto whitespace-nowrap text-[13px]">
               <Link href="/" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
                 Runs
               </Link>

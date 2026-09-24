@@ -266,3 +266,21 @@ button { transition: background-color 130ms ease-out, border-color 130ms ease-ou
   .mmd-ready svg g.node, .mmd-ready svg g.cluster, .mmd-ready svg .edgePaths, .mmd-ready svg .edgeLabels,
   .mmd svg path.edge-pattern-dotted, .mmd svg path.edge-thickness-thick, .panel-in { animation: none !important; }
 }
+
+/* ---- home: the cast as tiles -------------------------------------------------- */
+@keyframes cast-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+.cast-tile { animation: cast-in 480ms cubic-bezier(.2,.7,.3,1) both;
+  transition: transform 220ms cubic-bezier(.2,.7,.3,1), box-shadow 220ms ease, border-color 220ms ease; }
+.cast-tile::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--agent);
+  transform: scaleX(0); transform-origin: left; transition: transform 320ms cubic-bezier(.2,.7,.3,1); }
+.cast-tile::after { content: ""; position: absolute; right: -30px; bottom: -30px; width: 90px; height: 90px; border-radius: 50%;
+  background: var(--agent); opacity: .06; transition: transform 320ms ease, opacity 320ms ease; pointer-events: none; }
+.cast-tile:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--agent) 45%, #E1E1E1);
+  box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--agent) 55%, transparent); }
+.cast-tile:hover::before { transform: scaleX(1); }
+.cast-tile:hover::after { transform: scale(1.6); opacity: .1; }
+.cast-icon { box-shadow: 0 6px 14px -6px var(--agent); transition: transform 260ms cubic-bezier(.2,.7,.3,1); }
+.cast-tile:hover .cast-icon { transform: rotate(-6deg) scale(1.08); }
+.cast-tile:hover .cast-step { color: var(--agent); }
+.cast-role { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .cast-tile, .cast-tile::before, .cast-tile::after, .cast-icon { animation: none; transition: none; } }
