@@ -1644,7 +1644,7 @@ for route in app.routes:
         r = client.get(path)
         bad = r.status_code >= (500 if parametrised else 400)
         out.append({"path": route.path, "status": r.status_code, "parametrised": parametrised,
-                    "detail": r.text[:400] if bad else ""})
+                    "detail": r.text[:1500] if bad else ""})
     except Exception:  # noqa: BLE001 — the traceback is the finding
         tb = traceback.format_exc()
         lines = [l for l in tb.splitlines() if "site-packages" not in l]
@@ -1705,8 +1705,23 @@ async def api_smoke(run_id: str, timeout: int = 600) -> tuple[list[dict], str]:
     except json.JSONDecodeError:
         return [], "the smoke check produced unreadable output"
     # A GET with no parameters that answers 4xx is wrong too: a 422 on /api/metrics is
-    # how a stray root route in another router shows itself.
-    return [r for r in rows if int(r.get("status", 0)) >= (500 if r.get("parametrised") else 400)], ""
+    # how a stray root route in another router shows itself. But a 422 that only says
+    # required query parameters are missing is an endpoint that needs input (a
+    # deflection check wants the draft's subject); called bare, that is its answer.
+    return [r for r in rows if int(r.get("status", 0)) >= (500 if r.get("parametrised") else 400)
+            and not _needs_query(r)], ""
+
+
+def _needs_query(row: dict) -> bool:
+    """A 422 whose every complaint is a missing query parameter."""
+    if int(row.get("status", 0)) != 422:
+        return False
+    try:
+        errors = json.loads(row.get("detail") or "").get("detail") or []
+    except (ValueError, AttributeError):
+        return False
+    return bool(errors) and all(isinstance(e, dict) and e.get("type") == "missing"
+                                and (e.get("loc") or [None])[0] == "query" for e in errors)
 
 
 async def _smoke_postgres(run_id: str) -> str | None:
