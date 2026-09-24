@@ -68,6 +68,7 @@ export default function Home() {
       .finally(() => setLoaded(true));
   }, []);
 
+  const decisions = stages.filter((s) => s.gate && s.gate_mode === "require" && s.gate !== "failed_story").length;
   const canStart = !steps && (brief.trim().length > 0 || links.length > 0 || files.length > 0);
 
   async function start() {
@@ -113,24 +114,48 @@ export default function Home() {
   return (
     <div className="space-y-10">
       <section className="space-y-6">
-        <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,600px)]">
-        <div className="enter max-w-[640px]">
+        <div className="grid items-stretch gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,600px)]">
+        <div className="enter flex max-w-[680px] flex-col">
           {health && (
-            <p className="inline-flex items-center gap-2 rounded-full border border-moss/30 bg-moss/[0.06] px-3 py-1 text-[12px] font-medium text-moss">
+            <p className="inline-flex self-start items-center gap-2 rounded-full border border-moss/30 bg-moss/[0.06] px-3 py-1 text-[12px] font-medium text-moss">
               <span className="live-dot live-dot-moss" />
               Ready · {health.llm_profile === "local" ? "models running on your own GPU" : `${health.llm_profile} models`} · {health.pack} pack
             </p>
           )}
-          <h1 className="mt-4 text-[42px] font-semibold leading-[1.06] tracking-[-0.03em]">
+          <h1 className="mt-5 text-[42px] font-semibold leading-[1.04] tracking-[-0.03em] xl:text-[54px]">
             Describe the problem.
             <br />
             <span className="text-signal">Watch it get built.</span>
           </h1>
-          <p className="mt-4 max-w-[64ch] text-[16px] leading-relaxed text-graphite">
+          <p className="mt-4 max-w-[64ch] text-[16px] leading-relaxed text-graphite xl:text-[17px]">
             Hand over whatever you already have. Eight agents read it, question it, plan it, build it,
             test it and start it running, and they stop to ask you whenever a decision would change
             the outcome.
           </p>
+          <div className="mt-6 flex flex-wrap items-center gap-3 lg:mt-auto lg:pt-6">
+            <button
+              type="button"
+              onClick={() => {
+                document.getElementById("brief-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                setTimeout(() => document.getElementById("title")?.focus({ preventScroll: true }), 450);
+              }}
+              className="group inline-flex items-center gap-2 rounded-full bg-signal px-5 py-2.5 text-[14px] font-semibold text-paper shadow-spectrum transition-colors hover:bg-[#0054B6]"
+            >
+              Write a brief
+              <Icon name="down" size={15} className="transition-transform group-hover:translate-y-0.5" />
+            </button>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { icon: "backlog", label: `${stages.length || 13} stages` },
+                { icon: "users", label: "8 agents" },
+                { icon: "check", label: `${decisions || 1} decision${decisions === 1 ? "" : "s"} yours` },
+              ].map((f) => (
+                <span key={f.label} className="inline-flex items-center gap-1.5 rounded-full border border-rule bg-paper px-3 py-1.5 text-[12.5px] text-graphite">
+                  <Icon name={f.icon} size={13} className="text-signal" /> {f.label}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
         <Cast stages={stages} />
         </div>
@@ -144,7 +169,7 @@ export default function Home() {
       </section>
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="enter rounded border border-rule bg-paper p-6 shadow-spectrum sm:p-7" style={{ animationDelay: "140ms" }}>
+        <section id="brief-form" className="enter scroll-mt-6 rounded border border-rule bg-paper p-6 shadow-spectrum sm:p-7" style={{ animationDelay: "140ms" }}>
           <div className="space-y-7">
             <Field n={1} label="Name it" htmlFor="title" hint="A working title. The Product Owner will propose a product name.">
               <input

@@ -10,7 +10,7 @@ export default function StreamBand({ stages }: { stages: Stage[] }) {
   const cycle = `${stages.length * step}s`;
 
   return (
-    <div className="tape overflow-x-auto pb-1">
+    <div className="tape -mt-3 overflow-x-auto pb-1 pt-3">
       <ol className="flex min-w-[900px] items-start">
         {stages.map((s, i) => {
           const decides = s.gate && s.gate_mode === "require" && s.gate !== "failed_story";
