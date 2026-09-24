@@ -68,6 +68,18 @@ api and reported at `/api/platform/modules` instead of stopping it. Verified by 
 module and stopping the api service on a live stack: the UI kept loading and reads and
 writes kept working through the data service.
 
+**The experience is platform-owned.** Every generated app ships the same shell and UI kit
+(`frontend/app.js`, `ui.js`, `styles.css`): icon navigation, breadcrumbs, a progress bar on
+every call, skeleton loading, a command palette (Ctrl K) over screens and every record,
+light and dark themes, keyboard shortcuts, and components that animate on their own:
+count-up stats with trends, donut, line, column and bar charts, rings and meters, tables
+with filters, CSV export and a slide-over drawer per row, drag-and-drop boards, timelines,
+tabs, dialogs, toasts and a confetti burst for real successes. The Developer composes them,
+guided by `agents/prompts/ux_playbook.md` (appended to its instructions): the bar every
+screen clears, a recipe per screen type, and how to show names instead of ids. The worked
+example screen uses every recipe on seeded rows. Before deploy, every GET is exercised on a
+throwaway Postgres loaded from the app's own `init.sql`.
+
 Switch to `packs/default.yaml` for the full build: Tester, repair loops, regressions.
 
 ## Architecture at a glance
