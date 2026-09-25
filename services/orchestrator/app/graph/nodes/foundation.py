@@ -263,7 +263,7 @@ async def lay_foundation(state: RunState) -> RunState:
     }
     await save_artifact(run_id, "foundation", "foundation", record)
     if domain:
-        await save_artifact(run_id, "foundation", "domain", domain)
+        await save_artifact(run_id, "domain", "foundation", domain)
         return {"foundation": record, "domain": domain}
     return {"foundation": record}
 
