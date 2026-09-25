@@ -24,6 +24,7 @@ NOISE_DIRS = {".git", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cach
 NOISE_SUFFIXES = (".pyc", ".pyo", ".coverage", ".egg-info")
 
 GITIGNORE = """__pycache__/
+app.env
 *.py[cod]
 .pytest_cache/
 .mypy_cache/

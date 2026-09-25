@@ -148,6 +148,29 @@ export type CodebaseRow = {
   preview?: string; patterns?: string[]; flows?: number; job: CodemapJob;
 };
 
+export type ConnectorSetting = { env: string; label: string; required: boolean; secret: boolean; set: boolean; value: string; help: string };
+export type Connector = {
+  name: string; title: string; category: string; description: string; vendor_url: string;
+  mode: "live" | "sandbox" | "off"; missing: string[]; settings: ConnectorSetting[];
+  operations: Record<string, string>; source: string; lines: number;
+};
+export type EnterpriseApp = {
+  run_id: string; title: string; status: string; rules: number; workflows: number; roles: number;
+  tests: { total?: number; passed?: number; failed?: number; untested?: string[] }; url: string | null;
+};
+export type EnterpriseCatalogue = {
+  connectors: Connector[]; kernel: { key: string; title: string; detail: string }[];
+  apps: EnterpriseApp[]; live_settings: string[];
+};
+export type DomainLayer = {
+  imports: boolean; url: string | null;
+  rules: { id: string; title: string; kind: string; source: string; where: string }[];
+  workflows: { name: string; entity: string; field?: string; states: string[]; transitions: string[] }[];
+  roles: Record<string, string>; personas: { username: string; full_name: string; title: string; roles: string[] }[];
+  services: string[]; tests: { total?: number; passed?: number; failed?: number; untested?: string[] };
+  problems: string[];
+};
+
 export type PlaneRef = { id: string; key?: string; url: string; identifier?: string; name?: string; stories?: string[] };
 export type PlaneCounts = { backlog: number; unstarted: number; started: number; completed: number; cancelled: number };
 export type PlaneIdea = {
@@ -166,6 +189,8 @@ export type PlaneBoard = {
 };
 
 export const api = {
+  enterprise: () => json<EnterpriseCatalogue>("/api/enterprise/connectors"),
+  runDomain: (id: string) => json<DomainLayer>(`/api/enterprise/runs/${id}/domain`),
   planeOverview: () => json<{ enabled: boolean; url: string; syncing: boolean; ideas: PlaneIdea[] }>("/api/plane"),
   planeBoard: (id: string) => json<PlaneBoard>(`/api/runs/${id}/plane`),
   planeSync: (id: string) => json<any>(`/api/runs/${id}/plane/sync`, { method: "POST" }),

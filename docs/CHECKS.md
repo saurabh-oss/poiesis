@@ -113,6 +113,25 @@ After every deploy a headless Chromium on the app's own network opens every scre
 
 The Reviewer is shown what each screen displayed, not only the code.
 
+## Enterprise applications
+
+With the `enterprise` pack ([ENTERPRISE.md](ENTERPRISE.md)) the layers change in four places.
+
+- **The domain stage** runs before any story: the domain must import, agree with the data model
+  (roles, tables, workflow states and fields, a persona for every role, no worked example left)
+  and pass its rule tests, with every failure handed back up to three times. The results are
+  baked into the app as `domain/rule_results.json`.
+- **Two static checks** (`enterprise_issues` in `checks.py`) on a story's routers and on
+  `domain/services.py`: a call out with `requests`, `httpx`, `urllib`, `smtplib` or `aiohttp`
+  ("use a connector"), and a write to a column a workflow governs ("use `transition()`"). The
+  kernel refuses the second at runtime too (409, rule `WF-00`); found here it costs no repair round.
+- **The API smoke run** calls every GET with the platform's service token, since the app answers
+  401 without a session.
+- **The browser check** screenshots the sign-in page, checks it offers personas, signs in as the
+  profile's check persona and opens every screen with a real session, the platform's four screens
+  included. A platform screen that fails is reported as a platform problem, never as a story's —
+  no story could fix it.
+
 ## When a check was wrong
 
 A check that flags something the Developer cannot change turns a working story red after

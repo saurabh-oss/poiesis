@@ -61,7 +61,7 @@ from ..gates import raise_gate
 from ..memo import remember
 from ..state import RunState
 from ..store import save_artifact, set_stage
-from .scaffold import PROTECTED, refresh_platform_files
+from .scaffold import PROTECTED, overlay_owned, refresh_platform_files
 
 
 def _story(state: RunState, story_id: str) -> dict[str, Any]:
@@ -130,6 +130,16 @@ def _foundation_note(state: RunState) -> str:
     )
 
 
+def _enterprise_note(state: RunState, run_id: str) -> str:
+    """For an enterprise app: the kernel, connectors and screen helpers, and the domain to use."""
+    if not (repo.workspace_path(run_id) / "backend" / "app" / "kernel").is_dir():
+        return ""
+    from ...agents.base import PROMPT_DIR
+    from .domain import note_for_developer
+    reference = (PROMPT_DIR / "developer_enterprise.md").read_text(encoding="utf-8")
+    return "\n\n" + reference + note_for_developer(state)
+
+
 def _skeleton(state: RunState) -> str:
     """Tell the Developer what already exists, so it extends rather than replaces."""
     sc = state.get("scaffold") or {}
@@ -171,6 +181,7 @@ def _context(state: RunState, story: dict[str, Any], *, first: bool = True) -> s
         f"\nPORTFOLIO:\n{render_for_prompt(state.get('portfolio') or {'reuse_candidates': [], 'house_stack': [], 'prior_decisions': []}, limit=scaled(3))}\n"
         + _skeleton(state)
         + _foundation_note(state)
+        + _enterprise_note(state, run_id)
         + "\nCURRENT WORKSPACE FILES:\n" + ("\n".join(tree) or "(empty)")
         # Without the contracts the Developer rewrites every file from memory and
         # cannot see what the workspace already exports — which is how three
@@ -277,12 +288,13 @@ def _guard(
     these; this is what happens when it does anyway.
     """
     protected = set((state.get("scaffold") or {}).get("protected") or ())
+    protected |= set((state.get("domain") or {}).get("protected") or ())
     if not protected:
         return files, []
     if "backend/app/main.py" in protected:
         # A web-app workspace: files protected since it was bootstrapped count too.
         protected |= set(PROTECTED)
-    keep = {k: v for k, v in files.items() if k.lstrip("./") not in protected}
+    keep = {k: v for k, v in files.items() if k.lstrip("./") not in protected and not overlay_owned(k)}
     refused = [k for k in files if k not in keep]
     return keep, refused
 

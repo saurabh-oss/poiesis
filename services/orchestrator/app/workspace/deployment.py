@@ -287,6 +287,61 @@ async def _probe(run_id: str, service: str, port: int) -> tuple[str | None, str]
     )
 
 
+APP_ENV = "app.env"
+# Settings the operator gives every enterprise app, from the orchestrator's own
+# environment: APPS_JIRA_BASE_URL becomes JIRA_BASE_URL inside the app. Only the
+# connectors' own variables pass, so nothing else of the platform's leaks in.
+_APP_SETTINGS = ("JIRA_", "SERVICENOW_", "PLANE_", "SMTP_", "EMAIL_", "SLACK_", "TEAMS_", "AUTH_", "JOB_SECONDS")
+
+
+def service_token(run_id: str) -> str:
+    """The platform's own bearer token for this app (its checks), stable per run."""
+    path = workspace_path(run_id) / ".poiesis" / "service_token"
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    import secrets
+    path.parent.mkdir(parents=True, exist_ok=True)
+    token = secrets.token_urlsafe(32)
+    path.write_text(token, encoding="utf-8")
+    return token
+
+
+def write_app_env(run_id: str) -> list[str]:
+    """app.env for an enterprise application: its secret, the check token, connector settings.
+
+    Returns the names of the connector settings it passed on (never their values).
+    """
+    import os
+    import secrets
+    root = workspace_path(run_id)
+    if not (root / "backend" / "app" / "kernel").is_dir():
+        return []
+    existing: dict[str, str] = {}
+    path = root / APP_ENV
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and not key.startswith("#"):
+                existing[key.strip()] = value
+    values = {
+        "APP_SECRET": existing.get("APP_SECRET") or secrets.token_urlsafe(48),
+        "POIESIS_SERVICE_TOKEN": service_token(run_id),
+    }
+    passed = []
+    for key, value in sorted(os.environ.items()):
+        if key.startswith("APPS_") and key[5:].startswith(_APP_SETTINGS) and value.strip():
+            values[key[5:]] = value.strip()
+            passed.append(key[5:])
+    body = "# Written by Poiesis at each deployment. Not committed: it holds secrets.\n" + "".join(
+        f"{k}={v}\n" for k, v in values.items())
+    path.write_text(body, encoding="utf-8", newline="\n")
+    ignore = root / ".gitignore"
+    if ignore.is_file() and APP_ENV not in ignore.read_text(encoding="utf-8").split():
+        with ignore.open("a", encoding="utf-8", newline="\n") as f:
+            f.write(f"\n{APP_ENV}\n")
+    return passed
+
+
 async def deploy(run_id: str, *, fresh: bool = False) -> Outcome:
     """`fresh=True` drops any existing database volume before starting.
 
@@ -314,6 +369,9 @@ async def _deploy(run_id: str, *, fresh: bool = False) -> Outcome:
     try:
         changes = await asyncio.to_thread(make_portable, run_id)
         entry, container_port = await asyncio.to_thread(entry_service, run_id)
+        passed = await asyncio.to_thread(write_app_env, run_id)
+        if passed:
+            changes = [*changes, "connector settings passed to the app: " + ", ".join(passed)]
     except (DeployError, yaml.YAMLError, OSError) as exc:
         _record(run_id, status="failed", detail=str(exc))
         return Outcome("failed", project=project, detail=str(exc))

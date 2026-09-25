@@ -19,7 +19,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from ...config import archetype, scaffold_root
+from ...config import archetype, pack, scaffold_root
 from ...events import emit
 from ...integrations import gitremote
 from ...workspace import repo
@@ -75,6 +75,27 @@ PLATFORM_SHELL = ("frontend/app.js", "frontend/ui.js", "frontend/styles.css", "f
                   "frontend/Dockerfile", "frontend/nginx.conf", "frontend/index.html", "docker-compose.yml",
                   "backend/app/routes.py", "tests/test_platform_endpoints.py",
                   "backend/app/routers/__init__.py", "backend/app/routers/resources.py", "tests/conftest.py")
+
+
+# Overlays add to a scaffold rather than replace it: `scaffolds/_overlays/<name>/`
+# is copied over the rendered template when the pack's build.overlays names it. The
+# enterprise overlay brings the kernel (sign-in, roles, audit, workflows, rules), the
+# connectors, the platform screens, and a worked-example domain the domain stage
+# replaces. The kernel, the connectors and the platform screens are platform-owned:
+# stories may not edit them, and a run in flight gets their fixes on its next round.
+OVERLAY_ROOT = "_overlays"
+OVERLAY_OWNED_DIRS = ("backend/app/kernel/", "backend/app/connectors/")
+OVERLAY_OWNED_FILES = ("frontend/platform.js", "frontend/platform.css")
+
+
+def overlays() -> list[str]:
+    names = pack().get("build", {}).get("overlays") or []
+    return [n for n in names if isinstance(n, str) and (scaffold_root() / OVERLAY_ROOT / n).is_dir()]
+
+
+def overlay_owned(rel: str) -> bool:
+    rel = rel.replace("\\", "/").lstrip("./")
+    return rel.startswith(OVERLAY_OWNED_DIRS) or rel in OVERLAY_OWNED_FILES
 
 
 def slugify(name: str) -> str:
@@ -138,6 +159,21 @@ def refresh_platform_files(run_id: str, state: RunState) -> list[str]:
             req.write_text(merged, encoding="utf-8", newline="\n")
             added.append("backend/requirements.txt (restored: " + ", ".join(lost) + ")")
     values = template_values(state, run_id)
+    # The overlay's platform-owned files follow the template too: the kernel and the
+    # connectors are fixed in one place and every enterprise app picks the fix up.
+    if (root / "backend" / "app" / "kernel").is_dir():
+        for name in overlays():
+            source_root = scaffold_root() / OVERLAY_ROOT / name
+            for source in sorted(source_root.rglob("*")):
+                rel = source.relative_to(source_root).as_posix()
+                if not source.is_file() or "__pycache__" in rel or not overlay_owned(rel):
+                    continue
+                dest = root / rel
+                body = render(source.read_text(encoding="utf-8"), values)
+                if not dest.is_file() or body != dest.read_text(encoding="utf-8", errors="replace"):
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text(body, encoding="utf-8", newline="\n")
+                    added.append(rel)
     for rel in PLATFORM_SHELL:
         source, dest = template_dir / rel, root / rel
         if source.is_file() and dest.is_file():
@@ -190,6 +226,10 @@ async def bootstrap(state: RunState) -> RunState:
 
     repo.init_workspace(run_id)
     written = materialise(template_dir, repo.workspace_path(run_id), values)
+    applied = overlays()
+    for name in applied:
+        extra = materialise(scaffold_root() / OVERLAY_ROOT / name, repo.workspace_path(run_id), values)
+        written = sorted(set(written) | set(extra))
     regenerate_registry(run_id)
     sha = repo.commit(run_id, f"chore(scaffold): {arch['name']} skeleton for {project}")
 
@@ -197,7 +237,9 @@ async def bootstrap(state: RunState) -> RunState:
     await emit(
         run_id,
         f"Scaffolded a {arch['name']} in {len(written)} files "
-        f"({', '.join(services) or 'no services'}) — the app boots before any feature code",
+        f"({', '.join(services) or 'no services'})"
+        + (f" with the {', '.join(applied)} overlay (sign-in, roles, audit, workflows, rules, connectors)" if applied else "")
+        + " — the app boots before any feature code",
         agent="scaffold", stage="scaffold",
         data={"archetype": arch["name"], "files": written, "commit": sha,
               "services": arch.get("services", []),
@@ -211,7 +253,8 @@ async def bootstrap(state: RunState) -> RunState:
         "services": arch.get("services", []),
         "definition_of_deployable": arch.get("definition_of_deployable", []),
         "files": written,
-        "protected": [p for p in PROTECTED if p in written],
+        "protected": [p for p in PROTECTED if p in written] + [p for p in written if overlay_owned(p)],
+        "overlays": applied,
         "commit": sha,
     }
     await save_artifact(run_id, "scaffold", "scaffold", record)

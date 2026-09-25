@@ -58,6 +58,8 @@ export async function api(first, second, third) {
   path = path.replace(/^\/api(?=\/|$)/, "") || "/"; // tolerate a repeated /api prefix
   const method = String(options.method || (options.body !== undefined ? "POST" : "GET")).toUpperCase();
   const init = { method, headers: { "Content-Type": "application/json", ...(options.headers || {}) } };
+  const bearer = enterprise && enterprise.token();
+  if (bearer && !init.headers.Authorization) init.headers.Authorization = `Bearer ${bearer}`;
   if (options.body !== undefined) {
     init.body = typeof options.body === "string" ? options.body : JSON.stringify(options.body);
   }
@@ -67,13 +69,19 @@ export async function api(first, second, third) {
     const text = await response.text();
     if (!response.ok) {
       let detail = text;
+      let rule = "";
       try {
         const parsed = JSON.parse(text);
-        detail = JSON.stringify(parsed.detail ?? parsed);
+        rule = parsed.rule || "";
+        detail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail ?? parsed);
       } catch {
         /* keep the raw text */
       }
-      throw new Error(`${method} /api${path} failed with ${response.status}: ${detail}`);
+      if (response.status === 401 && enterprise && !path.startsWith("/auth/")) enterprise.expired();
+      // A business rule's refusal names the rule, so the screen can say which one stopped it.
+      const err = new Error(`${method} /api${path} failed with ${response.status}: ${rule ? `${rule}: ` : ""}${detail}`);
+      Object.assign(err, { status: response.status, detail, rule });
+      throw err;
     }
     if (!text) return null;
     try {
@@ -94,7 +102,12 @@ export function navigate(hash) {
 
 // Read by the platform's browser check, so a broken screen is found by the
 // platform rather than by the stakeholder.
-const state = (window.__poiesis = { ready: false, screens: [], errors: [], current: null });
+const state = (window.__poiesis = { ready: false, screens: [], errors: [], current: null, user: null });
+
+// The enterprise half of the shell (platform.js): sign-in, roles, approvals, audit,
+// rules and integrations. Loaded only when the API says this is an enterprise app.
+let enterprise = null;
+let helpers = null;
 const shell = document.getElementById("shell");
 const app = document.getElementById("app");
 const nav = document.getElementById("nav");
@@ -162,7 +175,7 @@ async function show() {
   try {
     // `actions` lets a screen put its primary button in the page header, where a
     // real product keeps it, without knowing anything about the frame around it.
-    await entry.module.render(root, { api, h, navigate, params, actions: pageActions, ui });
+    await entry.module.render(root, { api, h, navigate, params, actions: pageActions, ui, enterprise: helpers });
   } catch (err) {
     if (mine === token) root.replaceChildren(errorPanel(`${entry.title} hit an error`, err));
   }
@@ -389,6 +402,21 @@ async function start() {
   document.getElementById("collapse-toggle").addEventListener("click", toggleSidebar);
   paintThemeButton();
   showConnectionState();
+  let profile = null;
+  try { profile = await api("/platform/profile"); } catch { /* not an enterprise application */ }
+  if (profile && profile.enterprise) {
+    try {
+      enterprise = await import("./platform.js");
+    } catch (err) {
+      app.replaceChildren(errorPanel("The sign-in module could not be loaded", err));
+      state.ready = true;
+      return;
+    }
+    const user = await enterprise.boot({ api, profile });
+    if (!user) return; // the sign-in page is showing
+    state.user = { username: user.username, roles: user.roles };
+    helpers = enterprise.helpers();
+  }
   let registry = [];
   try {
     registry = (await import("./screens/index.js")).default || [];
@@ -424,14 +452,25 @@ async function start() {
         icon: r.module.icon || ui.guessIcon(`${r.module.title || ""} ${r.id}`),
         module: r.module,
       }));
+  if (enterprise) {
+    // Story screens the policy keeps from this person's roles are left out; the
+    // platform's own screens (approvals, audit, rules, integrations) follow them.
+    screens = screens.filter((s) => enterprise.mayOpen(s.id));
+    for (const p of enterprise.screens()) {
+      screens.push({ id: p.id, example: false, platform: true, title: p.module.title, story: "", icon: p.module.icon, module: p.module });
+    }
+  }
   for (const s of screens) if (s.broken) state.errors.push(`screen ${s.id} failed to load: ${s.broken}`);
-  state.screens = screens.map(({ id, title, story, example, broken }) => ({ id, title, story, example, broken: broken || "", hash: `#/${id}` }));
+  state.screens = screens.map(({ id, title, story, example, broken, platform }) => ({ id, title, story, example, platform: Boolean(platform), broken: broken || "", hash: `#/${id}` }));
+  const link = (s) => h("a", { href: `#/${s.id}`, "data-id": s.id, title: s.title },
+    ui.icon(s.icon, { class: "nav-icon" }),
+    h("span", { class: "nav-text" }, s.title));
+  const own = screens.filter((s) => !s.platform);
+  const platform = screens.filter((s) => s.platform);
   nav.replaceChildren(
     h("div", { class: "nav-label" }, "Workspace"),
-    ...screens.map((s) =>
-      h("a", { href: `#/${s.id}`, "data-id": s.id, title: s.title },
-        ui.icon(s.icon, { class: "nav-icon" }),
-        h("span", { class: "nav-text" }, s.title))),
+    ...own.map(link),
+    ...(platform.length ? [h("div", { class: "nav-label" }, "Governance"), ...platform.map(link)] : []),
   );
   window.addEventListener("hashchange", show);
   await show();

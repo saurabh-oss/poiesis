@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import llm, telemetry
-from .api import codemap, deployments, hitl, knowledge, observability, plane, runs, stream, uploads
+from .api import codemap, deployments, enterprise, hitl, knowledge, observability, plane, runs, stream, uploads
 from .config import pack, settings
 from .db import init_db
 from .graph import engine
@@ -93,6 +93,7 @@ app.include_router(deployments.router)
 app.include_router(observability.router)
 app.include_router(codemap.router)
 app.include_router(plane.router)
+app.include_router(enterprise.router)
 
 
 @app.get("/health")

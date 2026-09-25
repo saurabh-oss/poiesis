@@ -1,4 +1,4 @@
-# Restart Ollama cleanly for Poiesis.
+﻿# Restart Ollama cleanly for Poiesis.
 #
 # Why this exists: killing ollama.exe leaves its llama-server.exe model runners
 # alive. Each one keeps its share of GPU memory, so the next load gets less of the
@@ -30,9 +30,9 @@ $psi.CreateNoWindow = $true
 $psi.EnvironmentVariables["OLLAMA_HOST"] = "0.0.0.0:11434"
 $psi.EnvironmentVariables["OLLAMA_KEEP_ALIVE"] = "30m"
 $psi.EnvironmentVariables["OLLAMA_MAX_LOADED_MODELS"] = "1"
-# Leave 1.5 GB of VRAM to the display driver. With the GPU filled to the brim the
+# Leave 2 GB of VRAM to the display driver (1.5 GB was not enough on 2026-09-25). With the GPU filled to the brim the
 # driver bugchecked twice (0x116, STATUS_INSUFFICIENT_RESOURCES) during long runs.
-$psi.EnvironmentVariables["OLLAMA_GPU_OVERHEAD"] = "1610612736"
+$psi.EnvironmentVariables["OLLAMA_GPU_OVERHEAD"] = "2147483648"
 $proc = [System.Diagnostics.Process]::Start($psi)
 
 for ($i = 0; $i -lt 30; $i++) {

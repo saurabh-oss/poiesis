@@ -23,6 +23,13 @@ def status(db: Session = Depends(get_session)) -> dict:
     return {"database": "connected"}
 
 
+@router.get("/platform/profile")
+def profile() -> dict:
+    """What kind of application this is. The shell asks on load; an enterprise
+    application's kernel answers this path first, with its sign-in and roles."""
+    return {"enterprise": False, "app": os.getenv("APP_NAME", "{{project_name}}")}
+
+
 @router.get("/platform/modules")
 def modules() -> dict:
     """Which story modules loaded. A module that failed to import is left out of the

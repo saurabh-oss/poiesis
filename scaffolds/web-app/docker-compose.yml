@@ -40,6 +40,11 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    # Written by Poiesis at each deployment, never committed: the app's secret, the
+    # platform's check token, and any connector credentials (JIRA_*, SMTP_*, …).
+    env_file:
+      - path: ./app.env
+        required: false
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       APP_NAME: "{{project_name}}"
@@ -61,6 +66,9 @@ services:
     build: ./backend
     restart: unless-stopped
     command: ["uvicorn", "app.data_main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - path: ./app.env
+        required: false
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@db:5432/${POSTGRES_DB:-app}
       APP_NAME: "{{project_name}}"

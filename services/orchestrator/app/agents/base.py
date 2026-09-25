@@ -65,6 +65,8 @@ DEVELOPER = Agent("Developer", "coding", "developer.md+ux_playbook.md", 0.1, sch
 TESTER = Agent("Tester", "coding", "tester.md", 0.1, schemas.TESTS, "tester")
 # The foundation stage: the whole data model, then a generator for the demonstration data.
 FOUNDATION = Agent("Foundation Developer", "coding", "foundation.md", 0.1, schemas.IMPLEMENTATION, "developer")
+# The domain stage (enterprise pack): policy, rules, workflows and services, once, with rule tests.
+DOMAIN = Agent("Foundation Developer", "coding", "domain.md", 0.1, schemas.IMPLEMENTATION, "developer")
 DATA_DESIGNER = Agent("Data Designer", "coding", "data_designer.md", 0.3, None, "data_designer")
 REVIEWER = Agent("Reviewer", "reasoning", "reviewer.md", 0.1, schemas.REVIEW, "reviewer")
 RELEASE = Agent("Release Manager", "fast", "release.md", 0.1, schemas.RELEASE_NOTES, "release")

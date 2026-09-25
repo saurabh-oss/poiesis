@@ -254,7 +254,7 @@ def _idless_issue(rel: str, code: str) -> str:
 
 
 _RENDER_ARGS = re.compile(r"\brender\s*\(\s*\w+\s*,\s*\{([^}]*)\}")
-_RENDER_GIVES = ("api", "h", "navigate", "params", "actions", "ui")
+_RENDER_GIVES = ("api", "h", "navigate", "params", "actions", "ui", "enterprise")
 
 
 def _missing_render_args(rel: str, code: str) -> str:
@@ -279,7 +279,8 @@ def _missing_render_args(rel: str, code: str) -> str:
         return ""
     return (f"{rel}: uses {', '.join(f'`{n}`' for n in missing)} but render() does not receive it — "
             "a ReferenceError the moment the screen opens. Take everything from the shell: "
-            "`async render(root, { api, h, navigate, params, actions, ui })`.")
+            "`async render(root, { api, h, navigate, params, actions, ui })` (and `enterprise` in an "
+            "enterprise application).")
 
 
 _RENDER = re.compile(r"\brender\s*\(")
@@ -816,7 +817,89 @@ def backend_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
                 "raises TypeError on a value that is a date, not a string. Type the field and "
                 "use it directly."
             )
+    issues += enterprise_issues(run_id, own_files)
     return list(dict.fromkeys(issues))
+
+
+# --- enterprise applications ----------------------------------------------------------
+
+_OUTBOUND = re.compile(r"^\s*(?:import|from)\s+(requests|httpx|smtplib|aiohttp|urllib\.request|urllib3)\b", re.M)
+
+
+def governed_columns(run_id: str) -> dict[str, tuple[str, str]]:
+    """Model class -> (column, workflow) for every Workflow registered in domain/workflows.py."""
+    path = workspace_path(run_id) / "backend" / "app" / "domain" / "workflows.py"
+    if not path.is_file():
+        return {}
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return {}
+    out: dict[str, tuple[str, str]] = {}
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and getattr(call.func, "id", getattr(call.func, "attr", "")) == "Workflow"):
+            continue
+        args = call.args
+        name = args[0].value if args and isinstance(args[0], ast.Constant) else "?"
+        model = args[1].id if len(args) > 1 and isinstance(args[1], ast.Name) else None
+        field = "status"
+        for kw in call.keywords:
+            if kw.arg == "model" and isinstance(kw.value, ast.Name):
+                model = kw.value.id
+            elif kw.arg == "field" and isinstance(kw.value, ast.Constant):
+                field = str(kw.value.value)
+        if model:
+            out[model] = (field, str(name))
+    return out
+
+
+def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
+    """What breaks an enterprise application's guarantees, before the code runs.
+
+    The kernel refuses both at runtime too — a governed status written directly is a 409,
+    and nothing stops a raw HTTP call from leaving the app unrecorded — but a refusal
+    found by the browser costs a repair round; found here it costs nothing.
+    """
+    root = workspace_path(run_id)
+    if not (root / "backend" / "app" / "kernel").is_dir():
+        return []
+    governed = governed_columns(run_id)
+    files = list(_story_python(run_id, own_files))
+    services = root / "backend" / "app" / "domain" / "services.py"
+    rel_services = "backend/app/domain/services.py"
+    if services.is_file() and (own_files is None or rel_services in own_files):
+        files.append((rel_services, services.read_text(encoding="utf-8", errors="replace")))
+    issues: list[str] = []
+    for rel, src in files:
+        hit = _OUTBOUND.search(src)
+        if hit:
+            issues.append(
+                f"{rel}: talks to an outside system with `{hit.group(1)}`. In this application every call "
+                "out goes through a connector, which records it, retries it and runs in a sandbox without "
+                "credentials: `from ..connectors import jira, servicenow, plane, email, slack, teams`.")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        for model, (column, workflow) in governed.items():
+            if model not in used:
+                continue
+            for node in ast.walk(tree):
+                target = None
+                if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                    target = next((t for t in targets if isinstance(t, ast.Attribute) and t.attr == column), None)
+                elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setattr" and len(node.args) >= 2 \
+                        and isinstance(node.args[1], ast.Constant) and node.args[1].value == column:
+                    target = node
+                if target is not None:
+                    issues.append(
+                        f"{rel}: line {node.lineno} writes `.{column}` of {model}, which the {workflow} workflow "
+                        f"governs; the server refuses that write (409, rule WF-00). Move the record with "
+                        f"`transition(db, row, \"<transition>\", reason=...)` from `..kernel` instead.")
+                    break
+    return issues
 
 
 # --- the Tester's own output ----------------------------------------------------------
@@ -1615,6 +1698,9 @@ from sqlalchemy.pool import StaticPool
 from app import models  # noqa: F401
 from app.db import Base, get_session
 import os
+# An enterprise application answers 401 without a session; the platform's service
+# token is its own identity for this check (read by the kernel per request).
+os.environ.setdefault("POIESIS_SERVICE_TOKEN", "poiesis-smoke-check")
 from app.main import app
 if os.environ.get("SMOKE_DATABASE_URL"):
     # The real thing: Postgres, loaded from db/init.sql exactly as a deployment is.
@@ -1633,7 +1719,8 @@ S = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 app.dependency_overrides[get_session] = lambda: S()
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-client = TestClient(app, raise_server_exceptions=True)
+client = TestClient(app, raise_server_exceptions=True,
+                    headers={"Authorization": "Bearer " + os.environ["POIESIS_SERVICE_TOKEN"]})
 out = []
 for route in app.routes:
     if not isinstance(route, APIRoute) or "GET" not in route.methods or not route.path.startswith("/api/"):

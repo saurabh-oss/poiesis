@@ -13,6 +13,23 @@ from ..state import RunState
 from ..store import save_artifact, set_stage
 
 
+def platform_components() -> str:
+    """What the pack's overlays give every app, so the reuse plan reuses it."""
+    from ...config import pack
+    if "enterprise" not in (pack().get("build", {}).get("overlays") or []):
+        return ""
+    return (
+        "PLATFORM COMPONENTS EVERY APP OF THIS PACK ALREADY HAS (verdict `reuse`, never `build_new`):\n"
+        "- kernel: sign-in with roles and personas, permissions on every call, server-enforced workflows "
+        "with approvals and SLA escalation, an audit trail of every change, a business rule registry, "
+        "notifications (in-app, e-mail, Slack, Teams), a scheduler; Approvals, Audit trail, Business rules "
+        "and Integrations screens\n"
+        "- connectors: Jira, ServiceNow, Plane, e-mail (SMTP), Slack, Microsoft Teams — sandboxed until "
+        "credentials are set\n"
+        "- domain layer: the business rules, workflows and roles are designed once, before any story\n\n"
+    )
+
+
 async def architecture(state: RunState) -> RunState:
     run_id = state["run_id"]
     await set_stage(run_id, "architecture")
@@ -35,7 +52,8 @@ async def architecture(state: RunState) -> RunState:
         f"VISION:\n{state['vision']}\n\n"
         f"BACKLOG:\n{state['backlog']}\n\n"
         f"PORTFOLIO KNOWLEDGE GRAPH:\n{render_for_prompt(ctx)}\n\n"
-        "Produce the architecture, with an explicit reuse verdict per capability.",
+        + platform_components()
+        + "Produce the architecture, with an explicit reuse verdict per capability.",
         max_tokens=4000,
     ))
     await save_artifact(run_id, "architecture", "architecture", design)

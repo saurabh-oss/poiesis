@@ -7,6 +7,7 @@ live verification both depend on it answering 200.
 """
 from __future__ import annotations
 
+import importlib.util
 import logging
 import os
 import time
@@ -22,6 +23,11 @@ from .routes import router as base_router
 
 APP_NAME = os.getenv("APP_NAME", "{{project_name}}")
 log = logging.getLogger(__name__)
+
+# The enterprise kernel (sign-in, roles, audit, workflows, rules, connectors) exists
+# only in applications built with the enterprise pack. Everything below that uses it
+# is skipped when it is absent, so one main.py serves both.
+kernel = importlib.import_module(f"{__package__}.kernel") if importlib.util.find_spec(f"{__package__}.kernel") else None
 
 
 def _create_missing_tables(attempts: int = 10) -> None:
@@ -48,7 +54,11 @@ async def lifespan(_: FastAPI):
     # Only when the server starts: the test client in conftest.py never enters the
     # lifespan, so tests never reach for the real database.
     _create_missing_tables()
+    if kernel is not None:
+        kernel.startup("api")
     yield
+    if kernel is not None:
+        kernel.shutdown()
 
 
 app = FastAPI(title=APP_NAME, version="0.1.0", lifespan=lifespan)
@@ -61,6 +71,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+if kernel is not None:
+    # First, so its /api/auth and /api/platform routes are matched before any story's.
+    kernel.install(app, "api")
 
 app.include_router(base_router, prefix="/api")
 for story_router in routers:

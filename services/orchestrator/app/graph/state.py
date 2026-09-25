@@ -19,6 +19,10 @@ class RunState(TypedDict, total=False):
     architecture: dict[str, Any]
     sprint: dict[str, Any]
     scaffold: dict[str, Any]      # archetype, services, deployable contract
+    # Declared, or LangGraph drops them from the state without a word: `foundation` was
+    # returned for weeks and never reached the build stage's "the data layer exists" note.
+    foundation: dict[str, Any]    # tables, seeded rows
+    domain: dict[str, Any]        # roles, rules, workflows, rule test results (enterprise pack)
 
     build: dict[str, Any]
     test_report: dict[str, Any]

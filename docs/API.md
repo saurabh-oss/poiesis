@@ -34,6 +34,16 @@ curl -s -X POST localhost:8080/api/runs/$RID/uploads -F files=@docs/samples/BRD-
 curl -s -X POST localhost:8080/api/runs/$RID/start
 ```
 
+## Enterprise
+
+| Method | Path | What it does |
+|---|---|---|
+| GET | `/api/enterprise/connectors` | The connector catalogue (settings, operations, source), how each would run for apps given the `APPS_` settings present, the kernel's capabilities, and every enterprise app with its rule, workflow and test counts |
+| GET | `/api/enterprise/runs/{id}/domain` | One run's business logic: rules with source and location, workflows with states and transitions, roles, personas, services, rule-test results, remaining problems. 404 for a run not built with the enterprise pack |
+
+A generated enterprise application has its own platform API under `/api/platform/` and
+`/api/auth/`; see [ENTERPRISE.md](ENTERPRISE.md#the-platform-api-inside-every-enterprise-app).
+
 ## Gates
 
 | Method | Path | What it does |

@@ -221,7 +221,9 @@ def live_check(state: RunState) -> dict[str, Any]:
     } for p in v.get("problems", [])]
     errors = v.get("backend_errors") or []
     for s in screens:
-        if s.get("ok"):
+        if s.get("ok") or s.get("platform"):
+            # A platform screen that fails is the platform's fault, reported as such
+            # (result["platform_problems"]); a story rework could never fix it.
             continue
         detail = "; ".join(s.get("problems", []))[:700]
         if errors and any(re.search(r"(returned|failed with) 5\d\d", p) for p in s.get("problems", [])):

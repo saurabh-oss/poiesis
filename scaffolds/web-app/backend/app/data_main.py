@@ -19,6 +19,10 @@ import os
 
 os.environ.setdefault("POIESIS_SERVICE", "data")  # before the routers package loads: no story code here
 
+import importlib  # noqa: E402
+import importlib.util  # noqa: E402
+from contextlib import asynccontextmanager  # noqa: E402
+
 from fastapi import FastAPI  # noqa: E402
 
 from . import models  # noqa: E402,F401 — registers every table on Base.metadata
@@ -27,7 +31,22 @@ from .routes import router as base_router  # noqa: E402
 
 APP_NAME = os.getenv("APP_NAME", "{{project_name}}")
 
-app = FastAPI(title=f"{APP_NAME} data service", version="0.1.0")
+# The enterprise kernel, when this application has one: the same sign-in, permissions
+# and audit as the api, so falling back to this service never bypasses them. No
+# scheduler here: the api runs it.
+kernel = importlib.import_module(f"{__package__}.kernel") if importlib.util.find_spec(f"{__package__}.kernel") else None
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    if kernel is not None:
+        kernel.startup("data")
+    yield
+
+
+app = FastAPI(title=f"{APP_NAME} data service", version="0.1.0", lifespan=lifespan)
+if kernel is not None:
+    kernel.install(app, "data")
 app.include_router(base_router, prefix="/api")
 app.include_router(data_router, prefix="/api")
 

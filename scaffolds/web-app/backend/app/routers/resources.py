@@ -15,6 +15,11 @@ delete rows the moment the model exists:
     DELETE /api/<resources>/{id}            204
     GET    /api/resources                   every table, its path and its columns
 
+In an enterprise application every call is checked against the signed-in person's
+permissions (`<table>:read|create|update|delete`), a status a workflow governs can only
+move through its transitions, and every write lands in the audit trail. The kernel's
+own tables (users, audit, approvals, the outbox) are not served here at all.
+
 <resources> is the table name in kebab-case plural: `ticket` -> /api/tickets,
 `incident_audit_entry` -> /api/incident-audit-entries. Rows are plain JSON
 objects with one key per column. A story router that declares the same path
@@ -24,6 +29,8 @@ match, so a story replaces exactly the endpoints it needs and inherits the rest.
 from __future__ import annotations
 
 import datetime as dt
+import importlib
+import importlib.util
 import re
 from typing import Any
 
@@ -36,6 +43,21 @@ from .. import models  # noqa: F401 — registers every table on Base.metadata
 from ..db import Base, get_session
 
 router = APIRouter()
+
+# Present only in enterprise applications; find_spec rather than try/except, so a
+# kernel that fails to import stops the app instead of silently dropping its checks.
+_KERNEL = f"{__package__.rsplit('.', 1)[0]}.kernel"
+_kernel = importlib.import_module(_KERNEL) if importlib.util.find_spec(_KERNEL) else None
+
+
+def _allow(table: str, action: str) -> None:
+    if _kernel is not None:
+        _kernel.allow(table, action)
+
+
+def _served(cls: type) -> bool:
+    return not getattr(cls, "__poiesis_platform__", False)
+
 
 _RESERVED = {"q", "sort", "limit", "offset", "page", "_"}
 
@@ -95,6 +117,7 @@ def _register(cls: type) -> None:
         return row
 
     def list_rows(request: Request, db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+        _allow(table, "read")
         query = db.query(cls)
         params = request.query_params
         q = (params.get("q") or "").strip()
@@ -119,9 +142,11 @@ def _register(cls: type) -> None:
         return [_serialize(r, columns) for r in query.offset(offset).limit(limit).all()]
 
     def read_row(item_id: int, db: Session = Depends(get_session)) -> dict[str, Any]:
+        _allow(table, "read")
         return _serialize(get_or_404(db, item_id), columns)
 
     def create_row(payload: dict[str, Any], db: Session = Depends(get_session)) -> dict[str, Any]:
+        _allow(table, "create")
         if not isinstance(payload, dict):
             raise HTTPException(status_code=422, detail="the body must be a JSON object")
         values = {k: _coerce(by_key[k], v) for k, v in payload.items() if k in by_key and k != pk.key}
@@ -139,6 +164,7 @@ def _register(cls: type) -> None:
         return _serialize(row, columns)
 
     def update_row(item_id: int, payload: dict[str, Any], db: Session = Depends(get_session)) -> dict[str, Any]:
+        _allow(table, "update")
         row = get_or_404(db, item_id)
         if not isinstance(payload, dict):
             raise HTTPException(status_code=422, detail="the body must be a JSON object")
@@ -154,6 +180,7 @@ def _register(cls: type) -> None:
         return _serialize(row, columns)
 
     def delete_row(item_id: int, db: Session = Depends(get_session)):
+        _allow(table, "delete")
         db.delete(get_or_404(db, item_id))
         db.commit()
         return Response(status_code=204)
@@ -170,6 +197,8 @@ def catalogue() -> list[dict[str, Any]]:
     out = []
     for mapper in Base.registry.mappers:
         cls = mapper.class_
+        if not _served(cls):
+            continue
         out.append({
             "table": cls.__tablename__,
             "path": f"/api/{plural(cls.__tablename__)}",
@@ -185,4 +214,5 @@ def list_resources() -> list[dict[str, Any]]:
 
 
 for _mapper in sorted(Base.registry.mappers, key=lambda m: m.class_.__tablename__):
-    _register(_mapper.class_)
+    if _served(_mapper.class_):
+        _register(_mapper.class_)

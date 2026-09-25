@@ -844,7 +844,7 @@ button:not(.secondary):not(.ghost):not(.danger):not(.search-trigger) kbd { color
 @media (max-width: 1100px) { .split { grid-template-columns: 1fr; } .split-side { position: static; } }
 @media (max-width: 860px) {
   .app, .app.collapsed { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; flex-direction: row; align-items: center; gap: 12px; padding: 10px 14px; overflow-x: auto; }
+  .sidebar { position: static; height: auto; flex-direction: row; align-items: center; gap: 12px; padding: 10px 14px; overflow-x: auto; min-width: 0; }
   .sidebar::before, .nav-label, .search-trigger span, .search-trigger kbd, .status-text { display: none; }
   .search-trigger { width: auto; }
   .sidebar-foot { margin-top: 0; }

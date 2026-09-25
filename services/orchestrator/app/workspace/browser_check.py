@@ -96,6 +96,36 @@ with sync_playwright() as p:
 
     page.on("response", record)
 
+    # An enterprise application opens on its sign-in page. Check that page as a
+    # visitor sees it, then sign in the way a person does — as the persona who can
+    # reach the most screens — so every screen is opened with a real session.
+    try:
+        prof = page.request.get(base + "api/platform/profile", timeout=15000)
+        profile = prof.json() if prof.ok else {}
+    except Exception:
+        profile = {}
+    if profile.get("enterprise"):
+        result["enterprise"] = True
+        try:
+            page.goto(base, wait_until="load", timeout=30000)
+            page.wait_for_selector(".persona, .signin-password", timeout=15000)
+            page.wait_for_timeout(700)
+            page.screenshot(path=f"{out}/shots/_sign_in.png")
+            result["sign_in_personas"] = page.locator(".persona").count()
+        except Exception as e:
+            result["problems"].append(f"The sign-in page did not show its personas: {e}")
+        persona = profile.get("check_persona") or "admin"
+        signed = page.request.post(base + "api/auth/sign-in", data={"username": persona}, timeout=15000)
+        if signed.ok:
+            token = signed.json().get("token", "")
+            page.add_init_script("try { localStorage.setItem('poiesis-token', %s); } catch (e) {}" % json.dumps(token))
+            result["signed_in_as"] = persona
+        else:
+            result["problems"].append(f"Signing in as the persona '{persona}' failed with {signed.status}: {signed.text()[:300]}")
+        for key, err in (profile.get("errors") or {}).items():
+            result["problems"].append(f"The application's {key} did not load: {err}")
+        del errors[:]
+
     try:
         page.goto(base, wait_until="load", timeout=30000)
     except Exception as e:
@@ -115,7 +145,7 @@ with sync_playwright() as p:
     del errors[:]
 
     screens = (state or {}).get("screens", [])
-    real = [s for s in screens if not s.get("example")]
+    real = [s for s in screens if not s.get("example") and not s.get("platform")]
     if state and not real:
         result["problems"].append(
             "No story screens are registered: the page shows only the scaffold example or nothing at all.")
@@ -230,14 +260,18 @@ with sync_playwright() as p:
         del errors[before:]
         result["screens"].append({
             "id": s["id"], "title": s.get("title"), "story": s.get("story", ""),
-            "example": bool(s.get("example")), "ok": not problems, "problems": problems,
+            "example": bool(s.get("example")), "platform": bool(s.get("platform")), "ok": not problems, "problems": problems,
             "text": text.strip()[:300], "shot": shot,
             "fetched": [{"path": c["path"], "count": c["count"]} for c in calls],
             "controls": controls,
         })
 
+    # The platform's own screens (approvals, audit, rules, integrations) are opened and
+    # reported like any other, but no story can fix them, so they do not decide the verdict.
+    result["platform_problems"] = [f"{x['title']}: {'; '.join(x['problems'])[:300]}"
+                                   for x in result["screens"] if x.get("platform") and not x["ok"]]
     result["ok"] = (not result["problems"] and bool(real)
-                    and all(x["ok"] for x in result["screens"] if not x["example"]))
+                    and all(x["ok"] for x in result["screens"] if not x["example"] and not x.get("platform")))
     browser.close()
 
 with open(f"{out}/result.json", "w") as f:

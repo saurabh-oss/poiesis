@@ -40,6 +40,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/codebases" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
                 Codebases
               </Link>
+              <Link href="/enterprise" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
+                Enterprise
+              </Link>
               <Link href="/knowledge" className="nav-link rounded px-3 py-1.5 text-graphite hover:bg-mist hover:text-ink">
                 Portfolio
               </Link>

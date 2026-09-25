@@ -78,6 +78,21 @@ def _schema_prompt(state: RunState, run_id: str) -> str:
     )
 
 
+def _domain_note(state: RunState) -> str:
+    """The seed must speak the domain's language: workflow states and the personas' names."""
+    d = state.get("domain") or {}
+    if not d.get("imports"):
+        return ""
+    flows = "\n".join(f"- {w['entity']}.{w.get('field', 'status')}: use only these states, spread across all of them: "
+                      f"{', '.join(w['states'])}" for w in d.get("workflows", []))
+    people = "\n".join(f"- {p.get('full_name')} ({', '.join(p.get('roles') or [])}, {p.get('title') or ''})"
+                       for p in d.get("personas", []))
+    return ("\n\nTHE APPLICATION'S LIFECYCLES (a seeded status outside them breaks its workflow):\n" + (flows or "- none")
+            + "\n\nTHE PEOPLE WHO SIGN IN. Where a table holds people (agents, owners, assignees, approvers, "
+              "requesters), use these exact full names for a good share of the rows, alongside others, so each "
+              "persona finds their own work on first sign-in:\n" + (people or "- none") + "\n")
+
+
 def _seed_prompt(state: RunState, run_id: str) -> str:
     root = repo.workspace_path(run_id)
     sql = strip_seed_section((root / "db" / "init.sql").read_text(encoding="utf-8", errors="replace"))
@@ -91,6 +106,7 @@ def _seed_prompt(state: RunState, run_id: str) -> str:
         + "\n\nTHE SCREENS THAT WILL SHOW THIS DATA — each must open with something to show and something "
           "to do (a queue needs untriaged rows, an assign flow needs unassigned rows, a status board needs "
           "rows in every status):\n" + screens
+        + _domain_note(state)
         + f"\n\nTHE TABLES (db/init.sql, exactly as they are — every column name is what you use as a key):\n{sql[:14000]}\n\n"
         + SPEC_CONTRACT
         + "\nWrite the spec."
@@ -217,7 +233,14 @@ async def lay_foundation(state: RunState) -> RunState:
                agent="developer", stage="foundation",
                data={"files": written, "commit": sha, "reasoning": impl.get("reasoning", "")})
 
-    # 2. The demonstration data: a generator, run and checked here.
+    # 2. The business logic (enterprise pack): policy, rules, workflows, services, rule tests.
+    from .domain import design_domain, enabled as domain_enabled
+    domain: dict = {}
+    if domain_enabled(run_id):
+        domain = await design_domain({**state, "foundation": {"tables": sorted(tables)}}, run_id)
+        state = {**state, "domain": domain}  # type: ignore[assignment]
+
+    # 3. The demonstration data: a generator, run and checked here.
     await emit(run_id, "Writing the demonstration data generator", agent="data_designer", stage="foundation")
     seed = await generate_seed(state, run_id, "foundation:seed")
     record = {
@@ -227,6 +250,9 @@ async def lay_foundation(state: RunState) -> RunState:
         "commit": seed["commit"] or sha,
     }
     await save_artifact(run_id, "foundation", "foundation", record)
+    if domain:
+        await save_artifact(run_id, "foundation", "domain", domain)
+        return {"foundation": record, "domain": domain}
     return {"foundation": record}
 
 

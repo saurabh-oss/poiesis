@@ -1,0 +1,101 @@
+# Domain pack: enterprise application.
+#
+# An application an organisation can run its work on: people sign in and act within
+# their role; each record moves through a lifecycle the server enforces, with
+# approvals and SLAs; every change is in an audit trail; the business rules of the
+# brief exist once, with ids, tests and a catalogue; and the application talks to
+# Jira, ServiceNow, Plane, e-mail, Slack and Teams through platform-owned connectors
+# (in their sandboxes until credentials are set).
+#
+# It builds on the mvp pack's speed — gates automatic except release, no Tester loop —
+# and adds the enterprise overlay (kernel, connectors, platform screens) and the
+# domain stage, where the business logic is designed once from the whole backlog and
+# its rule tests are run before any story is built.
+
+name: enterprise
+description: A governed, connected enterprise application — sign-in and roles, workflows and approvals, audit, a tested rule catalogue, and connectors.
+
+gates:
+  clarify:              { mode: auto }
+  approve_vision:       { mode: auto }
+  approve_backlog:      { mode: auto }
+  approve_architecture: { mode: auto }
+  approve_sprint:       { mode: auto }
+  failed_story:         { mode: auto }
+  approve_release:      { mode: require }
+
+build:
+  mode: mvp                     # screens over the generic data API; the platform's checks and a browser verify them
+  foundation: true              # whole data model + demonstration data before any story
+  domain: true                  # policy, rules, workflows and services from the whole backlog, with rule tests
+  domain_repairs: 3             # attempts to get the domain importing and its rule tests green
+  overlays: [enterprise]        # kernel, connectors, platform screens (scaffolds/_overlays/enterprise)
+  max_repair_attempts: 3
+  max_rework_rounds: 1
+  sandbox_image: python:3.12-slim
+  test_timeout_seconds: 600
+
+codemap:
+  ai: true
+
+review:
+  ship_threshold: 65
+  release_requires_working_app: true
+  release_requires_ship_verdict: false
+  max_human_rebuilds: 2
+  weights:
+    acceptance_criteria_met: 0.40
+    reuse_compliance: 0.10      # the domain layer and the connectors are the reuse that matters here
+    test_adequacy: 0.10         # the rule tests
+    maintainability: 0.15
+    operational_safety: 0.25
+
+product:
+  guidance: |
+    This backlog is for an enterprise application people will run their work on. The
+    platform already provides — so write NO stories for them — sign-in with demonstration
+    personas, roles and permissions, an Approvals inbox, an Audit trail screen, a Business
+    rules catalogue, an Integrations screen with a connector outbox, and notifications.
+    Stories are the business's own screens and flows, each one a screen or a visible action
+    a named role performs on the demonstration data: the first story is an overview
+    dashboard with headline numbers and charts; then the list, detail and action screens
+    the brief describes. Say in each story WHICH ROLE does it ("As a support lead…"), and
+    write criteria that name the rule or approval involved when the brief states one
+    ("Given a refund above £500, when the agent submits it, then it waits for a team
+    lead's approval"). Integrations the brief mentions (Jira, ServiceNow, Plane, e-mail,
+    Slack, Teams) are in scope through the platform's connectors; others stay out of
+    scope. At most ten stories.
+
+archetypes:
+  default: web-app
+
+  web-app:
+    description: A browser application with an HTTP API and a database, with sign-in, roles, workflows, audit and connectors.
+    scaffold: web-app
+    entrypoint: frontend
+    services:
+      - { name: frontend, role: ui,        port: 80,   healthcheck: /        }
+      - { name: backend,  role: api,       port: 8000, healthcheck: /health  }
+      - { name: data,     role: data-api,  port: 8000, healthcheck: /health  }
+      - { name: db,       role: datastore                                    }
+    definition_of_deployable:
+      - docker compose up -d brings every service to healthy
+      - The backend answers 200 on /health
+      - The sign-in page offers the personas, and signing in opens the application
+      - Every story has a screen that opens in a real browser without errors
+      - Every screen shows the demonstration data on first open
+      - The domain imports and its rule tests pass
+
+definition_of_ready:
+  - Story has at least two acceptance criteria written as Given/When/Then
+  - Story cites at least one evidence id
+  - Story names the role that performs it
+  - Story is something a person sees or does in the browser
+
+definition_of_done:
+  - The deployed app opens in a real browser and every story's screen works against the live API
+  - Every business rule from the brief exists once in the domain layer, with passing tests
+  - Every status change goes through its workflow; nothing writes a governed status directly
+  - Every screen shows the demonstration data on first open, with no placeholders
+  - No blocker findings from the Reviewer
+  - Release notes written in stakeholder language

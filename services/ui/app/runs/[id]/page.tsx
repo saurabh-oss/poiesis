@@ -9,6 +9,7 @@ import ActivityFeed from "@/components/ActivityFeed";
 import BoardCard from "@/components/BoardCard";
 import CodemapCard from "@/components/CodemapCard";
 import DeploymentCard from "@/components/DeploymentCard";
+import DomainCard from "@/components/DomainCard";
 import GatePanel from "@/components/GatePanel";
 import Icon from "@/components/Icon";
 import IntegrationsCard from "@/components/IntegrationsCard";
@@ -211,6 +212,7 @@ export default function RunPage({ params }: { params: { id: string } }) {
           {/* A release decision arrives with the app one click away; any other
               decision comes first, because it is what the run is waiting on. */}
           {gate?.kind === "approve_release" ? <>{deployCard}{gatePanel}</> : <>{gatePanel}{deployCard}</>}
+          <DomainCard runId={runId} active={active} />
           <BoardCard runId={runId} active={active} />
           {run.files.includes("docker-compose.yml") && <CodemapCard runId={runId} />}
           <RunControls run={run} onChange={refresh} />

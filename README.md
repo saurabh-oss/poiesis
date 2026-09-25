@@ -19,6 +19,8 @@ The thing that makes Poiesis different from every "prompt to app" tool is the **
 | [docs/AGENTS.md](docs/AGENTS.md) | See what each agent reads, produces and refuses to do |
 | [docs/CHECKS.md](docs/CHECKS.md) | Know how an increment is verified, and why a story went red |
 | [docs/API.md](docs/API.md) | Script the platform: runs, gates, deployments, maps, boards, knowledge, observability |
+| [docs/ENTERPRISE.md](docs/ENTERPRISE.md) | Build enterprise applications: sign-in and roles, workflows and approvals, audit, a tested rule catalogue |
+| [docs/CONNECTORS.md](docs/CONNECTORS.md) | Use, configure and add the reusable Jira, ServiceNow, Plane, e-mail, Slack and Teams connectors |
 | [docs/CODEMAPS.md](docs/CODEMAPS.md) | Understand the ArchiLens codebase maps |
 | [docs/PLANE.md](docs/PLANE.md) | Set up and understand the Plane boards |
 | [docs/CASE-STUDY-DUPEGUARD.md](docs/CASE-STUDY-DUPEGUARD.md) | Read one full run: what the platform built, what it got wrong, what changed |
@@ -45,7 +47,23 @@ and BRD-SUP-2026-021 (DupeGuard, duplicate-ticket auto-triage).
 | Work tracked where the organisation tracks it | Every idea becomes its own project and board in a self-hosted Plane (modules, work items, a sprint cycle, cards moving as stories pass or fail); the same in Jira Cloud when configured; branch, tag and pull request on the Git remote, as the run goes | `integrations/plane.py`, `integrations/tracker.py`, `integrations/gitremote.py` |
 | Every codebase readable as pictures | ArchiLens draws each generated app's runtime topology, modules grouped by story, data model and request flows, explained by the local model; a reviewer sees what was built without opening a file | `workspace/codemap.py`, `/codebases` |
 | Explainable, measurable | Every model call kept with its prompt and reply; every stage, sandbox run and deploy timed; traces to Jaeger, metrics to Prometheus and Grafana | `telemetry.py`, `/api/runs/{id}/traces`, `/metrics` |
+| Enterprise-grade by construction | Under the `enterprise` pack every app has sign-in with roles, permissions on every call, server-enforced workflows with four-eyes approvals and SLAs, an audit trail, a tested catalogue of the brief's rules, and Jira, ServiceNow, Plane, e-mail, Slack and Teams connectors that work in a sandbox until credentials are set | `packs/enterprise.yaml`, `scaffolds/_overlays/enterprise/`, `graph/nodes/domain.py`, [docs/ENTERPRISE.md](docs/ENTERPRISE.md) |
 | A demonstrable MVP in one sitting | Under the `mvp` pack the platform lays the whole data model and generated, believable demonstration data first, serves every table through a generic data API, and has the Developer build only polished screens on a UI kit; no test loop, verification is the real browser | `packs/mvp.yaml`, `foundation` stage, `routers/resources.py`, `frontend/ui.js` |
+
+## Enterprise applications
+
+`POIESIS_PACK=packs/enterprise.yaml` builds an application an organisation can run its work on.
+Every such app carries a platform-owned **kernel** — sign-in with roles and demonstration
+personas, permissions checked on every API call, record lifecycles the server enforces with
+four-eyes approvals and SLA escalation, an audit trail of every change, a business rule
+catalogue, notifications, a scheduler — and six reusable **connectors** (Jira, ServiceNow,
+Plane, e-mail, Slack, Teams) that run in a recording sandbox until credentials are set. Before
+any story, a **domain stage** writes the app's business logic once from the whole backlog —
+policy, rules with ids, workflows, services — and proves it with at least two tests per rule, so
+no story re-implements a rule. The app gains Approvals, Audit trail, Business rules and
+Integrations screens. See [docs/ENTERPRISE.md](docs/ENTERPRISE.md) and
+[docs/CONNECTORS.md](docs/CONNECTORS.md); the control room's **Enterprise** page shows the
+catalogue and every enterprise app.
 
 ## MVP mode: screens first
 

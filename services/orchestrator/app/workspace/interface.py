@@ -54,6 +54,19 @@ def _public_names(source: str) -> list[str]:
     return names
 
 
+def _exported(source: str) -> list[str]:
+    """The names a package lists in __all__."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in node.targets):
+            if isinstance(node.value, (ast.List, ast.Tuple)):
+                return [e.value for e in node.value.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+    return []
+
+
 def router_files(run_id: str) -> list[Path]:
     """Every file that declares endpoints: the base routes.py plus one router per story.
 
@@ -86,6 +99,23 @@ def import_contract(run_id: str) -> str:
         names = _public_names(path.read_text(encoding="utf-8", errors="replace"))
         if names:
             modules.append((path.stem, names[:14]))
+    # An enterprise application's domain layer: every module's own names.
+    domain = package / "domain"
+    if domain.is_dir():
+        for path in sorted(domain.glob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            names = [n for n in _public_names(path.read_text(encoding="utf-8", errors="replace"))
+                     if not n.isupper() or path.stem == "rules"]
+            if names:
+                modules.append((f"domain.{path.stem}", names[:24]))
+    # The kernel and the connectors export a fixed API through __all__.
+    for sub in ("kernel", "connectors"):
+        init = package / sub / "__init__.py"
+        if init.is_file():
+            names = _exported(init.read_text(encoding="utf-8", errors="replace"))
+            if names:
+                modules.append((sub, names))
     if not modules:
         return ""
 

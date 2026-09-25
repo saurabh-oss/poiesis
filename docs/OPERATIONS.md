@@ -122,6 +122,9 @@ then the four commands above. See `PLANE.md` for how the mirror works.
 | Redraw a codebase map | Codebases page → Draw map, or `POST /api/runs/{id}/codemap?ai=false` (seconds); `ai=true` adds the local model's explanations |
 | Mirror a run into Plane | Boards page → Mirror to Plane, or `POST /api/runs/{id}/plane/sync` |
 | Stop an app | Apps page → Stop, or `POST /api/runs/{id}/deployment/stop` |
+| Build enterprise apps instead of MVPs | `POIESIS_PACK=packs/enterprise.yaml` in `.env`, then `docker compose up -d orchestrator`; applies to runs started afterwards ([ENTERPRISE.md](ENTERPRISE.md)) |
+| Make connectors live for every enterprise app | `APPS_JIRA_BASE_URL=…` and the rest in `.env` ([CONNECTORS.md](CONNECTORS.md#going-live)), restart the orchestrator, redeploy the app |
+| Sign in to an enterprise app | One-click personas on its sign-in page; `AUTH_PERSONAS=off` and `AUTH_ADMIN_PASSWORD` for passwords |
 
 A fresh redeploy resets a demo: DupeGuard, for example, comes back with 22 unscanned tickets
 for "Scan now" every time.
@@ -134,6 +137,7 @@ back (see "stale image" below):
 ```powershell
 docker compose exec orchestrator python -m app.selftest_core           # engine, model client, traces, git, vectors, code maps, check rules, Plane helpers (182 checks)
 docker compose exec orchestrator python -m app.selftest                # every build-time check, no model calls
+docker compose exec orchestrator python -m app.selftest_enterprise     # connectors (live, against local stand-ins), the kernel through three personas, the domain stage's checks (78 checks)
 docker compose exec orchestrator python -m app.integrations.selftest   # the Jira mirror against a fake Jira
 docker compose exec orchestrator python -m app.integrations.plane check  # Plane answers with the configured token
 ```

@@ -50,7 +50,16 @@ async def deploy_increment(state: RunState) -> RunState:
         else:
             verification = {"ok": True, "skipped": True, "problems": [], "screens": []}
         record["verification"] = verification
-        screens = [s for s in verification.get("screens", []) if not s.get("example")]
+        if verification.get("platform_problems"):
+            # The platform's own screens: not the stories' to fix, and said so.
+            await emit(run_id, "A platform screen failed in the browser (not a story's to fix): "
+                               + "; ".join(verification["platform_problems"])[:600],
+                       agent="governance", stage="deploy", level="warn")
+        if verification.get("signed_in_as"):
+            await emit(run_id, f"Signed in as the persona '{verification['signed_in_as']}' to check every screen; "
+                               f"the sign-in page offered {verification.get('sign_in_personas', 0)} persona(s)",
+                       agent="release", stage="deploy")
+        screens = [s for s in verification.get("screens", []) if not s.get("example") and not s.get("platform")]
         if verification.get("ok"):
             await emit(run_id, f"Checked in a browser: {len(screens)} screen(s), all working",
                        agent="release", stage="deploy", data={"verification": verification})
