@@ -724,6 +724,14 @@ async def test_foundation() -> None:
     _, bad_issues, _ = seedspec.expand_spec({"tables": [{"table": "ticket", "count": 3, "columns": {"colour": {"kind": "const", "value": 1}}}]}, spec_tables)
     expect("an unknown column and an uncovered NOT NULL column are reported",
            any("colour" in i for i in bad_issues) and any("subject" in i and "NOT NULL" in i for i in bad_issues), str(bad_issues)[:300])
+    selfref, selfref_issues, _ = seedspec.expand_spec({"tables": [{"table": "ticket", "count": 8, "columns": {
+        "subject": {"kind": "catalogue", "values": [f"s{i}" for i in range(8)]},
+        "original_ticket_id": {"kind": "ref", "table": "ticket"}}}]},
+        {"ticket": {"subject": True, "original_ticket_id": False}})
+    ids = [r["original_ticket_id"] for r in selfref["ticket"]]
+    expect("a table that refers to itself points at its own earlier rows (the first at none)",
+           not selfref_issues and ids[0] is None and all(v is None or 1 <= v <= i for i, v in enumerate(ids)),
+           f"{selfref_issues} {ids}")
     expect("the reply schema constrains the table names and kinds",
            seedspec.spec_schema(["ticket"])["properties"]["tables"]["items"]["properties"]["table"]["enum"] == ["ticket"])
     volume = "Data set | Volume | Characteristics\nEmployees | at least 120 | 6 departments\nLicence seats | at least 400 | x"

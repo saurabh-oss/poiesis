@@ -145,6 +145,14 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
         # so, but it is no reason to throw away an otherwise good data set.
         dropped = [p for p in problems if _SOFT.search(p)]
         problems = [p for p in problems if not _SOFT.search(p)]
+        # The enterprise DupeGuard run's first spec was 81 KB of one table (customers) and
+        # nothing else: tickets, clusters and known issues all opened empty, and nothing
+        # said so. Every table a screen can show needs rows.
+        empty = sorted(t for t in tables if t != "example" and not (rows or {}).get(t))
+        if rows is not None and empty:
+            problems.append(
+                f"the spec gives no rows for {len(empty)} table(s): {', '.join(empty)}. Every table needs rows — "
+                "write a short entry for each (catalogues of 10-25 values, not hundreds) before elaborating any one")
         if dropped:
             await emit(run_id, "Demonstration data: ignored " + "; ".join(d[:120] for d in dropped[:4]),
                        agent="data_designer", stage=stage, level="info")
@@ -180,6 +188,10 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
                 await emit(run_id, "Demonstration data: " + "; ".join(filled[:6]),
                            agent="data_designer", stage=stage, level="warn")
         if rows and seed_sql:
+            # Keep the spec these rows came from, as the passing path does: a later
+            # re-expansion or reseed must start from the data that is actually loaded.
+            import json as _json
+            repo.write_files(run_id, {SPEC_FILE: _json.dumps(reply, indent=1)})
             write_seed_section(run_id, seed_sql)
             check = await validate_init_sql(run_id)
             if not check.ok:

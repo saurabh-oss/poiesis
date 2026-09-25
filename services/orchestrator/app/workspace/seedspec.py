@@ -196,6 +196,7 @@ class _Expander:
         self.rng = random.Random(seed)
         self.now = dt.datetime.now(dt.timezone.utc)
         self.rows: dict[str, list[dict[str, Any]]] = {}
+        self._building: list[dict[str, Any]] = []
         self.issues: list[str] = []
         self.specs: dict[str, dict[str, dict[str, Any]]] = {}
         # Columns whose values are mechanical (a look-up, a weighted choice, a
@@ -249,6 +250,7 @@ class _Expander:
         if count < len(records):
             count = len(records)
         out: list[dict[str, Any]] = []
+        self._building = out  # the rows so far, for a column that refers to its own table
         unique_pos: dict[str, int] = {}
         seq_pos: dict[str, int] = {}
         for i in range(count):
@@ -330,6 +332,12 @@ class _Expander:
             return True, _weighted(rng, choices)
         if kind == "ref":
             target = str(spec.get("table") or "").lower()
+            if target == table.lower():
+                # A table that refers to itself (a ticket's original ticket, a manager who is
+                # an employee) points at its own earlier rows; the first has none to point at.
+                # Asking for it "earlier in the list" was a demand no spec could meet.
+                n = len(self._building)
+                return True, (rng.randint(1, n) if n else None)
             n = len(self.rows.get(target) or [])
             if n == 0:
                 self.issues.append(f"{table}.{col}: refers to `{target}`, which has no rows yet — put that "
