@@ -143,6 +143,9 @@ and each was fixed in the check:
 | `confirm(r.id)` flagged as the browser dialog, though the screen had its own `async function confirm(id)` for the review queue's Confirm button | the core story, the duplicate scan, red after three repairs in two rounds | a banned name the screen itself declares is allowed (`_defines`) |
 | `/api/intake/deflection` called bare answered 422 "missing query subject", reported as a 500 | the intake story red twice | a 422 made only of missing query parameters is an endpoint that needs input (`_needs_query`) |
 | 49 of 60 customers "Residential" rejected as lopsided | a wasted data attempt (about 12 minutes of model time) | two-value columns may split up to 90/10 |
+| `` api(`/api/audit-entries${params}`) `` read as a call to `/api/audit-entriesx` | the enterprise run's audit screen red after three repairs | an expression glued to the end of a path segment is a suffix (a query string), not part of the path |
+| The domain stage's rule tests imported the app's `tests/conftest.py`, which needs `httpx` | a repair spent on a file the Developer may not edit | the rule tests run with `--noconftest` and `backend` on the path; they are pure |
+| `ticket.original_ticket_id` refers to `ticket`; the seed expander demanded "put that table earlier" | four data attempts that could never pass | a table that refers to itself points at its own earlier rows |
 
 Earlier ones of the same kind: `ui.confirm()` was once flagged as `confirm()` (fixed with a
 look-behind), a history table's foreign key was required to be set on every row, ISO dates
@@ -151,6 +154,13 @@ never sized.
 
 The rule that came out of them: **a finding must name something the Developer can change,
 in words it can act on.** When a story is red and its screen works, suspect the check first.
+
+The same run found two platform gaps of the opposite kind — things nothing checked:
+
+- A seed spec that filled one table (81 KB of customers) and left ten empty passed. Every table
+  except the scaffold example must now get rows, with the missing ones named.
+- A story could delete another story's router by returning it empty: three repairs did, and
+  four screens answered 404. A router another story's screen still calls is now kept whole.
 
 ## Adding a check
 

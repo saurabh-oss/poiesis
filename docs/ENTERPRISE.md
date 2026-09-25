@@ -217,7 +217,12 @@ Inside `lay_foundation`, between the data model and the demonstration data
    persona; no worked example is left; at least one rule is registered. Then it runs the rule tests
    with a JUnit report.
 3. Every problem goes back — import tracebacks, consistency problems, failing tests, rules no
-   test is named after — up to `build.domain_repairs` times (3).
+   test is named after — up to `build.domain_repairs` times (3). Attempts are ranked (importing,
+   then consistency, then passing tests, then coverage) and the **best** one is kept: a repair can
+   make things worse, and in the first enterprise run attempts 2–4 were each worse than the first.
+   Each attempt's model call is memoised by what it was told, so a resumed run never replays a
+   reply written against different feedback. The rule tests run on their own (`--noconftest`);
+   a refusal's text starts with its rule id (`BR-04: …`).
 4. Test results are mapped to rules by name (`test_br_04_…` → `BR-04`; longer ids first, so
    `BR-10`'s tests are not taken for `BR-1`'s) and written to `domain/rule_results.json`.
 5. A domain that never imports is replaced by the platform's general policy (three generic roles,
