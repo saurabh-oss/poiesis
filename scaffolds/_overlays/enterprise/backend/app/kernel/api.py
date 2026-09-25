@@ -33,7 +33,7 @@ from ..db import get_session
 from . import rules as rule_registry
 from . import workflow as wf
 from .context import current
-from .models import AppUser, Approval, AuditEvent, ConnectorEvent, Notification, aware, utcnow
+from .models import AppUser, Approval, AuditEvent, ConnectorEvent, ConnectorObject, Notification, aware, utcnow
 from .policy import can, ensure, policy
 
 router = APIRouter(prefix="/platform")
@@ -279,10 +279,14 @@ def integration_events(connector: str = "", status: str = "", limit: int = 300,
 
 
 @router.get("/integrations/{connector}/objects")
-def integration_objects(connector: str) -> list[dict[str, Any]]:
+def integration_objects(connector: str, db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    # Through the request's session like every other endpoint here: the outbox's own
+    # session factory reached a database the platform's API smoke run does not have.
     ensure("integrations:read", what="see the integrations")
-    from .. import connectors
-    return list(reversed(connectors.store().objects(connector)))
+    rows = db.query(ConnectorObject).filter(ConnectorObject.connector == connector,
+                                            ~ConnectorObject.key.startswith("__counter__")) \
+        .order_by(ConnectorObject.id.desc()).all()
+    return [dict(o.data or {}) for o in rows]
 
 
 @router.post("/integrations/events/{event_id}/retry")
