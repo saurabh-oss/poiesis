@@ -445,4 +445,11 @@ Poiesis is the system that produces. If a third ever needs naming, *theoria* is 
 
 ## Licence
 
-Apache-2.0.
+Poiesis is source-available. The platform is licensed under the
+[Elastic License 2.0](LICENSE): run it inside your organisation for any purpose, read and
+modify it, but do not offer it to others as a hosted or managed service. The scaffold that
+Poiesis copies into every generated application is [Apache-2.0](scaffolds/LICENSE), so the
+applications it builds are yours to host and sell. [LICENSING.md](LICENSING.md) explains the
+split; contributions need the [Contributor Licence Agreement](CLA.md)
+([CONTRIBUTING.md](CONTRIBUTING.md)). Security reports: [SECURITY.md](SECURITY.md). The name:
+[TRADEMARKS.md](TRADEMARKS.md).

@@ -1,0 +1,30 @@
+name: CLA
+
+# Every pull request from someone other than the maintainer needs the Contributor
+# Licence Agreement box ticked in its description. No code is checked out and the job
+# has no permissions: it only reads the pull request's description.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Contributor Licence Agreement accepted
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ "$AUTHOR" = "saurabh-oss" ] || [[ "$AUTHOR" == *"[bot]" ]]; then
+            echo "Maintainer or bot: no agreement needed."
+            exit 0
+          fi
+          if printf '%s\n' "$BODY" | grep -Eiq '^[[:space:]]*[-*][[:space:]]*\[x\][[:space:]]*I have read the Contributor Licence Agreement'; then
+            echo "Contributor Licence Agreement accepted by $AUTHOR."
+            exit 0
+          fi
+          echo "::error::Tick the Contributor Licence Agreement box in the pull request description (see CLA.md), then save the description."
+          exit 1
