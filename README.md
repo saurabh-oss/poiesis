@@ -6,6 +6,8 @@ Poiesis takes whatever a business stakeholder already has (a document, a whitebo
 
 The thing that makes Poiesis different from every "prompt to app" tool is the **Portfolio Knowledge Graph**. Before any agent designs or writes anything, it must ask the graph what already exists. Reuse is enforced by architecture, not encouraged by a prompt.
 
+**Project site:** <https://saurabh-oss.github.io/poiesis/> — a replay of a real run, the value stream, the agents, the verification layers and the architecture, all interactive. Its source is [site/](site/), a static page published by [.github/workflows/pages.yml](.github/workflows/pages.yml).
+
 ## Documentation
 
 | Document | Read it to |

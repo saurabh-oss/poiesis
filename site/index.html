@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poiesis — from a business brief to a working, verified application</title>
+  <meta name="description" content="Poiesis is an autonomous engineering platform: ten AI agents turn a stakeholder's brief into a deployed, browser-verified application, with typed human gates, enforced reuse and an audit trail — on local models, on your own GPU.">
+  <meta name="theme-color" content="#0a2d6b">
+  <meta property="og:title" content="Poiesis — autonomous engineering platform">
+  <meta property="og:description" content="One brief in. A working, verified increment out — with an audit trail back to the sentence that asked for it.">
+  <meta property="og:image" content="assets/console-home.webp">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="fonts/SourceSans3.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+  <script>try { const t = localStorage.getItem("poiesis-site-theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="logo" href="#top" aria-label="Poiesis, back to top"><span class="mark">P</span>Poiesis</a>
+    <nav class="nav-links" id="navlinks" aria-label="Sections">
+      <a href="#why">Why</a>
+      <a href="#how">How it works</a>
+      <a href="#agents">Agents</a>
+      <a href="#verify">Verification</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#tour">Product</a>
+      <a href="#case">Case study</a>
+      <a href="#start">Get started</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="icon-btn" id="theme" aria-label="Switch between light and dark">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <a class="btn btn-primary btn-sm" href="https://github.com/saurabh-oss/poiesis" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.7.1-.7 1.2.1 1.9 1.3 1.9 1.3 1.1 1.9 2.9 1.3 3.6 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.3 4.7 18.3 5 18.3 5c.7 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .5z"/></svg>
+        GitHub
+      </a>
+      <button class="icon-btn menu-btn" id="menu" aria-label="Open the section menu" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ================================================================== HERO -->
+<section class="hero" id="top">
+  <span class="blob b1"></span><span class="blob b2"></span><span class="blob b3"></span>
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow"><span class="dot-live"></span> Autonomous engineering platform · runs on your own GPU</span>
+        <h1>Describe the problem.<br><span class="grad">Watch it get built.</span></h1>
+        <p class="lede">
+          Poiesis takes whatever a stakeholder already has — a requirements document, a whiteboard
+          photo, a recorded call, three lines of text — and ten AI agents turn it into a deployed,
+          browser-verified application. People decide at typed gates. Everything else runs on its own,
+          with an audit trail back to the sentence that asked for it.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#replay-note">▶ Replay a real run</a>
+          <a class="btn btn-ghost" href="#architecture">See the architecture</a>
+        </div>
+        <div class="hero-note">
+          <span>● No token bill: local models</span><span>● Apache-2.0</span><span>● Every screen opened in a real browser</span>
+        </div>
+      </div>
+
+      <div class="replay" id="replay" aria-label="A replay of a real Poiesis run">
+        <div class="replay-head">
+          <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="replay-title"><b>DupeGuard</b> · run b6c296c0 · qwen3.6 35B-A3B, local</span>
+          <span class="replay-clock" id="clock">00:00</span>
+        </div>
+        <div class="replay-rail" id="rail" aria-hidden="true"></div>
+        <div class="replay-stage"><span>Stage <b id="stageName">Intake</b></span><span id="stageAgent">—</span></div>
+        <div class="stories" id="stories" aria-label="Stories"></div>
+        <div class="feed" aria-live="polite"><div class="feed-inner" id="feed"></div></div>
+        <div class="replay-foot">
+          <button id="rp-play" aria-label="Pause the replay">❚❚ Pause</button>
+          <button id="rp-restart">↺ Restart</button>
+          <button id="rp-speed" aria-label="Change replay speed">1×</button>
+          <span class="score" id="score">Reviewer score <b>—</b></span>
+        </div>
+      </div>
+    </div>
+
+    <p class="hero-note" id="replay-note" style="margin-top:14px">
+      A replay of the actual event log of the DupeGuard run — 1 h 52 min on a laptop GPU, compressed to a minute.
+    </p>
+
+    <div class="stats" id="stats">
+      <div class="stat"><b data-count="13">0</b><span>stages, brief to release</span></div>
+      <div class="stat"><b data-count="10">0</b><span>agents, each with one job</span></div>
+      <div class="stat"><b data-count="7">0</b><span>typed human gates</span></div>
+      <div class="stat"><b data-count="9">0</b><span>verification layers</span></div>
+      <div class="stat"><b data-text="1h 52m">1h 52m</b><span>BRD to a working app (DupeGuard)</span></div>
+      <div class="stat"><b data-count="0">0</b><span>tokens billed — the GPU's clock is the meter</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== WHY -->
+<section class="block" id="why">
+  <div class="wrap">
+    <span class="kicker">Why it exists</span>
+    <h2 class="reveal">The expensive part was never the typing.</h2>
+    <p class="quote reveal">
+      An organisation with good engineers still loses most of its cycle time <em>before anyone writes code</em>:
+      turning intent into something buildable, finding out what already exists, agreeing what "done" means,
+      and getting a decision when the answer is genuinely ambiguous.
+    </p>
+    <div class="funnel reveal">
+      <div><span class="tag">Before</span><b>Intent to buildable</b><span>A stakeholder's words become cited evidence, questions and a backlog.</span></div>
+      <div><span class="tag">Before</span><b>What already exists</b><span>A portfolio knowledge graph is searched before anything is designed.</span></div>
+      <div><span class="tag">Before</span><b>What "done" means</b><span>Acceptance criteria, a computed verdict and a real-browser check.</span></div>
+      <div><span class="tag">Poiesis</span><b>Automates all three</b><span>…and keeps a human exactly where a decision changes the outcome.</span></div>
+    </div>
+
+    <div class="grid-3" style="margin-top:28px">
+      <div class="card lift reveal"><div class="icon" style="--c:#0265dc">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/></svg></div>
+        <h3>One user</h3><p>The business stakeholder. There is no product-owner, scrum-master or engineer seat: if a role is needed, it is an agent, and its output is an artifact the stakeholder can read.</p></div>
+      <div class="card lift reveal"><div class="icon" style="--c:#0fb5ae">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3 21 8l-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/></svg></div>
+        <h3>Reuse is enforced, not suggested</h3><p>The Architect cannot design until it has asked the knowledge graph what exists — and must justify, in writing, every "build new". That rationale is stored and surfaces on the next run.</p></div>
+      <div class="card lift reveal"><div class="icon" style="--c:#eb1000">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m5 12 4 4L19 6"/></svg></div>
+        <h3>Verified, not just tested</h3><p>Every increment is deployed and every screen opened — and used — in a real browser before a person sees the release decision. The release gate cannot offer "release" for an app that is not proven working.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== HOW -->
+<section class="block alt" id="how">
+  <div class="wrap">
+    <span class="kicker">How it works</span>
+    <h2 class="reveal">A value stream of thirteen stages.</h2>
+    <p class="intro reveal">Click a stage. Each is a node in a LangGraph graph checkpointed in Postgres, so a run can sit paused on a gate for a week, survive a restart, and resume at the exact node.</p>
+    <div class="stream-wrap reveal">
+      <div class="stream" id="stream" role="tablist" aria-label="Stages"></div>
+      <div class="stage-detail" id="stageDetail"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== AGENTS -->
+<section class="block" id="agents">
+  <div class="wrap">
+    <span class="kicker">The agents</span>
+    <h2 class="reveal">Ten agents. One job each.</h2>
+    <p class="intro reveal">Each has one system prompt and a typed output. On local models every reply is decoded against its JSON Schema, so "the model returned malformed JSON" is not a failure mode. Hover or tap a card to see what each one refuses to do.</p>
+    <div class="agents" id="agentGrid"></div>
+  </div>
+</section>
+
+<!-- ================================================================== GOVERNANCE -->
+<section class="block alt" id="gates">
+  <div class="wrap">
+    <span class="kicker">Governed autonomy</span>
+    <h2 class="reveal">People at typed gates, not in every token.</h2>
+    <p class="intro reveal">A gate has a kind, a schema, a stated default and a recorded answer with an actor. Which gates stop for a person is policy in a <b>domain pack</b>, so the same engine runs at different levels of autonomy. Switch packs:</p>
+    <div class="pack-toggle" role="tablist" aria-label="Domain pack">
+      <button class="on" data-pack="mvp" role="tab" aria-selected="true">mvp pack</button>
+      <button data-pack="default" role="tab" aria-selected="false">default pack</button>
+    </div>
+    <div class="gov">
+      <div class="gates" id="gateList"></div>
+      <div class="policy">
+        <div class="pol" id="p-repair"><span>Repairs per story</span><b>3</b></div>
+        <div class="pol" id="p-rework"><span>Automatic rework rounds</span><b>1</b></div>
+        <div class="pol" id="p-tester"><span>Tester & pytest</span><b>off</b></div>
+        <div class="pol" id="p-ship"><span>Ship threshold</span><b>60</b></div>
+        <div class="verdict">
+          <h4>The verdict is arithmetic</h4>
+          <p>The Reviewer scores five weighted dimensions; shipping is the score against the threshold plus a blocker check — not the model's opinion.</p>
+          <div class="weights" id="weights"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== VERIFICATION -->
+<section class="block" id="verify">
+  <div class="wrap">
+    <span class="kicker">Verification</span>
+    <h2 class="reveal">Nine layers between a model's code and your decision.</h2>
+    <p class="intro reveal">A story is not trusted because the model says it is done, nor because its own tests pass. Each finding goes back to the Developer as an instruction naming the file and what to do.</p>
+    <div class="gauntlet">
+      <div class="layers" id="layers"></div>
+      <div class="layer-detail"><div class="card" id="layerDetail"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== ARCHITECTURE -->
+<section class="block alt" id="architecture">
+  <div class="wrap">
+    <span class="kicker">Architecture</span>
+    <h2 class="reveal">Built from parts you can inspect.</h2>
+    <p class="intro reveal">Hover or tap any box. Three views: the platform, the application it generates, and the loop that makes every run better than the last.</p>
+    <div class="tabs" role="tablist" aria-label="Architecture views">
+      <button class="on" data-view="platform" role="tab">The platform</button>
+      <button data-view="app" role="tab">A generated app</button>
+      <button data-view="loop" role="tab">The knowledge loop</button>
+    </div>
+    <div class="arch">
+      <div class="arch-canvas"><svg id="archSvg" viewBox="0 0 1000 640" role="img" aria-label="Architecture diagram"></svg></div>
+      <div class="arch-side"><div class="card" id="archDetail"></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== PRODUCT TOUR -->
+<section class="block" id="tour">
+  <div class="wrap">
+    <span class="kicker">The product</span>
+    <h2 class="reveal">A control room for the whole value stream.</h2>
+    <p class="intro reveal">Real screenshots from a local installation — the console, and the application it built.</p>
+    <div class="tour">
+      <div class="tour-list" id="tourList"></div>
+      <div class="browser reveal">
+        <div class="browser-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><div class="url" id="tourUrl">localhost:3000</div></div>
+        <div class="shot"><img id="tourImg" src="assets/console-home.webp" alt="" width="1480" height="960"></div>
+        <div class="caption" id="tourCaption"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== CASE STUDY -->
+<section class="block alt" id="case">
+  <div class="wrap">
+    <span class="kicker">Case study</span>
+    <h2 class="reveal">DupeGuard: a 4,000-word BRD to a working app.</h2>
+    <p class="intro reveal">A support desk loses a quarter of Tier 1 capacity to duplicate tickets. The BRD asked for duplicates to be detected as they arrive, the obvious ones closed with a reply naming the original, uncertain ones reviewed, outage clusters turned into known issues that deflect new reports — and every automatic action recorded and reversible.</p>
+    <div class="case-top">
+      <div class="gantt reveal" id="gantt">
+        <h3>The run, stage by stage</h3>
+        <p class="muted" style="margin:0 0 14px;font-size:14.5px">Minutes from submission, from the run's event log.</p>
+        <div id="ganttRows"></div>
+        <div class="g-axis"><div></div><div><span>0</span><span>30</span><span>60</span><span>90</span><span>112</span></div><div></div></div>
+      </div>
+      <div class="numbers">
+        <div class="num accent reveal"><b>90.8</b><span>Reviewer score, 0 blockers</span></div>
+        <div class="num reveal"><b>10 / 10</b><span>screens working in a real browser</span></div>
+        <div class="num reveal"><b>29 / 29</b><span>BRD acceptance checks against the running app</span></div>
+        <div class="num reveal"><b>331</b><span>tickets of demonstration history, 30% duplicates</span></div>
+        <div class="num reveal"><b>7 of 10</b><span>stories right first time, no repair</span></div>
+        <div class="num reveal"><b>0</b><span>hosted model calls</span></div>
+      </div>
+    </div>
+    <div class="split">
+      <div class="card reveal">
+        <h3><span class="pill bad">Found</span> What the run got wrong</h3>
+        <ul>
+          <li><b>Two red stories were the platform's fault.</b> A screen's own <code>confirm()</code> was taken for the browser dialog; an endpoint that needs input was called bare and its correct 422 read as a crash. Both checks are fixed and covered by self-tests.</li>
+          <li><b>The screens worked; the rules didn't.</b> Three stories each implemented the BRD's duplicate score differently, because each story is built in its own context. Precision was simulated.</li>
+          <li><b>The data was thin</b> — no product areas, no customers, every ticket P3 — so the rules had nothing to show.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <h3><span class="pill good">Changed</span> What was done about it</h3>
+        <ul>
+          <li><b>One duplicate engine</b> with the BRD's 55/20/15/10 score, its reasons, and every rule — P1s never auto-closed, chains to the earliest original, known issues linking outage reports.</li>
+          <li><b>30 days of history replayed through that engine</b>: a Manchester outage, a billing run, chasers, known issues deflecting, six closures undone — and 22 fresh tickets for a live "Scan now".</li>
+          <li><b>Honest numbers</b>: precision counts every undone closure; a threshold change is previewed before it is saved.</li>
+        </ul>
+      </div>
+    </div>
+    <div class="lessons">
+      <div class="card reveal"><h3>Shared rules need one home</h3><p>The foundation stage should write the domain module the stories import.</p></div>
+      <div class="card reveal"><h3>Checks must be fair</h3><p>A finding must name something the Developer can change.</p></div>
+      <div class="card reveal"><h3>A working screen is not a working rule</h3><p>Acceptance criteria with numbers should run against the app.</p></div>
+      <div class="card reveal"><h3>Replay, don't list</h3><p>Data generated by the app's own rules is consistent everywhere.</p></div>
+    </div>
+    <p style="margin-top:22px"><a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/CASE-STUDY-DUPEGUARD.md">Read the full case study →</a></p>
+  </div>
+</section>
+
+<!-- ================================================================== SOVEREIGNTY -->
+<section class="block" id="local">
+  <div class="wrap">
+    <div class="sov">
+      <div>
+        <span class="kicker">Local first</span>
+        <h2 class="reveal">Your brief never leaves the machine.</h2>
+        <p class="intro reveal" style="margin-bottom:10px">On the <code>local</code> profile every agent runs on Ollama on your own GPU. Replies are constrained to each agent's schema at decode time, and one gate lets the model answer one call at a time — a build, a reseed and a code-map explanation never compete for the card.</p>
+        <ul class="checklist reveal">
+          <li>No brief, document or line of generated code sent to a hosted model</li>
+          <li>Every model call kept with its prompt, reply and timing — a run's cost is a query</li>
+          <li><span>Hosted profiles (<code>cloud</code>, <code>groq</code>) are one setting away when quality matters more than sovereignty</span></li>
+          <li>Generated apps bind to 127.0.0.1: model-written code stays off the network</li>
+        </ul>
+      </div>
+      <div class="gpu reveal">
+        <h3>The reference machine</h3>
+        <div class="row"><span>GPU</span><b>RTX 5070 Ti laptop · 12 GB</b></div>
+        <div class="row"><span>Reasoning, coding, fast</span><b>qwen3.6 35B-A3B (MoE, 3B active)</b></div>
+        <div class="row"><span>Embeddings</span><b>nomic-embed-text</b></div>
+        <div class="row"><span>Vision</span><b>gemma4 12B</b></div>
+        <div class="row"><span>Context window</span><b>32k, sent with every call</b></div>
+        <div class="row"><span>Brief to app (10 stories)</span><b>1 h 52 min</b></div>
+        <div class="meter" aria-hidden="true"><i></i></div>
+        <p style="margin:10px 0 0;font-size:13px;color:#a9b5cf;position:relative">One model loaded, weights split across the card and system RAM, 1.5 GB kept free for the display driver.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================================== STACK -->
+<section class="block alt" id="stack">
+  <div class="wrap">
+    <span class="kicker">Built with</span>
+    <h2 class="reveal">Open, inspectable, replaceable.</h2>
+    <div class="stack-groups" id="stackGroups" style="margin-top:34px"></div>
+  </div>
+</section>
+
+<!-- ================================================================== GET STARTED -->
+<section class="block" id="start">
+  <div class="wrap">
+    <span class="kicker">Get started</span>
+    <h2 class="reveal">From clone to your first run.</h2>
+    <p class="intro reveal">Windows with Docker Desktop, WSL2 and an NVIDIA GPU is the reference setup. Expect about 55 GB of models the first time.</p>
+    <div class="steps">
+      <div class="step reveal"><h3><i>1</i>Clone and configure</h3><p>Point the sandbox at your workspaces folder as Windows sees it.</p>
+        <div class="code"><button class="copy">Copy</button>git clone https://github.com/saurabh-oss/poiesis
+cd poiesis
+copy .env.example .env   <span class="c"># POIESIS_WORKSPACE_HOST_ROOT</span></div></div>
+      <div class="step reveal"><h3><i>2</i>Start the models and the platform</h3><p>The script starts Ollama with the settings Poiesis needs.</p>
+        <div class="code"><button class="copy">Copy</button>scripts\restart-ollama.ps1
+docker compose up -d
+.\scripts\bootstrap.ps1   <span class="c"># models + portfolio index</span></div></div>
+      <div class="step reveal"><h3><i>3</i>Submit a brief</h3><p>Open the control room, describe the problem, attach the sample BRD.</p>
+        <div class="code"><button class="copy">Copy</button>start http://localhost:3000
+<span class="c"># docs/samples/BRD-SUP-2026-021_DupeGuard_v1.2.docx</span></div></div>
+      <div class="step reveal"><h3><i>4</i>Optional: boards in Plane</h3><p>Every idea becomes a project and board in a self-hosted tracker.</p>
+        <div class="code"><button class="copy">Copy</button>copy infra\plane\plane.env.example infra\plane\plane.env   <span class="c"># set the two secret keys</span>
+docker compose -f infra/plane/docker-compose.yml --env-file infra/plane/plane.env -p plane up -d
+python scripts\plane-bootstrap.py
+docker compose up -d orchestrator</div></div>
+    </div>
+    <div class="docs" id="docs"></div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div>
+        <div class="greek">πρᾶξις · <em>ποίησις</em></div>
+        <p>Aristotle separated <i>praxis</i>, action whose end is the doing itself, from <i>poiesis</i>, action that brings something into being outside the maker — the word behind <i>poetry</i>, but it meant making of any kind. Poiesis is the system that produces.</p>
+      </div>
+      <div>
+        <h4>Documentation</h4>
+        <div class="foot-links">
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/SETUP-WINDOWS.md">Setup on Windows</a>
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/ARCHITECTURE.md">Architecture</a>
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/CHECKS.md">How increments are verified</a>
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/API.md">API reference</a>
+        </div>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <div class="foot-links">
+          <a href="https://github.com/saurabh-oss/poiesis">Source on GitHub</a>
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/CASE-STUDY-DUPEGUARD.md">DupeGuard case study</a>
+          <a href="https://github.com/saurabh-oss/archilens">ArchiLens</a>
+          <a href="https://github.com/saurabh-oss/poiesis#licence">Licence: Apache-2.0</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-bottom"><span>Poiesis · one brief in, a working, verified increment out.</span><span>Made with local models on a laptop GPU.</span></div>
+  </div>
+</footer>
+
+<script src="app.js" defer></script>
+</body>
+</html>
