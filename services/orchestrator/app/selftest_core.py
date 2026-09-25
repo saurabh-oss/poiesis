@@ -901,6 +901,14 @@ async def test_foundation() -> None:
                                                      "frontend/screens/dashboard.js": "export default {}"})
         expect("a route only the rewriting story's own screen called is not forced back",
                kept2["backend/app/routers/metrics.py"] == rewrite and not notes2, str(notes2))
+        original = (root / "backend" / "app" / "routers" / "metrics.py").read_text(encoding="utf-8")
+        kept3, notes3 = checks.preserve_routes(rid, {"backend/app/routers/metrics.py": ""})
+        expect("another story cannot delete a router a screen still calls",
+               kept3["backend/app/routers/metrics.py"] == original and any("not deleted" in n for n in notes3), str(notes3))
+        kept4, _ = checks.preserve_routes(rid, {"backend/app/routers/metrics.py": "",
+                                                "frontend/screens/dashboard.js": "export default {}"})
+        expect("a story may still delete a router only its own screens called",
+               kept4["backend/app/routers/metrics.py"] == "")
     finally:
         _drop_runs([rid])
         shutil.rmtree(repo.workspace_path(rid), ignore_errors=True)

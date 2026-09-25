@@ -1966,9 +1966,20 @@ def preserve_routes(run_id: str, files: dict[str, str]) -> tuple[dict[str, str],
         if not (key.startswith("backend/app/routers/") and key.endswith(".py")) or not isinstance(new, str):
             continue
         current = root / key
-        if not current.is_file() or not new.strip():
+        if not current.is_file():
             continue
         old = current.read_text(encoding="utf-8", errors="replace")
+        if not new.strip():
+            # An empty file deletes it. In the enterprise DupeGuard run three stories' repairs
+            # deleted routers other stories' screens called (S5 took S4's scan, S8 the known
+            # issues S6 and S7 used), and four screens answered 404. A router another screen
+            # still calls is kept whole.
+            called = [f"{m} {p}" for (m, p) in _route_functions(old)
+                      if any(_route_pattern(_normalise(p)).match(c) and (not cm or cm == m) for cm, c in calls)]
+            if called:
+                out[rel] = old
+                restored += [f"{key}: not deleted — other screens call {', '.join(called[:4])}"]
+            continue
         old_routes, new_routes = _route_functions(old), _route_functions(new)
         if not old_routes or not new_routes:
             continue
