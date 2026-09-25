@@ -126,6 +126,10 @@ person holds one of its roles (or the permission `<table>:<transition>`); a reas
 required; the guard (a domain rule) allows it. A transition with `approval="<role>"` opens an
 approval instead of moving; someone holding that role, and never the requester (four eyes, rule
 `WF-02`), approves or rejects it in the Approvals screen, and the move happens on approval.
+When the request is itself the record (a proposed threshold change), `on_reject="Rejected"`
+ends it on rejection, with an audit entry. When one transition serves several rules (an
+automatic close by BR-01 or by BR-12), the caller names the one that took the move:
+`transition(db, t, "auto_close", rule=decision.rule)`, and the audit trail records it.
 Entering a state with an SLA starts a clock; the scheduler escalates a clock past due to the
 `escalate` role.
 
