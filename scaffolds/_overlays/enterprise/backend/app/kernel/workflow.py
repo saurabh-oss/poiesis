@@ -71,6 +71,7 @@ class Transition:
     fields: tuple[str, ...] = ()          # extra columns the transition may set (duplicate_of_id, po_number)
     effects: tuple[Effect, ...] = ()      # run after the state changes (notify, call a connector, …)
     notify: tuple[str, ...] = ()          # roles told when it happens
+    on_reject: str | None = None          # with `approval`: the state a rejected request moves the record to
     tone: str = ""                        # ok | warn | down: how the button looks
 
     def sources(self) -> tuple[str, ...]:
@@ -134,6 +135,7 @@ class Context:
     reason: str = ""
     fields: dict[str, Any] = dc_field(default_factory=dict)
     approval: Approval | None = None
+    rule: str | None = None               # the rule that took this move, when the caller knows better than the transition
 
 
 WORKFLOWS: dict[str, Workflow] = {}
@@ -247,7 +249,7 @@ def _apply(db: Session, workflow: Workflow, t: Transition, obj: Any, ctx: Contex
                  f"{t.label or t.name.replace('_', ' ').capitalize()}: {workflow.entity} {obj.id} "
                  f"{workflow.states.get(ctx.from_state, ctx.from_state)} → {workflow.states.get(t.target, t.target)}{by}"
                  + (f" — {ctx.reason}" if ctx.reason else ""),
-                 entity=workflow.entity, entity_id=obj.id, rule_id=t.rule,
+                 entity=workflow.entity, entity_id=obj.id, rule_id=ctx.rule or t.rule,
                  changes={workflow.field: [ctx.from_state, t.target], **{k: [None, v] for k, v in ctx.fields.items() if k in t.fields}})
     for effect in t.effects:
         effect(db, obj, ctx)
@@ -259,8 +261,12 @@ def _apply(db: Session, workflow: Workflow, t: Transition, obj: Any, ctx: Contex
 
 
 def transition(db: Session, obj: Any, name: str, *, reason: str = "", fields: dict[str, Any] | None = None,
-               actor: Actor | None = None, workflow: str | None = None, commit: bool = True) -> dict[str, Any]:
-    """Perform (or, when it needs approval, request) a transition. Raises RuleViolation when refused."""
+               actor: Actor | None = None, workflow: str | None = None, commit: bool = True,
+               rule: str | None = None) -> dict[str, Any]:
+    """Perform (or, when it needs approval, request) a transition. Raises RuleViolation when refused.
+
+    `rule` names the rule that took the move when one transition serves several (an
+    automatic close by BR-01 or by BR-12); the audit trail records it."""
     actor = actor or current()
     flows = [w for w in for_model(type(obj)) if workflow in (None, w.name)]
     if not flows:
@@ -272,7 +278,7 @@ def transition(db: Session, obj: Any, name: str, *, reason: str = "", fields: di
     if refused:
         raise violation(refused[0], refused[1], transition=name)
     state = getattr(obj, wf.field)
-    ctx = Context(db, actor, wf, t, state, t.target, reason, fields)
+    ctx = Context(db, actor, wf, t, state, t.target, reason, fields, rule=rule)
     if t.approval:
         open_ = db.query(Approval).filter_by(entity=wf.entity, entity_id=obj.id, transition=name, status="pending").first()
         if open_:
@@ -332,6 +338,17 @@ def decide(db: Session, approval_id: int, approve: bool, note: str = "", actor: 
         a.status = "rejected"
         audit.record(db, "approval", f"Rejected: {a.title}" + (f" — {note}" if note else ""),
                      entity=a.entity, entity_id=a.entity_id)
+        t = next((x for x in wf.transitions if x.name == a.transition), None)
+        if t is not None and t.on_reject and obj is not None and getattr(obj, wf.field) == a.from_state:
+            # The request itself is the record (a proposed change): a rejection ends it.
+            audit.allow_transition(db, obj, wf.field)
+            setattr(obj, wf.field, t.on_reject)
+            _start_clock(db, wf, obj, t.on_reject)
+            audit.record(db, "transition", f"Rejected by {actor.name}: {wf.entity} {obj.id} "
+                                           f"{wf.states.get(a.from_state, a.from_state)} → {wf.states.get(t.on_reject, t.on_reject)}"
+                                           + (f" — {note}" if note else ""),
+                         entity=wf.entity, entity_id=obj.id, rule_id=t.rule,
+                         changes={wf.field: [a.from_state, t.on_reject]})
         if a.requested_by_id:
             notify(db, f"Rejected: {a.title}", f"{actor.name}: {note or 'no note'}", users=(a.requested_by_id,),
                    level="down", entity=a.entity, entity_id=a.entity_id, kind="approval_decided")

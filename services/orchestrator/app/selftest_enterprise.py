@@ -384,6 +384,25 @@ def test_kernel(tmp: Path) -> None:
         four_eyes = client.post(f"/api/platform/approvals/{mine['approval_id']}/approve", headers=alex)
         expect("nobody approves their own request (WF-02)", four_eyes.status_code == 409 and four_eyes.json()["rule"] == "WF-02",
                four_eyes.text[:200])
+        # A request that is itself the record (a proposed change) ends when rejected: `on_reject`.
+        finish_large = importlib.import_module("app.domain.workflows").EXAMPLE.get("finish_large")
+        finish_large.on_reject = "in_progress"
+        svc_headers = {"Authorization": "Bearer svc-token-123"}
+        rejected = client.post(f"/api/platform/approvals/{mine['approval_id']}/reject", json={"note": "Not this quarter"},
+                               headers=svc_headers).json()
+        after = client.get(f"/api/platform/workflows/example/{own['id']}", headers=alex).json()
+        expect("a rejected request moves the record to its transition's on_reject state, with an audit entry",
+               rejected.get("status") == "rejected" and after["state"] == "in_progress"
+               and any("Rejected by" in e["summary"] for e in after["history"]), str(after)[:300])
+        finish_large.on_reject = None
+        # One transition serving several rules: the caller names the one that took the move.
+        context = importlib.import_module("app.kernel.context")
+        with context.acting_as(context.SYSTEM), importlib.import_module("app.db")._sessionmaker()() as s:
+            kernel.transition(s, s.get(importlib.import_module("app.models").Example, own["id"]), "submit", rule="EX-99")
+        moves = [r for r in client.get(f"/api/platform/audit?entity=example&entity_id={own['id']}", headers=alex).json()
+                 if r["action"] == "transition"]
+        expect("a transition records the rule its caller names over the transition's own",
+               moves and moves[0]["rule"] == "EX-99", str(moves[:2])[:300])
 
         trail = client.get(f"/api/platform/audit?entity=example&entity_id={item['id']}", headers=sam).json()
         actions = [r["action"] for r in trail]
