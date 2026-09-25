@@ -19,6 +19,9 @@ In a router:
   it (409, rule WF-00). Call `transition(db, row, "approve", reason=…)` from `..kernel`, or let the
   screen use the workflow panel. `POST /api/platform/workflows/<table>/<id>/<transition>` is the
   endpoint, body `{"reason": "", "fields": {}}`.
+  An automatic action (a scan closing duplicates, a job) moves records with
+  `transition(db, row, "auto_close", reason="score 91 >= 85", actor=SYSTEM)` — `SYSTEM` from `..kernel` —
+  so the role check allows it and the audit trail says the system did it.
 - Decisions, scores and validations come from `..domain.rules` and `..domain.services`; never
   compute a rule inline. If your story needs an operation the services lack, add it to
   `backend/app/domain/services.py` (return that file complete) and call the rules from it.

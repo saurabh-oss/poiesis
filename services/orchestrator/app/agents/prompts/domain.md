@@ -127,8 +127,9 @@ from ..kernel.workflow import Workflow, Transition, register
 #   Transition(name, source, target, label="", roles=(), approval=None, requires_reason=False,
 #              guard=None, rule=None, fields=(), effects=(), notify=(), tone="")
 #   register(workflow) -> workflow
-from ..kernel import transition, record, notify, current, can, require
-#   transition(db, row, name, *, reason="", fields=None, commit=True) -> {"status": "done"|"pending_approval", ...}
+from ..kernel import transition, record, notify, current, can, require, SYSTEM
+#   transition(db, row, name, *, reason="", fields=None, actor=None, commit=True) -> {"status": "done"|"pending_approval", ...}
+#   (an automatic action passes actor=SYSTEM; never write a governed status column yourself)
 #   record(db, action, summary, *, entity="", entity_id=None, changes=None, rule_id=None)
 #   notify(db, title, body="", *, roles=(), users=(), link="", level="info", entity="", entity_id=None, kind="info")
 #   current() -> the acting person: .id .name .roles ; can("ticket:merge") -> bool

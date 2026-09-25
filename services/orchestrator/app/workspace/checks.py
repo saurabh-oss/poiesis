@@ -886,23 +886,35 @@ def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[st
         except SyntaxError:
             continue
         used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        # column -> the workflows governing it, among the models this file uses
+        columns: dict[str, list[str]] = {}
         for model, (column, workflow) in governed.items():
-            if model not in used:
+            if model in used:
+                columns.setdefault(column, []).append(f"{workflow} ({model})")
+        if not columns:
+            continue
+        found = 0
+        for node in ast.walk(tree):
+            written = None
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                hit = next((t for t in targets if isinstance(t, ast.Attribute) and t.attr in columns), None)
+                if hit is not None and not (isinstance(hit.value, ast.Name) and hit.value.id == "self"):
+                    written = (ast.unparse(hit), hit.attr)
+            elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setattr" and len(node.args) >= 2 \
+                    and isinstance(node.args[1], ast.Constant) and node.args[1].value in columns:
+                written = (ast.unparse(node), str(node.args[1].value))
+            if written is None:
                 continue
-            for node in ast.walk(tree):
-                target = None
-                if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
-                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                    target = next((t for t in targets if isinstance(t, ast.Attribute) and t.attr == column), None)
-                elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setattr" and len(node.args) >= 2 \
-                        and isinstance(node.args[1], ast.Constant) and node.args[1].value == column:
-                    target = node
-                if target is not None:
-                    issues.append(
-                        f"{rel}: line {node.lineno} writes `.{column}` of {model}, which the {workflow} workflow "
-                        f"governs; the server refuses that write (409, rule WF-00). Move the record with "
-                        f"`transition(db, row, \"<transition>\", reason=...)` from `..kernel` instead.")
-                    break
+            issues.append(
+                f"{rel}: line {node.lineno} writes `{written[0]}`, a column the "
+                f"{' / '.join(columns[written[1]])} workflow governs; the server refuses that write (409, rule "
+                f"WF-00). Move the record with `transition(db, row, \"<transition name>\", reason=...)` from "
+                f"`..kernel`; an automatic action passes `actor=SYSTEM` (also from `..kernel`) so the role check "
+                f"allows it.")
+            found += 1
+            if found >= 6:
+                break
     return issues
 
 
