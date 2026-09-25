@@ -11,7 +11,7 @@ and the schema together.
 | Agent | Model role | Reads | Produces | Refuses to |
 |---|---|---|---|---|
 | Analyst | reasoning | Evidence fragments | Understanding, contradictions, ranked questions with defaults | Ask more than six questions, or ask what the evidence answers |
-| Product Owner | reasoning | Evidence, clarifications | Vision; then Backlog | Assert anything it cannot cite; name a technology in the vision |
+| Product Owner | reasoning | Evidence, clarifications, the requirements inventory | Vision; then Backlog, each story naming the requirements it delivers in `covers`; then only the missing stories when coverage has gaps | Assert anything it cannot cite; name a technology in the vision |
 | Architect | reasoning | Vision, backlog, knowledge graph | Reuse plan, components, decisions, mermaid diagram | Build new without a written rationale |
 | Planner | fast | Backlog, reuse plan | Sprint goal, ranked stories, deferrals | Exceed capacity or violate dependencies |
 | Developer | coding | One story, architecture, workspace tree, the routes and tables that exist, the lessons that apply | Complete files, commit message | Implement anything beyond the acceptance criteria; edit tests; use the browser's dialogs, `fetch()` or a package |
@@ -19,6 +19,8 @@ and the schema together.
 | Foundation Developer | coding | Brief, architect's data model, every story's criteria | models.py, schemas.py and the CREATE TABLEs for the whole product | Invent a column no criterion needs; declare relationships or enums a screen cannot filter |
 | Foundation Developer, domain stage (enterprise pack) | coding | Brief, every story's criteria, models.py, the init.sql tables, the kernel's API, the worked example | `domain/policy.py`, `rules.py`, `workflows.py`, `services.py` and `tests/test_rules.py`: roles and personas, every rule once with its id and source, each lifecycle with approvals and SLAs, at least two tests per rule (`agents/prompts/domain.md`, [ENTERPRISE.md](ENTERPRISE.md#the-domain-stage)) | Put a database query in a rule; name a role, table or state that does not exist; leave the worked example in place |
 | Data Designer | coding | Brief, the screens, the tables as written, the spec contract | A JSON spec (catalogues, choices, references, time windows) the platform expands into demonstration data | Write rows or code; number the copies; repeat a sentence; include ids |
+| Analyst, requirements | reasoning | The brief, the ids it defines | Every requirement with its kind, statement and the numbers it fixes; unnumbered ones as `REQ-n` (`requirements.md`) | Drop an id the brief defines, or invent a requirement |
+| Acceptance Tester | coding | One story, its criteria, the brief's requirements it delivers, VERIFIED ROUTES, the personas | `acceptance/test_<story>.py` run against the deployed app; on failure, a verdict per test: the check was wrong (corrected) or the app is (a finding) | See the implementation; assert an error message's wording or a whole body |
 | Reviewer | reasoning | Diff, tests, criteria, reuse plan | Five scored dimensions, findings, verdict | Pass work that fails its criteria |
 | Release Manager | fast | Everything | Version, run command, stakeholder release notes | Use internal component names in the notes |
 

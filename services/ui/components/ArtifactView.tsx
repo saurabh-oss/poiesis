@@ -101,8 +101,27 @@ export default function ArtifactView({ artifact }: { artifact: Artifact }) {
   }
 
   if (artifact.kind === "backlog") {
+    const cov = b.coverage;
+    const missing: string[] = cov?.missing ?? [];
+    const excused = (cov?.rows ?? []).filter((r: any) => r.status === "excused");
     return (
       <div className="space-y-6">
+        {cov && (
+          <div className={`rounded border p-3 text-[13px] ${missing.length ? "border-rust/40 bg-rust/[0.04]" : "border-moss/40 bg-moss/[0.04]"}`}>
+            <p className="font-semibold">
+              Covers {cov.covered} of {cov.total} requirements of the brief
+              {cov.excused ? `, ${cov.excused} left out with a reason` : ""}
+            </p>
+            {missing.length > 0 && (
+              <p className="mt-1 text-rust">Still without a story: <span className="font-mono">{missing.join(", ")}</span></p>
+            )}
+            {excused.length > 0 && (
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-graphite">
+                {excused.map((r: any) => <li key={r.id}><span className="font-mono">{r.id}</span> {r.title}: {r.reason}</li>)}
+              </ul>
+            )}
+          </div>
+        )}
         {(b.epics ?? []).map((epic: any) => (
           <div key={epic.id}>
             <h3 className="text-[15px] font-semibold">{epic.title}</h3>
@@ -112,6 +131,7 @@ export default function ArtifactView({ artifact }: { artifact: Artifact }) {
                 <article key={s.id} className="border-l-2 border-rule pl-4">
                   <p className="font-mono text-[12px] text-graphite">
                     {s.id} · value {s.value} · estimate {s.estimate}
+                    {(s.covers ?? []).length > 0 && <> · delivers {(s.covers ?? []).join(", ")}</>}
                   </p>
                   <p className="text-[14px] font-medium">{s.title}</p>
                   <p className="text-[13px] text-graphite">{s.narrative}</p>

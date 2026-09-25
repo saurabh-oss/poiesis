@@ -202,9 +202,13 @@ had each implemented the BRD's duplicate-scoring rule differently
   closes the ticket", "precision counts undone closures") should become executable checks
   against the running app, as they were written by hand for DupeGuard.
 
-## Deliberately not built yet
+Both are now built: the domain stage of the enterprise pack writes the rules once
+([ENTERPRISE.md](ENTERPRISE.md)), and acceptance checks run against the deployed app
+([CHECKS.md](CHECKS.md#acceptance-checks)). The enterprise run then taught a third lesson: a
+backlog can quietly leave out a screen the brief names, so the backlog and the domain are
+checked against an inventory of the brief's requirements ([CHECKS.md](CHECKS.md#requirements-coverage)).
 
-- The shared domain module and executable acceptance criteria described above.
+## Deliberately not built yet
 
 - Multi-tenant SaaS. Local first; the seams (workspace root, pack selection, run ownership)
   are placed for it but nothing is multi-tenant today.

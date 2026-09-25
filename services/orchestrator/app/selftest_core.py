@@ -194,6 +194,106 @@ async def test_schemas() -> None:
     expect("an invented verdict is rejected by the schema", bool(bad))
 
 
+async def test_requirements() -> None:
+    """The brief as a checklist, on the enterprise DupeGuard run's failures: a backlog with no story
+    for the screen M10, and a domain that simplified its rules and never tested their numbers."""
+    print("\n[1b] requirements of the brief")
+    from . import requirements as req
+    from .graph.nodes.product import merge_additions
+    evidence = [{"id": "f1", "content": (
+        "Capability | What the stakeholder sees\n"
+        "M1 | Duplicate Command Center | Headline numbers for the last 30 days\n"
+        "M10 | Accuracy and settings | The thresholds in force, editable\n"
+        "BR-01 Auto-close | Score ≥ 85 (auto-close threshold) | Close the newer ticket\n"
+        "BR-10: A cluster of 5 or more duplicates within 24 hours is flagged.\n"
+        "FR-09 | Scan all open tickets and apply BR-01 to BR-06 | Must | M4\n"
+        "AC-8 (M10) Given the thresholds, when changed from 85 to 80, then the screen shows the effect.\n"
+        "NFR-01 | A duplicate scan of 1,000 open tickets completes in under 10 seconds.\n"
+        "Our engineers in M14 say the router shows a red light.")}]
+    defined = req.defined_ids(evidence)
+    ids = [d["id"] for d in defined]
+    expect("the ids the brief defines are found, a mid-sentence mention is not",
+           ids == ["M1", "M10", "BR-01", "BR-10", "FR-09", "AC-8", "NFR-01"], str(ids))
+    expect("a figure keeps its thousands and loses its section reference",
+           req.numbers_in("1,000 tickets in under 10 seconds (see 4.2)") == ["1000", "10"],
+           str(req.numbers_in("1,000 tickets in under 10 seconds (see 4.2)")))
+    brief = evidence[0]["content"] + "\nThe score weights are 55 / 20 / 15 / 10."
+    modelled = [{"id": "M1", "kind": "capability", "title": "Command Center", "statement": "", "numbers": []},
+                {"id": "BR-01", "kind": "rule", "title": "Auto-close", "statement": "", "numbers": ["85", "99"]},
+                {"id": "REQ-1", "kind": "rule", "title": "Confidence score", "statement": "weighted sum",
+                 "numbers": ["55", "20", "15", "10"]}]
+    inv = req.merge(defined, modelled, brief)
+    by = {i["id"]: i for i in inv}
+    expect("an id the model left out is put back, classified like its family",
+           by.get("M10", {}).get("kind") == "capability" and by.get("FR-09", {}).get("kind") == "functional",
+           str({k: v["kind"] for k, v in by.items()}))
+    expect("a number the brief never states is dropped", by["BR-01"]["numbers"] == ["85"], str(by["BR-01"]["numbers"]))
+    expect("an unnumbered rule the model found is kept", "REQ-1" in by)
+
+    backlog = {"epics": [{"id": "E1", "title": "Duplicate detection", "outcome": "find duplicates"},
+                         {"id": "E4", "title": "Audit & Accuracy Monitoring", "outcome": "accuracy and settings"}],
+               "stories": [{"id": "S1", "epic_id": "E1", "title": "Command Center", "covers": ["M1"],
+                            "acceptance_criteria": ["a", "b"]},
+                           {"id": "S2", "epic_id": "E1", "title": "Scan", "covers": ["FR-09"],
+                            "acceptance_criteria": ["a", "b"]}],
+               "not_covered": [{"id": "M10", "reason": "later"}, {"id": "AC-8", "reason": ""}]}
+    cov = req.backlog_coverage(inv, backlog, domain_layer=True)
+    expect("a screen the brief names with no story is missing, whatever reason is given",
+           "M10" in cov["missing"], str(cov["missing"]))
+    expect("an acceptance criterion without a story or a reason is missing", "AC-8" in cov["missing"])
+    expect("rules are left to the domain layer when the pack has one", "BR-01" not in cov["missing"])
+    expect("without a domain layer a rule needs a story",
+           "BR-01" in req.backlog_coverage(inv, backlog, domain_layer=False)["missing"])
+    added = merge_additions(backlog, {"stories": [
+        {"id": "S1", "epic_id": "E9", "title": "Accuracy and settings screen", "narrative": "accuracy thresholds",
+         "covers": ["M10", "AC-8"], "acceptance_criteria": ["a", "b"], "depends_on": ["S1", "S77"]},
+        {"id": "S2", "epic_id": "E1", "title": "Thin", "covers": ["x"], "acceptance_criteria": ["a"]}]})
+    new = next(s for s in backlog["stories"] if s["id"] == added[0])
+    expect("added stories get fresh ids, a known epic and only known dependencies; a thin one is refused",
+           added == ["S3"] and new["epic_id"] == "E4" and new["depends_on"] == ["S1"], str((added, new)))
+    cov = req.backlog_coverage(inv, backlog, domain_layer=True)
+    expect("once a story delivers them, the screen and its criterion are covered",
+           "M10" not in cov["missing"] and "AC-8" not in cov["missing"], str(cov["missing"]))
+
+    rules_py = ('AUTO_CLOSE = 85\n@rule("BR-01", "Auto-close")\ndef auto(s): return s >= AUTO_CLOSE\n'
+                'def keywords(): return "outage, down"  # Simplified for MVP\n')
+    tests = ("def test_br_01_closes_at_threshold():\n    assert rules.auto(rules.AUTO_CLOSE)\n"
+             "def test_br_10_suggests():\n    assert rules.suggest(5, 24)\n")
+    gaps = req.domain_gaps(inv, ["BR-01", "BR-10"], tests, {"backend/app/domain/rules.py": rules_py})
+    text = "\n".join(gaps)
+    expect("a rule the brief states that the domain never registers is named", "REQ-1" in text, text[:300])
+    expect("a test that reads the rule's constant instead of the brief's number is caught",
+           "BR-01's tests never state the brief's number(s) 85" in text, text[:300])
+    expect("tests that state the brief's numbers pass the check", "BR-10's tests" not in text)
+    expect("a rule that admits a simplification is refused", "Simplified for MVP" in text)
+    built = {"S1": "green", "S2": "red"}
+    d = req.delivery(inv, backlog, built, domain_layer=True)
+    expect("delivery names what no green story delivers, and why",
+           {g["id"] for g in d["not_delivered"]} >= {"FR-09", "M10"} and "M1" in d["delivered"]
+           and any("S2 red" in g["why"] for g in d["not_delivered"]), str(d)[:300])
+    from .graph.nodes import acceptance
+    from .workspace import samples
+    expect("an acceptance check file names its story",
+           acceptance._story_of("acceptance/test_s12.py") == "S12" and acceptance._file("S4") == "acceptance/test_s4.py")
+    tmp_run = "selftest-allowed-values"
+    root = repo.workspace_path(tmp_run)
+    (root / "db").mkdir(parents=True, exist_ok=True)
+    (root / "db" / "init.sql").write_text(
+        "CREATE TABLE IF NOT EXISTS ticket (\n  id SERIAL PRIMARY KEY,\n"
+        "  status VARCHAR(40) NOT NULL DEFAULT 'New',  -- New|Open|Duplicate\n"
+        "  product_area VARCHAR(40) NOT NULL DEFAULT '', -- Broadband|TV|Mobile\n  subject TEXT -- free text\n);\n"
+        "INSERT INTO ticket (status) VALUES ('New'); -- a|b\n", encoding="utf-8")
+    listed = samples.allowed_values(tmp_run)
+    expect("allowed values come from init.sql's comments, per table and column, and nothing else",
+           "ticket.status: New|Open|Duplicate" in listed and "ticket.product_area: Broadband|TV|Mobile" in listed
+           and "subject" not in listed and "a|b" not in listed, listed)
+    shutil.rmtree(root, ignore_errors=True)
+    from jsonschema import Draft202012Validator
+    Draft202012Validator(schemas.BACKLOG).validate({**backlog, "stories": [
+        {**s, "narrative": s.get("narrative", "x"), "value": 3, "estimate": 3, "risk": "low"} for s in backlog["stories"]]})
+    expect("a backlog with covers and not_covered validates", True)
+
+
 async def test_llm_client(fake: FakeOllama, rid: str) -> None:
     print("\n[2] native Ollama client")
     s = settings()
@@ -1051,6 +1151,7 @@ async def main() -> int:
     git_id = _run_row("selftest git")
     try:
         await test_schemas()
+        await test_requirements()
         await test_llm_client(fake, rid)
         await test_tracing(rid)
         await test_engine(engine_ids)

@@ -34,8 +34,10 @@ You write exactly five files, each complete.
 
 Find every rule the brief states: thresholds and limits, scores and weights, eligibility,
 validations, time windows, segregation of duties, what happens automatically and when it
-must not. Use the brief's own ids (`BR-01`) when it has them; otherwise number them `R-01`,
-`R-02`… in the order the brief gives them. A rule the brief only implies is not a rule.
+must not. You are given RULES THE BRIEF STATES, each with its id: register every one under
+exactly that id (`BR-01`, or `REQ-4` for a rule the brief did not number), and implement it
+as the brief states it. A formula keeps every weight the brief gives; nothing is
+"simplified for the MVP". A rule the brief only implies is not a rule.
 
 - One function per rule, decorated `@rule("BR-04", "One-line title", source="BRD §6.2", kind="decision")`.
   `source` says where the brief states it (a section, or the evidence id you were given).
@@ -89,7 +91,10 @@ stories' criteria need, not every conceivable one.
 ## 5. `tests/test_rules.py` — proof
 
 At least two tests per rule: both sides of every threshold, a violation's rule id, a
-score's weights. Name EVERY test after its rule, `test_<rule id in lower case with _>_…`
+score's weights. Write the brief's numbers in the tests as literals
+(`assert rules.reaches_auto_close(85)` and `not rules.reaches_auto_close(84.9)`), never as the
+rule's own constant: a test that reads `rules.AUTO_CLOSE` passes whatever the constant says.
+Every number listed for a rule appears in that rule's tests. Name EVERY test after its rule, `test_<rule id in lower case with _>_…`
 (`test_br_04_p1_never_auto_closed`): that is how the catalogue maps tests to rules, and a
 test named any other way counts for no rule. Build records with `types.SimpleNamespace`;
 no client, no database, no network. Import `from app.domain import rules` and

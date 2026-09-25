@@ -57,12 +57,16 @@ class Agent:
 
 
 ANALYST = Agent("Analyst", "reasoning", "analyst.md", 0.3, schemas.ANALYSIS, "analyst")
+# The same Analyst, listing what the brief requires so the backlog and the rules can be checked against it.
+REQUIREMENTS = Agent("Analyst", "reasoning", "requirements.md", 0.1, schemas.REQUIREMENTS, "analyst")
 # The Product Owner writes two artifacts; each call names its schema.
 PRODUCT_OWNER = Agent("Product Owner", "reasoning", "product_owner.md", 0.3, None, "product_owner")
 ARCHITECT = Agent("Architect", "reasoning", "architect.md", 0.2, schemas.ARCHITECTURE, "architect")
 PLANNER = Agent("Planner", "fast", "planner.md", 0.1, schemas.SPRINT, "planner")
 DEVELOPER = Agent("Developer", "coding", "developer.md+ux_playbook.md", 0.1, schemas.IMPLEMENTATION, "developer")
 TESTER = Agent("Tester", "coding", "tester.md", 0.1, schemas.TESTS, "tester")
+# Checks each story's acceptance criteria against the deployed app, through its API.
+ACCEPTANCE = Agent("Acceptance Tester", "coding", "acceptance.md", 0.1, schemas.TESTS, "tester")
 # The foundation stage: the whole data model, then a generator for the demonstration data.
 FOUNDATION = Agent("Foundation Developer", "coding", "foundation.md", 0.1, schemas.IMPLEMENTATION, "developer")
 # The domain stage (enterprise pack): policy, rules, workflows and services, once, with rule tests.

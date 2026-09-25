@@ -15,6 +15,7 @@ from ...events import emit
 from ...workspace import browser_check, codemap
 from ...workspace import deployment as runtime
 from ..state import RunState
+from . import acceptance
 from ..store import save_artifact, set_stage
 
 
@@ -71,6 +72,15 @@ async def deploy_increment(state: RunState) -> RunState:
                                + "; ".join(problems)[:600],
                        agent="release", stage="deploy", level="error",
                        data={"verification": verification})
+        if acceptance.enabled():
+            try:
+                async with telemetry.span("acceptance", "criteria against the running app") as sp:
+                    record["acceptance"] = await acceptance.check_acceptance(state, run_id)
+                    sp.set(passed=record["acceptance"].get("passed"), total=record["acceptance"].get("total"))
+            except Exception as exc:  # noqa: BLE001 — the checks inform the verdict; they never stop a deploy
+                record["acceptance"] = {"ran": False, "reason": f"{type(exc).__name__}: {exc}"[:400]}
+                await emit(run_id, f"The acceptance checks could not run: {record['acceptance']['reason']}",
+                           agent="tester", stage="deploy", level="warn")
     elif outcome.status == "not_applicable":
         await emit(run_id, outcome.detail, agent="release", stage="deploy", level="warn")
     else:

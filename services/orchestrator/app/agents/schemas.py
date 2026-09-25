@@ -71,17 +71,36 @@ VISION = _obj({
 }, ["product_name", "problem_statement", "target_users", "value_proposition",
     "success_metrics", "in_scope", "explicitly_out_of_scope"])
 
+_STORY = _obj({
+    "id": _str(), "epic_id": _str(), "title": _str(), "narrative": _str(),
+    "acceptance_criteria": _strs(), "evidence_ids": _strs(),
+    "covers": _strs("the ids of the brief's requirements this story delivers"),
+    "value": _INT, "estimate": _INT,
+    "risk": {"type": "string", "enum": ["high", "medium", "low"]},
+    "depends_on": _strs(),
+}, ["id", "epic_id", "title", "narrative", "acceptance_criteria", "covers", "value", "estimate", "risk"])
+_NOT_COVERED = _arr(_obj({"id": _str(), "reason": _str()}))
+
 BACKLOG = _obj({
     "epics": _arr(_obj({"id": _str(), "title": _str(), "outcome": _str(), "evidence_ids": _strs()},
                        ["id", "title", "outcome"])),
-    "stories": _arr(_obj({
-        "id": _str(), "epic_id": _str(), "title": _str(), "narrative": _str(),
-        "acceptance_criteria": _strs(), "evidence_ids": _strs(),
-        "value": _INT, "estimate": _INT,
-        "risk": {"type": "string", "enum": ["high", "medium", "low"]},
-        "depends_on": _strs(),
-    }, ["id", "epic_id", "title", "narrative", "acceptance_criteria", "value", "estimate", "risk"])),
-})
+    "stories": _arr(_STORY),
+    "not_covered": _NOT_COVERED,
+}, ["epics", "stories", "not_covered"])
+
+# Stories for requirements the backlog left without one; merged into it by the platform.
+BACKLOG_ADDITIONS = _obj({"stories": _arr(_STORY), "not_covered": _NOT_COVERED})
+
+# ---- requirements ----------------------------------------------------------------
+
+REQUIREMENTS = _obj({"items": _arr(_obj({
+    "id": _str("the brief's own id, or REQ-n for one it did not number"),
+    "kind": {"type": "string", "enum": ["capability", "functional", "acceptance", "rule", "compliance", "role",
+                                        "workflow", "integration", "notification", "nonfunctional", "data", "other"]},
+    "title": _str(), "statement": _str(),
+    "numbers": _strs("each number the brief fixes for it: thresholds, weights, limits, durations, counts"),
+    "evidence_id": _str(),
+}))})
 
 # ---- design ----------------------------------------------------------------------
 
@@ -143,6 +162,16 @@ TESTS = _obj({
     "extra_dependencies": _strs(),
 }, ["files", "criteria_covered", "criteria_not_covered"])
 
+# The Acceptance Tester's verdict on checks that failed against the running app.
+ACCEPTANCE_TRIAGE = _obj({
+    "files": _FILES,
+    "verdicts": _arr(_obj({
+        "test": _str(),
+        "verdict": {"type": "string", "enum": ["check_wrong", "app_wrong"]},
+        "finding": _str("for app_wrong: what the app does and what the criterion requires"),
+    }, ["test", "verdict", "finding"])),
+}, ["files", "verdicts"])
+
 # ---- ship ------------------------------------------------------------------------
 
 _DIM = _obj({"score": _INT, "notes": _str()}, ["score"])
@@ -181,7 +210,9 @@ LESSON = _obj({
 }, ["lesson"])
 
 ALL: dict[str, dict[str, Any]] = {
-    "analysis": ANALYSIS, "vision": VISION, "backlog": BACKLOG, "architecture": ARCHITECTURE,
-    "sprint": SPRINT, "implementation": IMPLEMENTATION, "tests": TESTS, "review": REVIEW,
+    "analysis": ANALYSIS, "vision": VISION, "backlog": BACKLOG, "backlog_additions": BACKLOG_ADDITIONS,
+    "requirements": REQUIREMENTS, "architecture": ARCHITECTURE,
+    "sprint": SPRINT, "implementation": IMPLEMENTATION, "tests": TESTS,
+    "acceptance_triage": ACCEPTANCE_TRIAGE, "review": REVIEW,
     "release_notes": RELEASE_NOTES, "terms": TERMS, "lesson": LESSON,
 }

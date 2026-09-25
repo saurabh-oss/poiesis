@@ -13,6 +13,7 @@ API smoke run, the frontend check), `seeding.py` (demonstration data), `browser_
 
 | # | Layer | Runs | Catches | Time |
 |---|---|---|---|---|
+| 0 | Requirements coverage | at the backlog, before any design | a screen, capability, functional requirement or acceptance criterion of the brief with no story | seconds, plus a focused model call per gap |
 | 1 | Compile | every story | Python that does not parse, with the line | < 1 s |
 | 2 | Static checks, backend | every story | the problems in "Backend" below | < 1 s |
 | 3 | Static checks, frontend | every story | the problems in "Screens" below | < 1 s |
@@ -21,6 +22,7 @@ API smoke run, the frontend check), `seeding.py` (demonstration data), `browser_
 | 6 | pytest in a sandbox | default pack only | failing tests; tests that could never fail (see "Tests") | minutes |
 | 7 | API smoke run | MVP pack, after all stories | any GET that errors against a throwaway Postgres loaded from `init.sql` | ~1 min |
 | 8 | Browser check | after deploy, every round | a screen that shows an error, shows nothing, shows seeded data nowhere, or breaks when used | ~1 min |
+| 8b | Acceptance checks | after deploy, every round (`build.acceptance`) | a criterion that does not hold on the running app, called through its API | minutes |
 | 9 | Review | after deploy | criteria not met, unsafe code, missing controls; a weighted score and blockers | minutes |
 
 A finding from layers 1–6 goes back to the Developer as a repair instruction naming the file
@@ -97,6 +99,40 @@ loaded from the app's `init.sql`), with `1` substituted for path parameters:
 Failures are grouped by the file that owns the path; each owning story gets one repair and
 the run is smoked again.
 
+## Requirements coverage
+
+The enterprise DupeGuard run built nine screens for a brief that named ten: its backlog had no
+story for "Accuracy and settings" (M10), and nothing checked the backlog against the brief.
+Now, before the backlog is written, the platform lists what the brief requires
+(`app/requirements.py`). Every id the brief defines — a line or table row that starts with
+`M1`, `BR-04`, `FR-12`, `AC-3` — is found without a model, so none can be dropped; the
+Analyst classifies them and adds what the brief did not number, such as the confidence score
+of section 6.2 and its weights. Each item keeps the numbers the brief fixes for it.
+
+Every story lists the ids it delivers in `covers`. A screen, capability, functional
+requirement or acceptance criterion with no story is sent back to the Product Owner, which
+writes only the missing stories (up to two focused rounds); a requirement may be left out
+only with the brief's own reason, and a screen the brief names never. The backlog gate shows
+the coverage, and the release gate names every requirement no green story delivered.
+
+## Acceptance checks
+
+The browser check proves a screen opens and shows data, not that it shows the right data. With
+`build.acceptance: true` (the enterprise pack), after the browser check the Acceptance Tester
+writes `acceptance/test_<story>.py` for each built story from its criteria, the brief's
+requirements it delivers and VERIFIED ROUTES; it never sees the implementation. The checks run
+in the sandbox on the app's network, signed in as the platform's service account or as a
+persona. A failure is triaged once by the same agent: a check that misread the API is
+corrected, and what the app gets wrong becomes a blocking finding against the story, which a
+rework round rebuilds. While `build.acceptance_blocking` is off (the default), those findings
+are evidence for the Reviewer and the release gate rather than blockers: in the first trial the
+local model's triage blamed the app for two checks that had filtered on a field the response does
+not have, and a false blocker would send correct code into rework to satisfy a wrong check. The
+checks are grounded in what the running app actually answers: before they are written, every GET
+it serves is called once and its shape recorded, with the allowed values and required columns of
+each table. The checks stay in the repository and run again every round. The
+database is reset afterwards, so the stakeholder opens the app on its demonstration data.
+
 ## The browser check
 
 After every deploy a headless Chromium on the app's own network opens every screen and:
@@ -115,12 +151,17 @@ The Reviewer is shown what each screen displayed, not only the code.
 
 ## Enterprise applications
 
-With the `enterprise` pack ([ENTERPRISE.md](ENTERPRISE.md)) the layers change in four places.
+With the `enterprise` pack ([ENTERPRISE.md](ENTERPRISE.md)) the layers change in five places; the fifth is the acceptance checks above.
 
 - **The domain stage** runs before any story: the domain must import, agree with the data model
   (roles, tables, workflow states and fields, a persona for every role, no worked example left)
   and pass its rule tests, with every failure handed back up to three times. The results are
-  baked into the app as `domain/rule_results.json`.
+  baked into the app as `domain/rule_results.json`. It is also checked against the brief: every
+  rule of the requirements inventory registered under its id, every number the brief fixes for a
+  rule written as a literal in that rule's tests (a test that reads the rule's own constant passes
+  whatever the constant says), and no line that admits a shortcut ("simplified for MVP",
+  "placeholder", "hard-coded"). DupeGuard's generated domain had all three problems and passed
+  its thirty tests.
 - **Two static checks** (`enterprise_issues` in `checks.py`) on a story's routers and on
   `domain/services.py`: a call out with `requests`, `httpx`, `urllib`, `smtplib` or `aiohttp`
   ("use a connector"), and a write to a column a workflow governs ("use `transition()`"). The

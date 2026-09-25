@@ -15,6 +15,7 @@ class RunState(TypedDict, total=False):
 
     vision: dict[str, Any]
     backlog: dict[str, Any]
+    requirements: list[dict[str, Any]]  # what the brief requires, with ids and numbers (requirements.py)
     portfolio: dict[str, Any]
     architecture: dict[str, Any]
     sprint: dict[str, Any]

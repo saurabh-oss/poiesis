@@ -26,6 +26,7 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from ... import requirements as req
 from ...agents.base import DOMAIN
 from ...config import pack
 from ...events import emit
@@ -163,6 +164,7 @@ def _prompt(state: RunState, run_id: str) -> str:
         (f"PRODUCT: {vision.get('product_name', '')}\n{vision.get('value_proposition', '')}\n\n" if vision else "")
         + "BRIEF (find every rule, role, lifecycle, approval and SLA in it):\n"
         + str(state.get("brief") or "")[:26000]
+        + _required(state)
         + f"\n\nEVERY STORY AND ITS ACCEPTANCE CRITERIA:\n{_stories(state)}\n"
         + f"\nbackend/app/models.py (table names and columns, exactly):\n{models[:9000]}\n"
         + f"\ndb/init.sql tables (the comments list each status column's allowed values):\n{sql[:7000]}\n"
@@ -171,6 +173,31 @@ def _prompt(state: RunState, run_id: str) -> str:
         + _current(run_id)[:12000]
         + "\n\nWrite the five files."
     )
+
+
+def _required(state: RunState) -> str:
+    """The brief's rules, roles, lifecycles and integrations, from the requirements inventory."""
+    inv = state.get("requirements") or []
+    rules = [it for it in inv if it["kind"] in req.RULE_KINDS]
+    other = [it for it in inv if it["kind"] in ("role", "workflow", "integration", "notification")]
+    out = ""
+    if rules:
+        out += ("\n\nRULES THE BRIEF STATES — register each with @rule under exactly this id (declare() it when a "
+                "workflow or service implements it), implement it as written with no simplification, and state "
+                "every listed number as a literal in its tests:\n" + req.describe(rules, limit=80))
+    if other:
+        out += "\n\nROLES, LIFECYCLES, INTEGRATIONS AND NOTIFICATIONS THE BRIEF STATES:\n" + req.describe(other, limit=40)
+    return out
+
+
+def _brief_gaps(state: RunState, run_id: str, report: dict[str, Any]) -> list[str]:
+    """What the domain leaves out of the brief: rules missing, numbers untested, shortcuts admitted."""
+    inv = state.get("requirements") or []
+    if not inv or report.get("error"):
+        return []
+    files = {rel: repo.read(run_id, rel, 400000) for rel in FILES if rel.startswith("backend/")}
+    return req.domain_gaps(inv, [r.get("id", "") for r in report.get("rules", [])],
+                           repo.read(run_id, "tests/test_rules.py", 400000), files)
 
 
 def _schema(root: Any) -> str:
@@ -339,7 +366,7 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
             repo.write_files(run_id, files)
         report, cases, tail = await _check(run_id)
         results = results_by_rule(report.get("rules", []), cases)
-        problems = _feedback(report, cases, results, tail)
+        problems = _feedback(report, cases, results, tail) + _brief_gaps(state, run_id, report)
         rules_n, flows_n = len(report.get("rules", [])), len(report.get("workflows", []))
         score = _score(report, cases, results)
         if best is None or score > best["score"]:

@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ... import requirements as req
 from ...agents import schemas
 from ...agents.base import RELEASE, REVIEWER
 from ...kg import vectors
@@ -347,6 +348,14 @@ async def review(state: RunState) -> RunState:
         state = {**state, "deployment": {**dep, "verification": v}}
     live = live_check(state)
     live_lines = "\n".join(f"- {f['finding']}" for f in live["findings"][:8])
+    acc = (state.get("deployment") or {}).get("acceptance") or {}
+    acc_text = (f"ACCEPTANCE CHECKS (the platform called the running app's API for each story's criteria): "
+                f"{acc.get('passed')} of {acc.get('total')} pass"
+                + (f"; checks that could not be made to work (nothing proven either way): "
+                   f"{', '.join(t for ts in (acc.get('unproven') or {}).values() for t in ts)}"
+                   if acc.get("unproven") else "") + ".\n"
+                + "\n".join(f"- {f['finding']}" for f in (acc.get("findings") or [])[:10]) + "\n\n"
+                if acc.get("ran") else "")
     # What a first-time visitor actually reads. Without it the Reviewer scored an
     # "explain how LLMs work" app 77/100 when its screens were blank forms asking
     # the visitor to type the explanation themselves.
@@ -379,6 +388,7 @@ async def review(state: RunState) -> RunState:
         f"TEST REPORT:\n{_test_summary(state)}\n\n"
         f"LIVE CHECK (the platform deployed this increment and opened every screen in a "
         f"real browser):\n{live['summary']}\n{live_lines}\n\n"
+        + acc_text
         + (f"WHAT EACH SCREEN SHOWS to a first-time visitor on a fresh deployment (its "
            f"visible text):\n{shows}\n\n" if shows else "")
         +
@@ -388,7 +398,8 @@ async def review(state: RunState) -> RunState:
     score = weighted_score(verdict.get("dimensions", {}))
     threshold = pack().get("review", {}).get("ship_threshold", 70)
     # The live findings are facts, not opinions: they go in front of the model's.
-    verdict["blocking_findings"] = live["findings"] + list(verdict.get("blocking_findings") or [])
+    verdict["blocking_findings"] = (live["findings"] + list(acc.get("findings") or [])
+                                    + list(verdict.get("blocking_findings") or []))
     blockers = [f for f in verdict["blocking_findings"] if f.get("severity") == "blocker"]
     # A red story is a failed definition of done ("all acceptance criteria have a
     # passing test"), and that has to be arithmetic too.
@@ -408,6 +419,13 @@ async def review(state: RunState) -> RunState:
     verdict["threshold"] = threshold
     verdict["failing_stories"] = failing
     verdict["live"] = {k: live[k] for k in ("working", "summary", "screens")}
+    if acc.get("ran"):
+        verdict["acceptance"] = {k: acc.get(k) for k in ("total", "passed", "failing")}
+    if state.get("requirements"):
+        built = {str(s.get("story_id")): str(s.get("status"))
+                 for s in (state.get("test_report") or {}).get("stories", [])}
+        verdict["requirements"] = req.delivery(state["requirements"], state.get("backlog") or {}, built,
+                                               bool(pack().get("build", {}).get("domain", False)))
     await save_artifact(run_id, "review", "review", verdict)
     await emit(
         run_id,
@@ -450,6 +468,7 @@ async def release(state: RunState) -> RunState:
     unhealthy = _unhealthy_stories(state) if not releasable else set()
     can_ship_partial = bool(unhealthy) and unhealthy < all_stories
 
+    gaps = (rv.get("requirements") or {}).get("not_delivered") or []
     if url and working:
         live_text = f" It is running at {url} and every screen opened cleanly — try it before you decide."
     elif url:
@@ -481,6 +500,9 @@ async def release(state: RunState) -> RunState:
         options.append({"value": "rebuild", "label": "Send it back for another build round"})
     options.append({"value": "hold", "label": "Hold — do not release"})
 
+    if gaps:
+        live_text += (f" {len(gaps)} requirement(s) of the brief are not delivered: "
+                      + ", ".join(f"{g['id']} ({g['why']})" for g in gaps[:8]) + ".")
     response = await raise_gate(
         run_id=run_id, kind="approve_release", stage="release",
         question=f"The Reviewer scored this {rv.get('weighted_score')}/100 and recommends "
