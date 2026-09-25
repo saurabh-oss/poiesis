@@ -77,7 +77,8 @@ export default function EnterprisePage() {
   const groups = data ? Array.from(new Set(data.connectors.map((c) => c.category))) : [];
   return (
     <div className="space-y-8">
-      <section className="enter relative overflow-hidden rounded-2xl border border-rule bg-gradient-to-br from-[#0A2D6B] via-[#0265DC] to-[#5258E4] p-7 text-white shadow-spectrum">
+      {/* A div, not a section: the cards' cursor spotlight (globals.css) would replace its gradient. */}
+      <div className="enter relative overflow-hidden rounded-2xl border border-rule bg-gradient-to-br from-[#0A2D6B] via-[#0265DC] to-[#5258E4] p-7 text-white shadow-spectrum">
         <span aria-hidden className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
         <p className="text-[12px] font-semibold uppercase tracking-[.12em] text-white/70">Enterprise pack</p>
         <h1 className="mt-1 max-w-3xl text-[28px] font-semibold leading-tight">Applications an organisation can run its work on</h1>
@@ -94,7 +95,7 @@ export default function EnterprisePage() {
             ))}
           </div>
         )}
-      </section>
+      </div>
 
       {error && <p className="rounded-lg border border-[#FFD0CC] bg-[#FFEBE9] p-3 text-[13px] text-[#D31510]">{error}</p>}
       {!data && !error && <p className="text-graphite">Loading…</p>}

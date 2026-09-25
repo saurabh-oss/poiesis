@@ -274,7 +274,7 @@ class Connector:
             "description": self.description, "vendor_url": self.vendor_url,
             "mode": self.mode, "missing": self.missing(),
             "settings": [{"env": s.env, "label": s.label, "required": s.required, "secret": s.secret,
-                          "set": bool(self.setting(s.env)),
+                          "set": bool(self.env(s.env)),  # given explicitly, not a default
                           "value": ("•••" if s.secret else self.setting(s.env)) if self.setting(s.env) else "",
                           "help": s.help} for s in self.settings],
             "operations": self.operations,
