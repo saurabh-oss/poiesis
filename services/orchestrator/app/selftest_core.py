@@ -983,6 +983,10 @@ async def test_check_rules() -> None:
     expect("a two-value column may split 80/20 (48 Residential, 12 Business)", not lopsided((48, 12, 0)))
     expect("a two-value column split 95/5 is still lopsided", lopsided((57, 3, 0)))
     expect("a three-value column over 80% one value is still lopsided", lopsided((51, 5, 4)))
+    expect("a query string built elsewhere and appended is not part of the path",
+           checks._normalise("/api/audit-entries${params}") == "/api/audit-entries"
+           and checks._normalise("/tickets/${id}/duplicates") == "/api/tickets/x/duplicates"
+           and checks._normalise("/tickets/${id}") == "/api/tickets/x", checks._normalise("/api/audit-entries${params}"))
 
 
 async def test_plane() -> None:

@@ -163,6 +163,10 @@ def _route_pattern(route: str) -> re.Pattern[str]:
 
 def _normalise(path: str) -> str:
     path = path.split("?")[0].strip()
+    # `/audit-entries${params}`: an expression glued to the end of a segment is a suffix
+    # built elsewhere (a query string), not part of the path. Read as "/audit-entriesx" it
+    # sent a correct audit screen round three repairs in the enterprise DupeGuard run.
+    path = re.sub(r"(?<=[^/])(?:\$\{[^}]*\})+$", "", path)
     path = re.sub(r"\$\{[^}]*\}", "x", path)
     if not path.startswith("/"):
         path = "/" + path
