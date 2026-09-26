@@ -242,6 +242,9 @@ async def test_requirements() -> None:
            "M10" in cov["missing"], str(cov["missing"]))
     expect("an acceptance criterion without a story or a reason is missing", "AC-8" in cov["missing"])
     expect("rules are left to the domain layer when the pack has one", "BR-01" not in cov["missing"])
+    superseded = [{**i, "superseded_by": "the director's brief asks for sign-in"} if i["id"] == "AC-8" else i for i in inv]
+    expect("a requirement a later instruction replaced needs no story",
+           "AC-8" not in req.backlog_coverage(superseded, backlog, domain_layer=True)["missing"])
     expect("without a domain layer a rule needs a story",
            "BR-01" in req.backlog_coverage(inv, backlog, domain_layer=False)["missing"])
     added = merge_additions(backlog, {"stories": [
@@ -292,6 +295,29 @@ async def test_requirements() -> None:
     Draft202012Validator(schemas.BACKLOG).validate({**backlog, "stories": [
         {**s, "narrative": s.get("narrative", "x"), "value": 3, "estimate": 3, "risk": "low"} for s in backlog["stories"]]})
     expect("a backlog with covers and not_covered validates", True)
+
+
+async def test_seed_loops() -> None:
+    """DupeGuard's rerun: ticket → known issue → cluster → ticket, a loop no table order can satisfy."""
+    print("\n[1c] demonstration data over tables that refer to each other in a loop")
+    from .workspace.seedspec import expand_spec
+    tables = {"ticket": {"subject": True, "known_issue_id": False}, "cluster": {"original_ticket_id": True},
+              "known_issue": {"title": True, "cluster_id": False}}
+    spec = {"tables": [
+        {"table": "ticket", "count": 40, "columns": {
+            "subject": {"kind": "catalogue", "values": ["a", "b", "c"]},
+            "known_issue_id": {"kind": "ref", "table": "known_issue", "null_share": 0.5}}},
+        {"table": "cluster", "count": 2, "columns": {"original_ticket_id": {"kind": "ref", "table": "ticket"}}},
+        {"table": "known_issue", "count": 2, "columns": {
+            "title": {"kind": "catalogue", "values": ["x", "y"]}, "cluster_id": {"kind": "ref", "table": "cluster"}}}]}
+    rows, issues, _ = expand_spec(spec, tables)
+    ids = [r["known_issue_id"] for r in rows["ticket"]]
+    expect("a nullable reference to a later table is filled once every table has rows",
+           not issues and {x for x in ids if x} <= {1, 2} and any(ids) and not all(ids), str((issues, ids))[:300])
+    tables["ticket"]["known_issue_id"] = True
+    _, issues, _ = expand_spec(spec, tables)
+    expect("a NOT NULL reference to a later table still asks for the other order",
+           any("earlier in the list" in i for i in issues), str(issues))
 
 
 async def test_llm_client(fake: FakeOllama, rid: str) -> None:
@@ -1152,6 +1178,7 @@ async def main() -> int:
     try:
         await test_schemas()
         await test_requirements()
+        await test_seed_loops()
         await test_llm_client(fake, rid)
         await test_tracing(rid)
         await test_engine(engine_ids)

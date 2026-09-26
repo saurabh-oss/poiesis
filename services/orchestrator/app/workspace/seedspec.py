@@ -37,7 +37,8 @@ on the words only a person can write. Nothing here can raise a SyntaxError.
 A row starts from one of the table's `records` (each used at least once, then
 reused with fresh generated columns), and every other column comes from its
 spec. Ids are 1..N in order; a `ref` is a 1-based id into a table generated
-earlier in the list.
+earlier in the list, or, for a nullable column, into a later one (tables that refer
+to each other in a loop): those are filled once every table has its rows.
 """
 from __future__ import annotations
 
@@ -129,7 +130,7 @@ customers, other dates), so 40 records make 150 distinct-looking rows. Near-dupl
 `columns`: how every column NOT covered by the records is filled. One spec per column, `kind`:
   catalogue     {"kind":"catalogue","values":["Billing","Mobile App"],"unique":false}   pick from the list ("unique": in order, no repeats)
   choices       {"kind":"choices","choices":{"open":4,"triaged":5,"resolved":3}}         weighted pick — the weights are the shape of the data
-  ref           {"kind":"ref","table":"agent","null_share":0.4}                          a 1-based id of a row in an earlier table; None on a share
+  ref           {"kind":"ref","table":"agent","null_share":0.4}                          a 1-based id of a row in an earlier table (a nullable column may point at a later one); None on a share
   lookup        {"kind":"lookup","via":"customer_id","field":"name"}                     copy a field from the row a ref column points at
   time          {"kind":"time","days_back":30}                                           a timestamp in the last N days, spread evenly
                 {"kind":"time","after":"arrival_time","hours_min":0.2,"hours_max":8}     a timestamp after another column of the same row
@@ -204,8 +205,20 @@ class _Expander:
         self.derived: set[tuple[str, str]] = set()
 
     def run(self) -> tuple[dict[str, list[dict[str, Any]]], list[str], set[tuple[str, str]]]:
-        for entry in self.spec.get("tables") or []:
+        entries = self.spec.get("tables") or []
+        self._order = [str(e.get("table") or "").lower() for e in entries if isinstance(e, dict)]
+        self._deferred: list[tuple[str, int, str, str, Any]] = []
+        for entry in entries:
             self._table(entry)
+        for table, idx, col, target, _share in self._deferred:
+            rows, n = self.rows.get(table) or [], len(self.rows.get(target) or [])
+            if not (0 <= idx < len(rows)):
+                continue
+            # `null_share` was already drawn when the row was built; only non-null ones were deferred.
+            if n == 0:
+                self.issues.append(f"{table}.{col}: refers to `{target}`, which has no rows")
+            else:
+                rows[idx][col] = self.rng.randint(1, n)
         return self.rows, list(dict.fromkeys(self.issues)), self.derived
 
     def count_of(self, table: str) -> int:
@@ -340,6 +353,13 @@ class _Expander:
                 return True, (rng.randint(1, n) if n else None)
             n = len(self.rows.get(target) or [])
             if n == 0:
+                later = target in self._order[self._order.index(table) + 1:] if table in self._order else False
+                if later and not (self.tables.get(table) or {}).get(col, False):
+                    # Tables that refer to each other in a loop (a ticket's known issue, the known
+                    # issue's cluster, the cluster's original ticket) cannot all come first. A
+                    # nullable reference to a later table is filled once every table has rows.
+                    self._deferred.append((table, row_no - 1, col, target, spec.get("null_share")))
+                    return True, None
                 self.issues.append(f"{table}.{col}: refers to `{target}`, which has no rows yet — put that "
                                    "table earlier in the list")
                 return True, None

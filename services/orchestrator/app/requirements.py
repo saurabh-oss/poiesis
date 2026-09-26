@@ -115,7 +115,8 @@ def merge(defined: list[dict[str, Any]], modelled: list[dict[str, Any]], brief: 
                 and re.search(rf"(?<![\d.]){re.escape(n)}(?![\d])", brief)]
         items[rid] = {"id": rid, "kind": kind, "title": str(raw.get("title") or "").strip()[:160],
                       "statement": statement[:600], "numbers": nums,
-                      "evidence_id": str(raw.get("evidence_id") or ""), "source": "brief" if rid else ""}
+                      "evidence_id": str(raw.get("evidence_id") or ""), "source": "brief" if rid else "",
+                      "superseded_by": str(raw.get("superseded_by") or "").strip()[:300]}
     by_family: dict[str, Counter] = {}
     for it in items.values():
         by_family.setdefault(family(it["id"]), Counter())[it["kind"]] += 1
@@ -140,6 +141,8 @@ def merge(defined: list[dict[str, Any]], modelled: list[dict[str, Any]], brief: 
 
 
 def needs_story(item: dict[str, Any], domain_layer: bool) -> bool:
+    if item.get("superseded_by"):
+        return False  # a later instruction replaced it: building it would contradict the brief
     return item["kind"] in STORY_KINDS or (item["kind"] in RULE_KINDS and not domain_layer)
 
 
@@ -227,7 +230,7 @@ def tests_by_rule(test_source: str, rule_ids: list[str]) -> dict[str, str]:
 def domain_gaps(inventory: list[dict[str, Any]], registered: list[str], test_source: str,
                 files: dict[str, str]) -> list[str]:
     """What the domain layer leaves out of the brief's rules. Each line is a repair instruction."""
-    rules = [it for it in inventory if it["kind"] in RULE_KINDS]
+    rules = [it for it in inventory if it["kind"] in RULE_KINDS and not it.get("superseded_by")]
     have = {norm(r) for r in registered}
     problems: list[str] = []
     missing = [it for it in rules if it["id"] not in have]

@@ -100,7 +100,8 @@ REQUIREMENTS = _obj({"items": _arr(_obj({
     "title": _str(), "statement": _str(),
     "numbers": _strs("each number the brief fixes for it: thresholds, weights, limits, durations, counts"),
     "evidence_id": _str(),
-}))})
+    "superseded_by": _str("empty, or what later instruction replaces it and how"),
+}, ["id", "kind", "title", "statement", "numbers", "evidence_id", "superseded_by"]))})
 
 # ---- design ----------------------------------------------------------------------
 

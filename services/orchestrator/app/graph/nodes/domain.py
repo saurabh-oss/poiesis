@@ -178,6 +178,7 @@ def _prompt(state: RunState, run_id: str) -> str:
 def _required(state: RunState) -> str:
     """The brief's rules, roles, lifecycles and integrations, from the requirements inventory."""
     inv = state.get("requirements") or []
+    inv = [it for it in inv if not it.get("superseded_by")]
     rules = [it for it in inv if it["kind"] in req.RULE_KINDS]
     other = [it for it in inv if it["kind"] in ("role", "workflow", "integration", "notification")]
     out = ""
@@ -192,12 +193,18 @@ def _required(state: RunState) -> str:
 
 def _brief_gaps(state: RunState, run_id: str, report: dict[str, Any]) -> list[str]:
     """What the domain leaves out of the brief: rules missing, numbers untested, shortcuts admitted."""
-    inv = state.get("requirements") or []
-    if not inv or report.get("error"):
+    if report.get("error"):
         return []
+    # services.py is shared by every story: a governed status it writes directly turned each
+    # story that touched it red in DupeGuard's rerun, for code the story never wrote.
+    from ...workspace.checks import enterprise_issues
+    gaps = enterprise_issues(run_id, own_files={"backend/app/domain/services.py"})
+    inv = state.get("requirements") or []
+    if not inv:
+        return gaps
     files = {rel: repo.read(run_id, rel, 400000) for rel in FILES if rel.startswith("backend/")}
-    return req.domain_gaps(inv, [r.get("id", "") for r in report.get("rules", [])],
-                           repo.read(run_id, "tests/test_rules.py", 400000), files)
+    return gaps + req.domain_gaps(inv, [r.get("id", "") for r in report.get("rules", [])],
+                                  repo.read(run_id, "tests/test_rules.py", 400000), files)
 
 
 def _schema(root: Any) -> str:
@@ -348,6 +355,7 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
     problems: list[str] = ["not attempted"]
     reply: dict[str, Any] = {}
     best: dict[str, Any] | None = None
+    previous_failures: dict[str, str] = {}
     for attempt in range(repairs + 1):
         # Keyed by what the attempt was told as well: a resumed run whose checks changed
         # must not replay a reply written against the old feedback.
@@ -367,8 +375,26 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
         report, cases, tail = await _check(run_id)
         results = results_by_rule(report.get("rules", []), cases)
         problems = _feedback(report, cases, results, tail) + _brief_gaps(state, run_id, report)
+        # The rerun of DupeGuard's domain failed test_br_12 the same way three times: the rule
+        # was right, the test expected "my broadband is down" to match two keywords it has one
+        # of, and "decide which side is wrong" never made the model check. A test that fails
+        # identically again gets a worked instruction instead.
+        failing_now = {c["name"]: c["message"] for c in cases if not c["passed"]}
+        stuck = [n for n, m in failing_now.items() if previous_failures.get(n) == m]
+        if stuck:
+            problems.insert(0,
+                "these tests failed exactly the same way last time: " + ", ".join(stuck[:6]) + ". For each, "
+                "evaluate the rule by hand on the test's own inputs, step by step, and write the result down; "
+                "then compare it with what the brief says for those inputs. If the rule gives what the brief "
+                "says, the test's expectation is wrong: change the test's inputs or its expected value, not the rule.")
+        previous_failures = failing_now
         rules_n, flows_n = len(report.get("rules", [])), len(report.get("workflows", []))
         score = _score(report, cases, results)
+        # An admitted shortcut outranks a failing test: DupeGuard's rerun kept an attempt whose
+        # scan fed the score a hard-coded text similarity of 0.9 over one with a better test file.
+        shortcuts = len(req.placeholders({rel: repo.read(run_id, rel, 400000) for rel in FILES
+                                          if rel.startswith("backend/")}))
+        score = (score[0], -shortcuts) + tuple(score[1:])
         if best is None or score > best["score"]:
             best = {"score": score, "files": {rel: repo.read(run_id, rel, 400000) for rel in FILES},
                     "report": report, "results": results, "problems": problems, "reply": reply, "attempt": attempt + 1}

@@ -857,6 +857,70 @@ def governed_columns(run_id: str) -> dict[str, tuple[str, str]]:
     return out
 
 
+def _variable_models(tree: ast.AST) -> dict[str, str]:
+    """Variable -> the model class it holds, where the code says so plainly:
+    `x = db.get(M, …)`, `x = db.query(M)….first()`, `x = M(…)`, `for x in db.query(M)…`.
+    A name bound to two different models is left out: which one a write means is unknown."""
+    seen: dict[str, set[str]] = {}
+
+    def model_of(value: ast.AST) -> str | None:
+        for n in ast.walk(value):
+            if isinstance(n, ast.Call):
+                fn = n.func
+                name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                if name in ("get", "query", "get_or_404") and n.args and isinstance(n.args[0], ast.Name) \
+                        and n.args[0].id[:1].isupper():
+                    return n.args[0].id
+                if isinstance(fn, ast.Name) and fn.id[:1].isupper() and fn.id not in ("HTTPException", "Depends"):
+                    return fn.id
+        return None
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            m = model_of(node.value)
+            if m:
+                seen.setdefault(node.targets[0].id, set()).add(m)
+        elif isinstance(node, (ast.For, ast.AsyncFor)) and isinstance(node.target, ast.Name):
+            m = model_of(node.iter)
+            if m:
+                seen.setdefault(node.target.id, set()).add(m)
+    return {k: next(iter(v)) for k, v in seen.items() if len(v) == 1}
+
+
+def workflow_transitions(run_id: str) -> dict[str, list[tuple[str, list[str], str]]]:
+    """Workflow name -> [(transition, from states, to state)], read from domain/workflows.py."""
+    path = workspace_path(run_id) / "backend" / "app" / "domain" / "workflows.py"
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError):
+        return {}
+
+    def text(node: ast.AST | None) -> list[str]:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [node.value]
+        if isinstance(node, (ast.Tuple, ast.List)):
+            return [e.value for e in node.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        return []
+
+    out: dict[str, list[tuple[str, list[str], str]]] = {}
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and getattr(call.func, "id", getattr(call.func, "attr", "")) == "Workflow"):
+            continue
+        name = call.args[0].value if call.args and isinstance(call.args[0], ast.Constant) else "?"
+        moves = []
+        for t in ast.walk(call):
+            if isinstance(t, ast.Call) and getattr(t.func, "id", getattr(t.func, "attr", "")) == "Transition":
+                a = t.args
+                kw = {k.arg: k.value for k in t.keywords}
+                tname = text(a[0] if a else kw.get("name"))
+                src = text(a[1] if len(a) > 1 else kw.get("source"))
+                dst = text(a[2] if len(a) > 2 else kw.get("target"))
+                if tname and dst:
+                    moves.append((tname[0], src, dst[0]))
+        out[str(name)] = moves
+    return out
+
+
 def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
     """What breaks an enterprise application's guarantees, before the code runs.
 
@@ -868,6 +932,7 @@ def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[st
     if not (root / "backend" / "app" / "kernel").is_dir():
         return []
     governed = governed_columns(run_id)
+    transitions = workflow_transitions(run_id)
     files = list(_story_python(run_id, own_files))
     services = root / "backend" / "app" / "domain" / "services.py"
     rel_services = "backend/app/domain/services.py"
@@ -894,24 +959,43 @@ def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[st
         if not columns:
             continue
         found = 0
+        kinds = _variable_models(tree)
         for node in ast.walk(tree):
             written = None
             if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 hit = next((t for t in targets if isinstance(t, ast.Attribute) and t.attr in columns), None)
                 if hit is not None and not (isinstance(hit.value, ast.Name) and hit.value.id == "self"):
-                    written = (ast.unparse(hit), hit.attr)
+                    # `config.status = …` on a model no workflow governs is fine: DupeGuard's rerun
+                    # was told to use a transition for a threshold setting that has no lifecycle.
+                    model = kinds.get(hit.value.id) if isinstance(hit.value, ast.Name) else None
+                    if model is None or (model in governed and governed[model][0] == hit.attr):
+                        written = (ast.unparse(hit), hit.attr)
+                        if model is not None:
+                            written = (written[0], written[1], f"{governed[model][1]} ({model})")
             elif isinstance(node, ast.Call) and getattr(node.func, "id", "") == "setattr" and len(node.args) >= 2 \
                     and isinstance(node.args[1], ast.Constant) and node.args[1].value in columns:
                 written = (ast.unparse(node), str(node.args[1].value))
             if written is None:
                 continue
+            # Name the moves that exist: DupeGuard's rerun spent three repairs on "use
+            # transition(db, row, "<transition name>")" without ever learning the names.
+            value = node.value.value if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant) else None
+            owners = [written[2]] if len(written) > 2 else columns[written[1]]
+            flows = [w.split(" (")[0] for w in owners]
+            moves = [m for w in flows for m in transitions.get(w, [])]
+            to_value = [m for m in moves if value is not None and m[2] == value]
+            listed = "; ".join(f"`{n}` ({', '.join(s) or '*'} → {d})" for n, s, d in moves[:10])
+            hint = (f" To set it to '{value}', call `transition(db, row, \"{to_value[0][0]}\", reason=...)`."
+                    if to_value else "")
             issues.append(
                 f"{rel}: line {node.lineno} writes `{written[0]}`, a column the "
-                f"{' / '.join(columns[written[1]])} workflow governs; the server refuses that write (409, rule "
+                f"{' / '.join(owners)} workflow governs; the server refuses that write (409, rule "
                 f"WF-00). Move the record with `transition(db, row, \"<transition name>\", reason=...)` from "
                 f"`..kernel`; an automatic action passes `actor=SYSTEM` (also from `..kernel`) so the role check "
-                f"allows it.")
+                f"allows it." + (f" Its transitions: {listed}.{hint}" if listed else "")
+                + (" A transition with an approver only asks for approval; the move happens when a person "
+                   "approves it in the Approvals screen, so never set the state yourself after asking." if moves else ""))
             found += 1
             if found >= 6:
                 break
