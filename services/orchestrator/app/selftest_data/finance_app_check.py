@@ -110,7 +110,7 @@ def main() -> int:
         kpis = {x["key"]: x for x in k["kpis"]}
         expect("spend year to date is the sum of the invoices", abs(kpis["spend"]["value"] - spend) < 0.01,
                f"{kpis['spend']['value']} vs {spend}")
-        expect("every figure is there", len(kpis) == 24, f"{len(kpis)}: {sorted(kpis)}")
+        expect("every figure is there", len(kpis) == 31, f"{len(kpis)}: {sorted(kpis)}")
         bad = [x["key"] for x in k["kpis"] if x["value"] is None]
         expect("every figure has a value", not bad, str(bad))
         expect("a figure carries its comparison, direction and trend",
@@ -123,7 +123,15 @@ def main() -> int:
                [x["key"] for x in few["kpis"]] == ["spend", "overdue"] and few["scope"]["from"] == "2026-04-01"
                and few["scope"]["prior"] == {"from": "2026-01-01", "to": "2026-03-30"} or few["scope"]["prior"]["from"] == "2026-01-01",
                json.dumps(few["scope"]))
-        get("/kpis?keys=nonsense", status=422)
+        odd = get("/kpis?keys=spend,variance,forecast,nonsense,Open_Payables&spark=0")
+        expect("figures go by other names too, and one the library does not have is left out and named",
+               [x["key"] for x in odd["kpis"]] == ["spend", "budget_variance", "forecast", "payables"]
+               and odd["unknown"] == ["nonsense"] and "budget_used" in odd["known"], json.dumps(odd)[:300])
+        year = {x["key"]: x["value"] for x in get("/kpis?keys=budget,budget_variance,budget_available,forecast,forecast_pct")["kpis"]}
+        expect("the budget figures agree with the budget endpoint",
+               abs(year["budget_variance"] - get("/budget")["totals"]["variance"]) < 0.01
+               and abs(year["budget_available"] - get("/budget")["totals"]["available"]) < 0.01
+               and abs(year["forecast"] - get("/budget")["totals"]["forecast"]) < 0.01, json.dumps(year))
         get("/kpis?period=whenever", status=422)
         get("/kpis?from=2026-13-01", status=422)
 
@@ -312,7 +320,26 @@ def main() -> int:
                and advice["level"] in ("warn", "down"), json.dumps(advice["findings"]))
 
         as_clerk = get("/kpis", clerk)
-        expect("everyone who may read sees the same figures", len(as_clerk["kpis"]) == 24)
+        expect("everyone who may read sees the same figures", len(as_clerk["kpis"]) == 31)
+
+        # ---- the same figures as functions, for a router
+        from app.db import _sessionmaker  # noqa: E402
+        from app.finance import insight, operations as ops_  # noqa: E402
+        from app.kernel.context import Actor, acting_as  # noqa: E402
+        with _sessionmaker()() as db, acting_as(Actor(None, "system", "System", ("admin",), kind="system")):
+            mine = insight.budget(db, by="cost_center", period="fy_to_date")
+            few_ = insight.kpis(db, keys=["spend", "overdue"], period="last_quarter", compare="none")
+            docs = insight.documents(db, entity="invoice", overdue=True, dated=False, sort="-amount", limit=5)
+            expect("a router asks for the figures by the same names",
+                   abs(mine["totals"]["actual"] - spend) < 0.01 and [x["key"] for x in few_["kpis"]] == ["spend", "overdue"]
+                   and few_["scope"]["from"] == "2026-04-01" and len(docs["rows"]) == 5 and docs["rows"][0]["days_overdue"] > 0,
+                   json.dumps(few_["scope"]))
+            try:
+                ops_.budget_position(cost_center_id=7, requested=100)
+                said = ""
+            except TypeError as exc:
+                said = str(exc)
+            expect("an operation called without its session says so", "session" in said or "db" in said, said)
 
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed")
     for f_ in FAILED:

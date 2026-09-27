@@ -1540,6 +1540,8 @@ const slug = (text) => String(text || "dashboard").toLowerCase().replace(/[^a-z0
  *   });
  *
  * A widget: { type, title?, span? (of 12), id?, hint?, … its own parameters }. `ctx` is what render() received.
+ * A widget of any type may bring its own `draw(result, env)` (the type's figures, shown its own way) or its own
+ * `load(env)` as well; its title is the widget's, so what it draws needs no heading of its own.
  * People choose the period and the filters, hide and reorder widgets; their choice is remembered on their device.
  */
 export async function dashboard(root, ctx, spec = {}) {
@@ -1613,7 +1615,10 @@ export async function dashboard(root, ctx, spec = {}) {
   }
 
   function widget(w, mine) {
-    const kind = w.type === "custom" ? w : WIDGETS[w.type];
+    // A widget that brings its own load or draw is drawn its own way, whatever type it names:
+    // { type: "aging", draw: (result) => … } is the standard figures, shown differently.
+    const own = Object.fromEntries(["load", "draw", "rows"].filter((k) => typeof w[k] === "function").map((k) => [k, w[k]]));
+    const kind = w.type === "custom" ? w : (WIDGETS[w.type] || own.load) ? { ...(WIDGETS[w.type] || {}), ...own } : null;
     if (!kind || typeof kind.load !== "function" || typeof kind.draw !== "function") {
       return h("section", { class: "panel fin-widget", style: { gridColumn: "span 12" } }, ui.notice(`There is no widget of type "${w.type}". There are: ${Object.keys(WIDGETS).join(", ")}, custom.`, "warn"));
     }

@@ -98,6 +98,12 @@ def now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
+def _session(db: Any, operation: str) -> None:
+    if not hasattr(db, "execute") or not hasattr(db, "get"):
+        raise TypeError(f"ops.{operation}(db, …): the first argument is the database session the router was "
+                        f"given (`db: Session = Depends(get_session)`), then the record; it was given {type(db).__name__}")
+
+
 def _put(obj: Any, **values: Any) -> None:
     """Set the columns the record has; an application may have left some out."""
     have = {c.key for c in type(obj).__table__.columns}
@@ -131,6 +137,7 @@ def match_invoice(db: Session, invoice: Any, *, tolerance: fin.Tolerance | None 
 
     A received invoice is moved to matched or to exception, with the reason. Returns the
     match: status, ok, ordered, received, invoiced, discrepancies and the rule that decided."""
+    _session(db, "match_invoice")
     inv = row(db, "invoice", invoice)
     cls = type(inv)
     currency = get(inv, "currency", base_currency())
@@ -200,6 +207,7 @@ def receive_goods(db: Session, order: Any, amount: Any, *, quantity: Any = None,
                   received_at: dt.datetime | None = None, quality_ok: bool = True, commit: bool = True) -> dict[str, Any]:
     """Post a receipt against an order: the receipt, the order's received value, and the
     order's move to partly received or received. Says whether it came on time and in full."""
+    _session(db, "receive_goods")
     po = row(db, "purchase_order", order)
     currency = get(po, "currency", base_currency())
     value = money.quantize(amount, currency)
@@ -242,6 +250,7 @@ def receive_goods(db: Session, order: Any, amount: Any, *, quantity: Any = None,
 def payable(db: Session, *, due_by: Any = None, as_of: Any = None, take_discounts: bool = True) -> list[dict[str, Any]]:
     """The approved invoices a payment run would pay: those due by `due_by`, and those whose
     early payment discount can still be taken and is worth taking (FIN-04)."""
+    _session(db, "payable")
     cls = need("invoice")
     day = as_date(as_of) or today()
     limit = as_date(due_by) or day + dt.timedelta(days=7)
@@ -316,6 +325,7 @@ def budget_position(db: Session, cost_center_id: Any, *, requested: Any = 0, on:
                     spend_category_id: Any = None) -> dict[str, Any]:
     """What is left of a cost centre's budget for the fiscal year `on` falls in (FIN-02): the
     year's budget, less what is invoiced so far, less what is ordered and not yet invoiced."""
+    _session(db, "budget_position")
     day = as_date(on) or today()
     cal = calendar()
     first, last = cal.bounds("year", day)
@@ -364,6 +374,7 @@ def check_request(db: Session, requisition: Any) -> dict[str, Any]:
     """What to tell a requester before they submit: who will approve it (PROC-02), whether the
     budget covers it (FIN-02), how many quotes it needs (PROC-10), whether the supplier can be
     ordered from (PROC-09), and whether it looks like part of a split (PROC-11)."""
+    _session(db, "check_request")
     req = row(db, "requisition", requisition)
     currency = get(req, "currency", base_currency())
     amount = D(get(req, "amount", 0))

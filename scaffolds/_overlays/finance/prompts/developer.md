@@ -21,7 +21,8 @@ are already written, tested and read-only. Compose them; do not rebuild them.
    Measures: spend, invoiced, payables, paid, orders, commitments, requisitions, receipts, payments, budget,
    savings, realised_savings, contract_value. Dimensions (`by`): supplier, category, family, cost_center,
    department, region, country, status, match_status, risk, buyer, requester, month, quarter, year.
-   Figures (`kpis`): spend, budget_used, orders, commitments, payables, overdue, po_coverage, first_time_match,
+   Figures (`kpis`): spend, budget, budget_used, budget_variance, budget_available, forecast, forecast_pct,
+   requisitions, awaiting_approval, orders, commitments, payables, overdue, po_coverage, first_time_match,
    contracted_spend, maverick_spend, on_time_payment, dpo, discount_capture, discounts_missed, invoice_cycle,
    requisition_cycle, otif, price_variance, savings_identified, savings_realised, exceptions, suppliers,
    high_risk, expiring.
@@ -55,8 +56,14 @@ are already written, tested and read-only. Compose them; do not rebuild them.
        await data.proposeRun({ due_by: "2026-10-09" })   approved invoices into a payment run, discounts taken
        await data.budgetPosition({ cost_center_id: 3, requested: 5000 })     -> { status: ok|warning|exceeded, remaining, message }
        await data.advice(requisition.id)                 -> { approver, findings: [{ rule, level, message }] } to show before Submit
-   In a router: `from ..finance import operations as ops`, `from ..finance import rules as fin`,
-   `from ..finance import analytics as fa`, `from ..finance import money, periods`. An amount is summed with
+   In a router, the database session comes first: `ops.match_invoice(db, invoice_id)`,
+   `ops.receive_goods(db, order_id, amount, received_by="")`, `ops.propose_payment_run(db, due_by="2026-10-09")`,
+   `ops.budget_position(db, cost_center_id, requested=5000)`, `ops.check_request(db, requisition_id)`.
+   The figures of the insight API are functions too, by the same names: `from ..finance import insight`, then
+   `insight.budget(db, by="cost_center", period="fy_to_date")`, `insight.kpis(db, keys="spend,overdue")`,
+   `insight.documents(db, entity="invoice", status="exception", dated=False)`. Import ONLY these modules from the
+   library: `operations as ops`, `insight`, `rules as fin`, `analytics as fa`, `money`, `periods`; nothing from
+   `..finance.api`. A route function has no return annotation (`def approve(...):`, never `-> PurchaseOrder`). An amount is summed with
    `money.total(values)` and compared as `money.D(a) > money.D(b)`, never as floats.
    The ERP is `from ..connectors import erp`: `erp().create_purchase_order(reference, supplier_code, amount,
    idempotency_key=reference)`, `erp().post_invoice(...)`, `erp().release_payments(...)`; each returns a Result

@@ -27,6 +27,33 @@ GENERIC = "resources"
 
 log = logging.getLogger(__name__)
 
+
+def _tolerate_return_annotations() -> None:
+    """A route written `def approve(...) -> PurchaseOrder:` means "it returns an order", not "validate
+    the reply against this class": FastAPI reads the annotation as a response model, cannot make one
+    of an ORM class, and refuses the whole router ("Invalid args for response field"), taking every
+    endpoint of the story with it. Such a route is registered without a response model instead."""
+    from fastapi import routing
+    from fastapi.exceptions import FastAPIError
+    if getattr(routing.APIRouter.add_api_route, "_poiesis_tolerant", False):
+        return
+    original = routing.APIRouter.add_api_route
+
+    def add_api_route(self, path, endpoint, **kwargs):  # type: ignore[no-untyped-def]
+        try:
+            return original(self, path, endpoint, **kwargs)
+        except FastAPIError as exc:
+            if "response field" not in str(exc):
+                raise
+            log.warning("%s %s: its return annotation is not a response model; registered without one", endpoint.__name__, path)
+            return original(self, path, endpoint, **{**kwargs, "response_model": None})
+
+    add_api_route._poiesis_tolerant = True  # type: ignore[attr-defined]
+    routing.APIRouter.add_api_route = add_api_route  # type: ignore[method-assign]
+
+
+_tolerate_return_annotations()
+
 # module name -> "file:line: ErrorType: message" for every router that did not load.
 broken: dict[str, str] = {}
 

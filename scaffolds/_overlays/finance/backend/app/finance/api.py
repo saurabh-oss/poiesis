@@ -596,6 +596,21 @@ def _budget_used(w: Window) -> float | None:
     return money.pct(w.total("spend"), budget) if budget > 0 else None
 
 
+def _year(w: Window) -> dict[str, Any]:
+    """The fiscal year the window ends in: its budget, what is spent and committed, where it is heading."""
+    scope = w.book.scope
+    year = scope.calendar.bounds("year", w.end)
+    so_far = min(w.end, scope.today, year[1])
+    commitments = [o for o in facts(w.book, MEASURES["commitments"]) if get(o, "order_date") and as_date(o.order_date) <= w.end]
+    value = valuer(w.book, MEASURES["commitments"])
+    sums = {"budget": w.total("budget"), "actual": w.total("spend"),
+            "year_budget": total(w.book, MEASURES["budget"], *year),
+            "year_actual": total(w.book, MEASURES["spend"], year[0], so_far),
+            "committed": sum((value(o) for o in commitments), ZERO)}
+    elapsed = Decimal((so_far - year[0]).days + 1) / Decimal((year[1] - year[0]).days + 1)
+    return _budget_figures(sums, elapsed)
+
+
 def _expiring(w: Window) -> int:
     day = w.book.scope.today
     return sum(1 for c in w.book.all("contract")
@@ -631,6 +646,23 @@ KPIS: tuple[Kpi, ...] = (
         about=MEASURES["spend"].about, drill=(("entity", "invoice"),)),
     Kpi("budget_used", "Budget used", "pct", _budget_used, ("invoice", "budget_line"), good="down", icon="pie",
         about="Spend in the period as a share of the budget for the same period"),
+    Kpi("budget", "Budget", "money", lambda w: _money(w.total("budget")), ("budget_line",), icon="dollar",
+        about="The budget of the period"),
+    Kpi("budget_variance", "Variance to budget", "money", lambda w: _year(w)["variance"], ("invoice", "budget_line"),
+        good="down", icon="activity", about="Spend in the period less its budget: above zero is over budget (FIN-07)"),
+    Kpi("budget_available", "Budget available", "money", lambda w: _year(w)["available"], ("invoice", "budget_line"),
+        good="up", position=True, icon="layers",
+        about="The fiscal year's budget less what is spent and what is committed, as of today (FIN-02)"),
+    Kpi("forecast", "Year forecast", "money", lambda w: _year(w)["forecast"], ("invoice", "budget_line"), position=True,
+        icon="trend-up", about="Where the fiscal year's spend is heading at the rate so far"),
+    Kpi("forecast_pct", "Forecast against budget", "pct", lambda w: _year(w)["forecast_pct"], ("invoice", "budget_line"),
+        good="down", position=True, icon="pie", about="The year's forecast spend as a share of the year's budget"),
+    Kpi("requisitions", "Requested", "money", lambda w: _money(w.total("requisitions")), ("requisition",), icon="inbox",
+        about=MEASURES["requisitions"].about, drill=(("entity", "requisition"),)),
+    Kpi("awaiting_approval", "Awaiting approval", "count",
+        lambda w: sum(1 for r in w.book.all("requisition") if get(r, "status", "") == "submitted"), ("requisition",),
+        good="down", position=True, icon="clock", about="Requisitions submitted and not yet decided",
+        drill=(("entity", "requisition"), ("status", "submitted"), ("dated", "false"))),
     Kpi("orders", "Ordered", "money", lambda w: _money(w.total("orders")), ("purchase_order",), icon="cart",
         about=MEASURES["orders"].about, drill=(("entity", "purchase_order"),)),
     Kpi("commitments", "Open commitments", "money", lambda w: _money(w.total("commitments")), ("purchase_order",),
@@ -698,6 +730,25 @@ KPIS: tuple[Kpi, ...] = (
 )
 
 
+# Other names people give the same figures.
+KPI_ALIASES = {
+    "variance": "budget_variance", "budget_vs_actual": "budget_variance", "available": "budget_available",
+    "remaining": "budget_available", "budget_remaining": "budget_available", "utilisation": "budget_used",
+    "utilization": "budget_used", "budget_utilisation": "budget_used", "budget_utilization": "budget_used",
+    "open_payables": "payables", "accounts_payable": "payables", "overdue_payables": "overdue",
+    "open_commitments": "commitments", "committed": "commitments", "ordered": "orders", "total_spend": "spend",
+    "match_rate": "first_time_match", "first_time_match_rate": "first_time_match", "exception_rate": "exceptions",
+    "invoices_held": "exceptions", "held": "exceptions", "on_time": "on_time_payment", "paid_on_time": "on_time_payment",
+    "days_payable_outstanding": "dpo", "discounts": "discount_capture", "discounts_captured": "discount_capture",
+    "missed_discounts": "discounts_missed", "spend_under_contract": "contracted_spend", "maverick": "maverick_spend",
+    "active_suppliers": "suppliers", "supplier_count": "suppliers", "high_risk_suppliers": "high_risk",
+    "contracts_expiring": "expiring", "expiring_contracts": "expiring", "renewals": "expiring",
+    "savings": "savings_identified", "realised_savings": "savings_realised", "ppv": "price_variance",
+    "pending_approvals": "awaiting_approval", "pending": "awaiting_approval", "approval_time": "requisition_cycle",
+    "cycle_time": "invoice_cycle", "on_time_in_full": "otif",
+}
+
+
 def _available(book: Book, needs: tuple[str, ...]) -> bool:
     for need in needs:
         table, _, column = need.partition(".")
@@ -717,11 +768,13 @@ def get_kpis(keys: str = "", spark: int = 6, db: Session = Depends(get_session),
              scope: Scope = Depends(requested)) -> dict[str, Any]:
     """Every headline figure the data allows, or the ones named in ?keys=spend,po_coverage."""
     book = Book(db, scope)
-    wanted = [k.strip() for k in keys.split(",") if k.strip()]
     known = {k.key: k for k in KPIS}
+    asked = [k.strip() for k in keys.split(",") if k.strip()]
+    wanted = list(dict.fromkeys(KPI_ALIASES.get(k.lower(), k.lower()) for k in asked))
+    # A figure the library does not have is left out and named, so a dashboard that asks for
+    # one too many still shows the rest.
     unknown = [k for k in wanted if k not in known]
-    if unknown:
-        raise HTTPException(status_code=422, detail=f"no figure called {', '.join(unknown)}. There are: {', '.join(known)}")
+    wanted = [k for k in wanted if k in known]
     now = Window(book, scope.start, scope.end)
     before = Window(book, *scope.prior) if scope.prior else None
     months = [Window(book, a, min(b, scope.end)) for a, b in scope.calendar.last("month", max(0, min(spark, 24)), scope.end)] \
@@ -747,7 +800,7 @@ def get_kpis(keys: str = "", spark: int = 6, db: Session = Depends(get_session),
                     item["favourable"] = _favourable(kpi, change)
             item["spark"] = [{"label": scope.calendar.label("month", w.start), "value": kpi.value(w)} for w in months]
         out.append(item)
-    return {"scope": scope.describe(), "kpis": out}
+    return {"scope": scope.describe(), "kpis": out, "unknown": unknown, "known": list(known) if unknown else []}
 
 
 # ----------------------------------------------------------------- breakdowns and trends

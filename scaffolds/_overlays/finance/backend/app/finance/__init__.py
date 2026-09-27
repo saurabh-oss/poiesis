@@ -14,6 +14,7 @@ tested, so a story composes it instead of re-deciding it:
                 actual, ageing, concentration, cycle times, pivots, procurement KPIs
     operations  what people do to their records: match an invoice, receive goods, propose a
                 payment run, check a budget — each through the record's workflow
+    insight     the figures of the insight API as functions, for a router: insight.budget(db, by=…)
     personas    the roles of the function, a demonstration persona for each, and permissions
     standard    the standard entities (supplier, purchase_order, invoice…) and their columns
     demo        a coherent year of demonstration data for the standard entities
@@ -28,5 +29,7 @@ from .periods import FiscalCalendar
 from .rules import POLICY, Tolerance, configure
 from .workflows import ByAmount
 
-__all__ = ["analytics", "money", "operations", "periods", "personas", "rules", "standard", "workflows",
+# `insight` and `api` are imported where they are used (`from ..finance import insight`): they
+# need the application's database, which the rest of the library does not.
+__all__ = ["analytics", "insight", "money", "operations", "periods", "personas", "rules", "standard", "workflows",
            "D", "Money", "FiscalCalendar", "Tolerance", "ByAmount", "POLICY", "configure"]

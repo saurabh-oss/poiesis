@@ -47,6 +47,11 @@
 .fin-widget-tools { gap: 6px; flex-wrap: nowrap; }
 .fin-widget-tools .icon-btn { opacity: 0; transition: opacity .2s; }
 .fin-widget:hover .fin-widget-tools .icon-btn, .fin-widget-tools .icon-btn:focus-visible { opacity: 1; }
+/* A widget is already a panel with a title: a section drawn inside it loses its own frame. */
+.fin-widget-body > section.panel, .fin-widget-body > .stack > section.panel { border: 0; box-shadow: none; padding: 0; background: none; margin: 0; }
+.fin-widget-body > section.panel::before { display: none; }
+.fin-widget-body > section.panel > .section-head h2 { font-size: 13px; color: var(--ink-2); }
+.fin-widget-body > section.panel > .section-head h2 svg { display: none; }
 .fin-sub h3 { font-size: 13px; font-weight: 650; color: var(--ink-2); margin: 4px 0 10px; }
 @keyframes fin-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (max-width: 1180px) { .fin-grid > .fin-widget:not(.fin-span-12) { grid-column: span 6 !important; } }
