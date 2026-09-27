@@ -152,7 +152,14 @@ export type ConnectorSetting = { env: string; label: string; required: boolean; 
 export type Connector = {
   name: string; title: string; category: string; description: string; vendor_url: string;
   mode: "live" | "sandbox" | "off"; missing: string[]; settings: ConnectorSetting[];
-  operations: Record<string, string>; source: string; lines: number;
+  operations: Record<string, string>; source: string; lines: number; library?: string | null;
+};
+export type Library = {
+  name: string; title: string; pack: string | null; active: boolean; requires: string[]; components: string[];
+  entities: { table: string; title: string; about: string; columns: number }[];
+  rules: { id: string; title: string }[]; rule_tests: number; lifecycles: string[]; operations: string[];
+  endpoints: { method: string; path: string }[]; blueprints: string[]; widgets: string[]; kit_components: number;
+  demo: boolean; starter: boolean; prompts: string[]; settings: string[]; docs: string;
 };
 export type EnterpriseApp = {
   run_id: string; title: string; status: string; rules: number; workflows: number; roles: number;
@@ -160,7 +167,7 @@ export type EnterpriseApp = {
 };
 export type EnterpriseCatalogue = {
   connectors: Connector[]; kernel: { key: string; title: string; detail: string }[];
-  apps: EnterpriseApp[]; live_settings: string[];
+  apps: EnterpriseApp[]; live_settings: string[]; libraries?: Library[];
 };
 export type DomainLayer = {
   imports: boolean; url: string | null;

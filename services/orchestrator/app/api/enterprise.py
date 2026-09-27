@@ -1,13 +1,15 @@
 """The enterprise overlay as the control room sees it: the reusable connectors every
 enterprise app carries, and each app's business logic (roles, rules, workflows, tests).
 
-    GET /api/enterprise/connectors          the catalogue, with how apps would run each one
+    GET /api/enterprise/connectors          the catalogue, with how apps would run each one, and the
+                                            department libraries a pack can lay over the kernel
     GET /api/enterprise/runs/{id}/domain    one run's domain: rules and their tests, workflows, roles
 """
 from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 from functools import lru_cache
 from types import ModuleType
@@ -17,6 +19,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..config import scaffold_root
 from ..db import Artifact, Deployment, Run, session
+from ..workspace import overlays
 
 router = APIRouter(prefix="/api/enterprise", tags=["enterprise"])
 
@@ -42,7 +45,11 @@ def _connectors() -> ModuleType:
     always what the applications actually ship."""
     root = scaffold_root() / "_overlays" / "enterprise" / "backend" / "app" / "connectors"
     name = "poiesis_overlay_connectors"
-    spec = importlib.util.spec_from_file_location(name, root / "__init__.py", submodule_search_locations=[str(root)])
+    # The connectors a department library adds live in its own overlay; in an application they
+    # share the package, so here they share its search path, and are discovered the same way.
+    others = [str(p) for p in sorted((scaffold_root() / "_overlays").glob("*/backend/app/connectors")) if p != root]
+    spec = importlib.util.spec_from_file_location(name, root / "__init__.py",
+                                                  submodule_search_locations=[str(root), *others])
     if spec is None or spec.loader is None:
         raise RuntimeError("the enterprise overlay has no connectors package")
     module = importlib.util.module_from_spec(spec)
@@ -71,7 +78,9 @@ def connectors() -> dict[str, Any]:
             lines = sum(1 for _ in open(file, encoding="utf-8"))
         except OSError:
             lines = 0
-        status["source"] = f"scaffolds/_overlays/enterprise/backend/app/connectors/{os.path.basename(file)}"
+        parts = file.replace("\\", "/").split("/_overlays/", 1)
+        status["source"] = "scaffolds/_overlays/" + parts[1] if len(parts) == 2 else os.path.basename(file)
+        status["library"] = parts[1].split("/", 1)[0] if len(parts) == 2 and not parts[1].startswith("enterprise/") else None
         status["lines"] = lines
         out.append(status)
     with session() as s:
@@ -88,7 +97,52 @@ def connectors() -> dict[str, Any]:
                          "roles": len(body.get("roles") or {}), "tests": body.get("tests") or {},
                          "url": d.url if d and d.status == "running" else None})
     return {"connectors": out, "kernel": KERNEL_FEATURES, "apps": apps,
-            "live_settings": sorted(env)}
+            "live_settings": sorted(env), "libraries": libraries()}
+
+
+def _read(path: Any) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def libraries() -> list[dict[str, Any]]:
+    """The department libraries among the overlays: what each brings, read from its own files."""
+    out = []
+    active = overlays.active()
+    root = scaffold_root() / overlays.ROOT
+    for folder in sorted(p for p in root.iterdir() if p.is_dir()) if root.is_dir() else []:
+        name = folder.name
+        m = overlays.manifest(name)
+        if name == "enterprise" or not m.get("title"):
+            continue
+        package = folder / "backend" / "app" / name
+        standard = overlays.module(name, "standard")
+        entities = [{"table": t, "title": e.get("title", t), "about": e.get("about", ""), "columns": len(e.get("columns") or [])}
+                    for t, e in (getattr(standard, "ENTITIES", {}) or {}).items()]
+        rules = [{"id": i, "title": t} for i, t in re.findall(r'^@rule\("([A-Z]+-\d+)",\s*"([^"]+)"', _read(package / "rules.py"), flags=re.M)]
+        kit = _read(folder / "frontend" / f"{name}.js")
+        tests = sum(len(re.findall(r"^def test_", _read(folder / t), flags=re.M)) for t in m.get("library_tests") or [])
+        endpoints = re.findall(r'@router\.(get|post)\("([^"]+)"\)', _read(package / "api.py"))
+        pack = f"packs/{name}.yaml"
+        out.append({
+            "name": name, "title": m["title"], "pack": pack if os.path.isfile(pack) else None, "active": name in active,
+            "requires": m.get("requires") or [], "components": [line.strip()[2:] for line in str(m.get("components") or "").splitlines()
+                                                                 if line.strip().startswith("- ")],
+            "entities": entities, "rules": rules, "rule_tests": tests,
+            "lifecycles": re.findall(r"^def ([a-z]\w*)\(model: type, \*", _read(package / "workflows.py"), flags=re.M),
+            "operations": [n for n in re.findall(r"^def ([a-z]\w*)\(db: Session", _read(package / "operations.py"), flags=re.M)
+                           if n != "row"],
+            "endpoints": [{"method": method.upper(), "path": f"/api/{name}{path}"} for method, path in endpoints],
+            "blueprints": re.findall(r"^  (\w+): blueprint\(", kit, flags=re.M),
+            "widgets": re.findall(r"^  (\w+): \{\n    title:", kit, flags=re.M),
+            "kit_components": len(re.findall(r"^export (?:async )?function \w+", kit, flags=re.M)),
+            "demo": overlays.module(name, "demo") is not None, "starter": overlays.module(name, "starter") is not None,
+            "prompts": sorted(m.get("prompts") or {}), "settings": m.get("settings") or [],
+            "docs": f"docs/{name.upper()}.md",
+        })
+    return out
 
 
 @router.get("/runs/{run_id}/domain")

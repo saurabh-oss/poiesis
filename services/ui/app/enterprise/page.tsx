@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api, type Connector, type EnterpriseCatalogue } from "@/lib/api";
+import { api, type Connector, type EnterpriseCatalogue, type Library } from "@/lib/api";
 import Icon from "@/components/Icon";
 
 const LOGO: Record<string, string> = {
@@ -12,7 +12,110 @@ const LOGO: Record<string, string> = {
   email: "linear-gradient(135deg,#E68619,#B35F00)",
   slack: "linear-gradient(135deg,#E01E5A,#611F69)",
   teams: "linear-gradient(135deg,#7B83EB,#4B53BC)",
+  erp: "linear-gradient(135deg,#0FB5AE,#0A7C77)",
 };
+
+const words = (s: string) => s.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+
+function Chips({ items, mono = false }: { items: string[]; mono?: boolean }) {
+  return (
+    <ul className="mt-2 flex flex-wrap gap-1.5">
+      {items.map((t) => (
+        <li key={t} className={`rounded-md border border-rule bg-mist px-2 py-0.5 text-[11.5px] ${mono ? "font-mono" : ""}`}>{t}</li>
+      ))}
+    </ul>
+  );
+}
+
+function LibraryCard({ lib }: { lib: Library }) {
+  const [open, setOpen] = useState<"rules" | "entities" | "api" | null>(null);
+  const figures: [number, string][] = [
+    [lib.entities.length, "standard entities"], [lib.rules.length, "tested rules"], [lib.lifecycles.length, "lifecycles"],
+    [lib.operations.length, "operations"], [lib.endpoints.length, "API endpoints"], [lib.blueprints.length, "dashboards"],
+    [lib.widgets.length, "widget types"], [lib.rule_tests, "rule tests"],
+  ];
+  const tab = (key: "rules" | "entities" | "api", label: string) => (
+    <button onClick={() => setOpen(open === key ? null : key)}
+            className={`rounded-full border px-3 py-1 text-[12.5px] font-medium transition ${open === key ? "border-signal bg-[#E5F0FE] text-signal" : "border-rule text-graphite hover:border-signal hover:text-signal"}`}>
+      {label}
+    </button>
+  );
+  return (
+    <article className="enter rounded-xl border border-rule bg-paper shadow-spectrum">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-rule p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-[17px] font-semibold">{lib.title}</h3>
+            {lib.active
+              ? <span className="rounded-full bg-[#E6F6EF] px-2 py-0.5 text-[11px] font-semibold text-[#007A4D]">In the active pack</span>
+              : <span className="rounded-full bg-mist px-2 py-0.5 text-[11px] font-semibold text-graphite">Available</span>}
+          </div>
+          <p className="mt-1 text-[12.5px] text-graphite">
+            {lib.pack ? <>Build with <span className="font-mono">POIESIS_PACK={lib.pack}</span></> : "No pack yet"}
+            {" · "}<span className="font-mono">scaffolds/_overlays/{lib.name}</span>{" · "}<span className="font-mono">{lib.docs}</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-x-6 gap-y-2">
+          {figures.filter(([n]) => n > 0).map(([n, l]) => (
+            <div key={l}><p className="text-[20px] font-semibold leading-none">{n}</p><p className="text-[11.5px] text-graphite">{l}</p></div>
+          ))}
+        </div>
+      </div>
+      <div className="grid gap-5 p-5 lg:grid-cols-2">
+        <div>
+          <p className="text-[13px] font-semibold">What every application of the pack already has</p>
+          <ul className="mt-2 space-y-1.5 text-[13px] leading-relaxed text-ink">
+            {lib.components.map((c) => {
+              const [head, ...rest] = c.split(":");
+              return <li key={head}><span className="font-semibold">{head}</span>{rest.length ? `:${rest.join(":")}` : ""}</li>;
+            })}
+          </ul>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <p className="text-[13px] font-semibold">Dashboards, each a description to change</p>
+            <Chips items={lib.blueprints.map(words)} />
+          </div>
+          <div>
+            <p className="text-[13px] font-semibold">Lifecycles and operations</p>
+            <Chips items={[...lib.lifecycles, ...lib.operations].map(words)} />
+          </div>
+          <div>
+            <p className="text-[13px] font-semibold">It tells</p>
+            <Chips items={lib.prompts.map((p) => `the ${p}`)} />
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2 border-t border-rule px-5 py-3">
+        {tab("rules", `Rules (${lib.rules.length})`)}{tab("entities", `Entities (${lib.entities.length})`)}{tab("api", `API (${lib.endpoints.length})`)}
+      </div>
+      {open === "rules" && (
+        <div className="grid gap-x-6 border-t border-rule p-5 text-[12.5px] md:grid-cols-2">
+          {lib.rules.map((r) => (
+            <p key={r.id} className="border-b border-rule py-1.5"><span className="mr-2 font-mono text-[11.5px] text-signal">{r.id}</span>{r.title}</p>
+          ))}
+        </div>
+      )}
+      {open === "entities" && (
+        <div className="grid gap-x-6 border-t border-rule p-5 text-[12.5px] md:grid-cols-2">
+          {lib.entities.map((e) => (
+            <p key={e.table} className="border-b border-rule py-1.5">
+              <span className="mr-2 font-mono text-[11.5px] text-signal">{e.table}</span>{e.about}
+              <span className="text-graphite"> · {e.columns} columns</span>
+            </p>
+          ))}
+        </div>
+      )}
+      {open === "api" && (
+        <div className="grid gap-x-6 border-t border-rule p-5 font-mono text-[11.5px] md:grid-cols-2">
+          {lib.endpoints.map((e) => (
+            <p key={e.method + e.path} className="border-b border-rule py-1.5"><span className="mr-2 text-signal">{e.method}</span>{e.path}</p>
+          ))}
+        </div>
+      )}
+    </article>
+  );
+}
 
 const MODE = {
   live: { label: "Live for apps", cls: "bg-[#E6F6EF] text-[#007A4D]" },
@@ -89,7 +192,8 @@ export default function EnterprisePage() {
         </p>
         {data && (
           <div className="mt-5 flex flex-wrap gap-6">
-            {[[data.connectors.length, "connectors"], [data.kernel.length, "kernel capabilities"], [data.apps.length, "enterprise apps"],
+            {[[data.connectors.length, "connectors"], [data.kernel.length, "kernel capabilities"],
+              [(data.libraries ?? []).length, "department libraries"], [data.apps.length, "enterprise apps"],
               [data.connectors.filter((c) => c.mode === "live").length, "live for apps"]].map(([n, l]) => (
               <div key={String(l)}><p className="text-[26px] font-semibold leading-none">{n}</p><p className="text-[12px] text-white/75">{l}</p></div>
             ))}
@@ -113,6 +217,18 @@ export default function EnterprisePage() {
               ))}
             </div>
           </section>
+
+          {(data.libraries ?? []).length > 0 && (
+            <section>
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 className="text-[17px] font-semibold">Department libraries</h2>
+                <p className="text-[12px] text-graphite">What a department&apos;s applications share, written once and handed to each run</p>
+              </div>
+              <div className="space-y-4">
+                {(data.libraries ?? []).map((lib) => <LibraryCard key={lib.name} lib={lib} />)}
+              </div>
+            </section>
+          )}
 
           {groups.map((g) => (
             <section key={g}>
