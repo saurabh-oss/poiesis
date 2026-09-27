@@ -305,7 +305,7 @@ function workflowPanel(entity, id, opts = {}) {
     const steps = h("ol", { class: "wf-steps" }, def.states.map((s, i) => h("li", {
       class: `${i < current ? "past" : ""}${i === current ? " now" : ""}${def.final.includes(s.key) ? " final" : ""}`,
       "data-tip": s.sla_hours ? `SLA ${s.sla_hours} h` : null }, h("span", { class: "wf-dot" }), h("span", {}, s.label))));
-    const approvals = (data.approvals || []).map((a) => ui.notice(h("span", {}, h("b", {}, `Waiting for ${a.approver_label}`),
+    const approvals = (opts.approvals === false ? [] : data.approvals || []).map((a) => ui.notice(h("span", {}, h("b", {}, `Waiting for ${a.approver_label}`),
       ` to approve “${a.title}” — asked by ${a.requested_by} ${ui.timeAgo(a.requested_at)}${a.reason ? `: ${a.reason}` : ""}`), "warn"));
     const history = (data.history || []).filter((e) => ["transition", "approval", "create", "sla", "rule", "connector"].includes(e.action)).slice(0, opts.historyLimit || 8)
       .map((e) => ({ title: e.summary, body: `${e.actor}${e.rule ? ` · ${e.rule}` : ""}`, time: e.at,

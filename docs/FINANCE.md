@@ -4,7 +4,7 @@ The `finance` pack builds an application a finance or procurement team runs its 
 the [enterprise pack](ENTERPRISE.md) with the **finance library** laid over it: what every such
 application shares, written once, tested, and handed to each run ready to use. A run then spends
 its effort on what this organisation does differently — its own rules and thresholds, its own
-records, the dashboards its people asked for.
+records, the dashboards and the work screens its people asked for.
 
 It is the first **department library**. The mechanism that carries it (an overlay with a
 manifest) is how the next department is added; [Adding a department](#adding-a-department) says how.
@@ -23,9 +23,10 @@ POIESIS_PACK=packs/finance.yaml
 | 22 tested rules with ids, in the rule catalogue | The brief's rules under the brief's ids, calling the library's with the brief's numbers |
 | The lifecycle of each record, with approval by amount | The brief's roles, limits, SLAs and consequences, passed to the factory |
 | The roles of the function, a persona for each, their permissions | The brief's own role names |
-| Operations: match an invoice, receive goods, propose a payment run, check a budget | The brief's own operations |
+| Operations: raise a requisition, raise and send its order, receive goods, match an invoice, propose a payment run, check a budget, what waits for whose approval | The brief's own operations |
 | An insight API: figures, breakdowns, trends, budget, ageing, funnel, cross-tabs, controls, scorecards, the rows behind every number | Routers only for what the API does not give |
 | A dashboard kit: whole dashboards from a description, and every chart and record component | The description of each dashboard: what it shows, to whom |
+| Work screens: a queue or a desk from a description (requests, approvals, ordering, goods in, invoices, payment runs, suppliers, contracts) | The description of each: which tabs, which actions, what is its own |
 | An ERP connector, sandboxed until credentials are set | The calls, at the moments the brief names |
 
 ## Where it lives
@@ -41,21 +42,25 @@ scaffolds/_overlays/finance/
     rules.py                       FIN-01…11, PROC-01…11
     workflows.py                   the lifecycles, as factories over an application's models
     personas.py                    roles, personas, permissions, segregation of duties
-    operations.py                  match_invoice, receive_goods, propose_payment_run, budget_position, check_request
+    operations.py                  create_requisition, raise_order, send_order, receive_goods, match_invoice,
+                                   propose_payment_run, budget_position, check_request, waiting
     analytics.py                   the numbers behind a dashboard, as pure functions over rows
     api.py                         the insight API and the operations, under /api/finance/
+    insight.py                     the insight API as functions, for a router or a job
     demo.py                        the demonstration data
     starter.py                     the business logic an application starts with
   backend/app/connectors/erp.py    the ERP connector
-  frontend/finance.js, finance.css the dashboard kit
-  frontend/screens/example_finance.js   the worked example the Developer is shown
-  tests/test_finance_library.py    83 tests: every rule on both sides of its thresholds
+  frontend/finance.js, finance.css the dashboard kit and the work screens
+  frontend/screens/example_finance.js    the worked examples the Developer is shown: a screen people
+  frontend/screens/example_worklist.js   read figures on, and a screen people work on
+  tests/test_finance_library.py    every rule on both sides of its thresholds (85 tests with test_rules.py)
 packs/finance.yaml                 the pack
 services/orchestrator/app/
   workspace/overlays.py            reads an overlay's manifest
   workspace/standards.py           merges the standard entities into the data model
   selftest_finance.py              the platform's self-test of all of it
-tools/finance/                     compose an application without a run; drive the kit in a browser
+tools/finance/                     compose an application without a run; drive the kit and the work
+                                   screens in a browser
 ```
 
 ## The standard entities
@@ -145,9 +150,12 @@ def match(order, receipts, invoice):
 
 Settings: `doa`, `tolerance`, `po_required_above`, `po_exempt_categories`, `quote_bands`,
 `budget_warning_pct`, `material_pct`, `material_amount`, `expiring_days`, `duplicate_days`,
-`split_days`, `orderable`, `late_interest_pct`, `tax_rates`. A name the library does not have is
-refused, so a misspelt one is not silently ignored. Any rule still takes a number of its own
-as an argument. The library's tests state the library's defaults and restore the
+`split_days`, `orderable`, `late_interest_pct`, `tax_rates`, `approval_hours`, `exception_hours`,
+`escalate_to`. `configure` never raises: a name the library does not have, or a value it cannot
+read, is reported in the domain check and in the application's profile, and the rest is applied,
+so one misspelt setting does not take the application's rules down with it. Any rule still takes
+a number of its own as an argument. What a rule returns reads as an object and as a mapping
+(`m.ok`, `m["ok"]`, `m.get("status")`). The library's tests state the library's defaults and restore the
 application's after each.
 
 ## The lifecycles
@@ -167,6 +175,15 @@ record** (`ByAmount`, which follows the configured delegation of authority, PROC
 in a **state of its own while it waits** (`pending="submitted"`): a requisition is "submitted",
 not still "draft", until someone decides. A move sets only the columns the application's table
 has, so an application that left `discount_taken` out still gets the invoice lifecycle.
+
+An order raised from an approved requisition is **released**, not approved a second time
+(`release`, PROC-02): the approval was the requisition's. An order raised on its own still waits
+for its approver by amount.
+
+Records that **arrive already waiting** (loaded as demonstration data, imported, migrated) are
+given the approval request they wait on by the kernel, a few seconds after the application
+starts and at every round of its scheduler, so a requisition loaded as "submitted" is in its
+approver's queue and can be decided.
 
 ## The business logic an application starts with
 
@@ -189,7 +206,7 @@ entities it has. A figure that needs a table the application lacks is empty
 |---|---|
 | `GET calendar` | Today, the fiscal year, the period presets, which entities exist, roles, approval matrix |
 | `GET dimensions` | Cost centres, departments, families, categories, suppliers, countries, for filters |
-| `GET kpis` | 24 headline figures against the comparison period, each with direction, trend and drill |
+| `GET kpis` | 31 headline figures against the comparison period, each with direction, trend and drill; a figure asked for by another name (`variance`, `open_payables`) is found, one the library lacks is left out and named |
 | `GET breakdown` | A measure by a dimension, with shares and the comparison |
 | `GET concentration` | The Pareto, the top-10 share, the Herfindahl index |
 | `GET trend` | A measure per month, quarter or year, with budget and the year before |
@@ -199,7 +216,12 @@ entities it has. A figure that needs a table the application lacks is empty
 | `GET funnel`, `cycle-times` | Purchase to pay: how many reach each step, how long each takes |
 | `GET exceptions`, `accruals`, `renewals`, `controls` | The worklists of the function |
 | `GET suppliers/{id}/scorecard` | One supplier: spend, delivery, risk by factor, contracts |
-| `GET documents` | The rows behind any number, with the names of what they refer to |
+| `GET documents` | The rows behind any number, with the names of what they refer to; `?mine=true` for the ones I raised, buy or own |
+| `GET worklist` | How many of an entity's records are in each state, and their value: what a work screen's tabs count |
+| `GET approvals` | What waits for my decision, each with its record and whether I may decide it (`?mine=false`: for anyone's) |
+| `POST requisitions` | A draft requisition with its reference and its requester |
+| `POST requisitions/{id}/order` | The order of an approved requisition, with an approved supplier (PROC-09), released |
+| `POST purchase-orders/{id}/send` | To the supplier, and into the ERP, once |
 | `POST invoices/{id}/match` | Three-way match, duplicates, no order no pay; moves the invoice |
 | `POST purchase-orders/{id}/receive` | Posts a receipt, moves the order |
 | `POST payment-runs/propose`, `GET payment-runs/payable` | A run of what is due, discounts worth taking taken |
@@ -217,6 +239,10 @@ Setting open commitments against a year-to-date budget makes every cost centre l
 
 Rows are read into memory and summed exactly, which is right for a department's volumes (tens
 of thousands of documents); beyond that, the measures move into SQL behind the same endpoints.
+
+A router asks for the same figures by the same names, with the session it was given:
+`from ..finance import insight`, then `insight.budget(db, by="cost_center")`,
+`insight.kpis(db, keys="spend,overdue")`, `insight.approvals(db)`.
 
 ## The dashboard kit
 
@@ -262,6 +288,54 @@ same component works in a widget, a drawer and on a phone. Everything is built o
 scaffold's Spectrum tokens and follows the light and dark themes. Nothing is ever written as
 "null", "NaN" or "undefined": a figure that is not there is a dash.
 
+## The work screens
+
+The first finance run built its dashboards green at the first attempt and its work screens red
+after every repair: an approval queue that showed only text, a goods-receipt screen that did
+not parse, an order whose status was set by hand. The operations were all in the library; what
+was missing was the screen. So a work screen is a description as well:
+
+```js
+import fin from "../finance.js";
+
+export default {
+  title: "Goods in", story: "S9", icon: "truck",
+  async render(root, ctx) {
+    await fin.workbench(root, ctx, fin.worklists.receiving({
+      remove: ["receipts"],
+      add: [{ key: "large", label: "Large orders", status: "sent,partially_received", actions: ["receive"],
+              filter: (row) => row.amount >= 25000 }],
+    }));
+  },
+};
+```
+
+| Worklist | Whose | Tabs | What is done there |
+|---|---|---|---|
+| `requisitions` | Requester | Drafts, waiting, approved, ordered, cancelled | Raise a request, told who approves it and what it leaves of the budget as it is typed; submit it with what the rules say |
+| `approvals` | Approver | Waiting for me, everything waiting | Approve or reject, with the request, its budget position and the rules beside the decision |
+| `ordering` | Buyer | To order, to send, in approval, with suppliers, received | Raise the order of an approved request; send it to the supplier and the ERP |
+| `receiving` | Goods in | To receive, late, received, receipts | Post a receipt, in part or in full |
+| `invoices` | Accounts payable | To match, held, to approve, to pay, overdue, paid | See what matching would find, then match or hold |
+| `paymentRuns` | Accounts payable, treasury | Due to pay, proposed, approved, released | Propose a run of what is due |
+| `suppliers` | Procurement | Onboarding, approved, suspended, retired | Open the scorecard; move a supplier through its lifecycle |
+| `contracts` | Procurement | To decide, in force, in negotiation, ended | Decide on a renewal before its notice date |
+
+With a description come the tabs with their counts and values, search, CSV export, the choice
+between one's own records and everyone's, the record in a slide-over (what it holds, what the
+rules say about it, its approval chain, its three-way match, its lifecycle with the moves this
+person may make, its history), the forms, and the tab a person was on, remembered. An action is
+offered on the rows it applies to and to the roles that may take it; a refusal is shown where
+the person is, with the rule that refused (`PROC-09: Halden Freight is suspended…`).
+
+- **Views** (tabs): `{ key, label, icon, entity, status, sort, query, filter, actions, columns, empty }`,
+  or a `source` of `approvals`, `payable`, `renewals`, or a `load` of its own.
+- **Actions** (`fin.ACTIONS`): `submit`, `order`, `send`, `receive`, `match`, `approve`, `reject`,
+  `scorecard`; a step of the record's lifecycle, `{ transition: "approve" }`; or one of the
+  application's own, `{ key, label, when, run }`.
+- **Tools** above the rows (`fin.TOOLS`): `propose_run`, or one of the application's own.
+- `fin.advice(findings)` shows what the rules say about a request anywhere.
+
 ## The ERP connector
 
 `erp()` keeps the contract of every connector ([CONNECTORS.md](CONNECTORS.md)): sandboxed
@@ -294,9 +368,12 @@ docker compose exec orchestrator python -m app.selftest_finance      58 checks, 
 ```
 covers the overlay's manifest, the standard-entity merge, the demonstration data (loaded as
 SQL), the starting domain under the domain stage's own check, the contracts a Developer is
-shown, the insight API and the operations as the people of the function (54 checks of their
-own), every `GET` answering without an error in applications with all, some and none of the
-entities, and the library's 83 rule tests.
+shown, the insight API and the operations as the people of the function (73 checks of their
+own, among them a purchase from the request to the ERP), every `GET` answering without an error
+in applications with all, some and none of the entities, and the library's 85 rule tests.
+
+The domain stage and the build run their checks in a sandbox image prepared once with the
+scaffold's requirements (`poiesis-sandbox:python-3.12-slim-<hash>`), so a check needs no network.
 
 The kit in a real browser, without a run:
 
@@ -309,6 +386,12 @@ docker run --rm --network fintest_default -v "$PWD/../..:/t" -v "$PWD/../shots:/
 opens every blueprint and the component gallery as the CFO and as accounts payable, at three
 widths and in both themes, and reports console errors, failed calls, text that should never be
 shown, and widgets that are empty, failed or spilling (78 checks), with a screenshot of each.
+`browse_work.py`, run the same way against a fresh deployment, opens every worklist at three
+widths and then takes one purchase through the application, each step as the person whose job it
+is: a requester raises and submits a request, the budget holder approves it (and rejects another,
+with a reason), the buyer is refused an order to a suspended supplier and raises it with an
+approved one, sends it to the ERP, goods in receives it, accounts payable matches an invoice and
+proposes a payment run (77 checks).
 
 ## Adding a department
 

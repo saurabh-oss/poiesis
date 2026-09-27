@@ -267,13 +267,15 @@ def test_overlay(tmp: Path) -> None:
         expect(f"it has something to tell the {slot}", len(text) > 300 and "{{" not in text, text[:120])
     expect("the Developer's note names the kit, the insight API and the operations",
            all(w in overlays.prompt("developer", NAMES) for w in ('import fin from "../finance.js"', "fin.dashboard(", "fin.data(api)",
-                                                                   "data.match(", "blueprints")), "")
+                                                                   "data.match(", "blueprints", "fin.workbench(",
+                                                                   "fin.worklists.approvals()", "data.raiseOrder(")), "")
     expect("without the overlay nothing is added", overlays.prompt("developer", ["enterprise"]) == ""
            and overlays.components(["enterprise"]) == "" and not overlays.standards(["enterprise"]))
     expect("the Architect is told what every application of the pack has", "dashboard kit" in overlays.components(NAMES)
-           and "insight API" in overlays.components(NAMES))
+           and "insight API" in overlays.components(NAMES) and "work screens" in overlays.components(NAMES))
     expect("its settings reach a deployed application", set(overlays.settings_prefixes(NAMES)) == {"ERP_", "FISCAL_", "FINANCE_", "BASE_CURRENCY"})
-    expect("its worked example is shown to the Developer", overlays.references(NAMES) == [("frontend/screens/example_finance.js", 3400)])
+    expect("its worked examples are shown to the Developer: a screen to read and a screen to work on",
+           overlays.references(NAMES) == [("frontend/screens/example_finance.js", 3400), ("frontend/screens/example_worklist.js", 2700)])
     expect("example screens are told from story screens by name",
            overlays.is_example_screen("example.js") and overlays.is_example_screen("example_finance.js")
            and not overlays.is_example_screen("examples_of_spend.js") and not overlays.is_example_screen("spend.js"))
@@ -283,7 +285,8 @@ def test_overlay(tmp: Path) -> None:
     expect("an application gets the library, the kit, the connector and their tests",
            {"backend/app/finance/rules.py", "backend/app/finance/api.py", "backend/app/finance/operations.py",
             "backend/app/finance/demo.py", "backend/app/connectors/erp.py", "frontend/finance.js", "frontend/finance.css",
-            "frontend/screens/example_finance.js", "tests/test_finance_library.py", "backend/app/kernel/workflow.py"} <= files,
+            "frontend/screens/example_finance.js", "frontend/screens/example_worklist.js", "tests/test_finance_library.py",
+            "backend/app/kernel/workflow.py"} <= files,
            str(sorted(f for f in files if "finance" in f))[:400])
     expect("and none of what is about the overlay", not any(f.endswith("overlay.yaml") or f.startswith("prompts/") for f in files),
            str([f for f in files if "overlay" in f or f.startswith("prompts")]))
@@ -455,6 +458,8 @@ def approve(invoice_id: int, db=Depends(get_session)):
         expect("the verified routes list the insight API and the operations",
                {("GET", "/api/finance/kpis"), ("GET", "/api/finance/breakdown"), ("GET", "/api/finance/documents"),
                 ("POST", "/api/finance/invoices/{invoice_id}/match"), ("GET", "/api/finance/suppliers/{supplier_id}/scorecard"),
+                ("POST", "/api/finance/requisitions"), ("POST", "/api/finance/requisitions/{requisition_id}/order"),
+                ("GET", "/api/finance/approvals"), ("GET", "/api/finance/worklist"),
                 ("GET", "/api/invoices")} <= routes, str(sorted(p for _, p in routes if "finance" in p))[:500])
         overlays_before = overlays.active
         overlays.active = lambda: NAMES          # the pack of this process may be another
@@ -464,8 +469,10 @@ def approve(invoice_id: int, db=Depends(get_session)):
             begun = domain_stage.starter(rid)
         finally:
             overlays.active = overlays_before
-        expect("the Developer is shown the finance example beside the scaffold's", "### frontend/screens/example_finance.js" in shown
-               and "fin.dashboard(root, ctx, fin.blueprints.executive(" in shown and "### frontend/screens/example.js" in shown, shown[:200])
+        expect("the Developer is shown the finance examples beside the scaffold's", "### frontend/screens/example_finance.js" in shown
+               and "fin.dashboard(root, ctx, fin.blueprints.executive(" in shown and "### frontend/screens/example.js" in shown
+               and "### frontend/screens/example_worklist.js" in shown and "fin.workbench(root, ctx, fin.worklists.receiving(" in shown
+               and "fin.worklists.approvals()" in shown, shown[:200])
         expect("the rule tests run with the library's own", "tests/test_rules.py tests/test_finance_library.py" in command, command[-200:])
         expect("the domain stage starts from the library's domain for this application's tables",
                set(begun) == set(domain_stage.FILES) and "register(flows.invoice(Invoice))" in begun["backend/app/domain/workflows.py"]
@@ -475,12 +482,14 @@ def approve(invoice_id: int, db=Depends(get_session)):
             'await fin.dashboard(root, ctx, fin.blueprints.spend()); } };\n', encoding="utf-8")
         listed = ws_checks.regenerate_registry(rid)
         registry = (wroot / "frontend" / "screens" / "index.js").read_text(encoding="utf-8")
-        expect("once a story has a screen, neither example is listed",
-               '"spend"' in registry and "example_finance" not in registry and "example.js" not in registry, registry[:300])
+        expect("once a story has a screen, no example is listed",
+               '"spend"' in registry and "example_finance" not in registry and "example_worklist" not in registry
+               and "example.js" not in registry, registry[:300])
         (wroot / "frontend" / "screens" / "spend.js").unlink()
         ws_checks.regenerate_registry(rid)
         registry = (wroot / "frontend" / "screens" / "index.js").read_text(encoding="utf-8")
-        expect("until then both are, as examples", registry.count("example: true") == 2 and '"example_finance"' in registry, registry[:400])
+        expect("until then they are, as examples", registry.count("example: true") == 3 and '"example_finance"' in registry
+               and '"example_worklist"' in registry, registry[:400])
     finally:
         shutil.rmtree(wroot, ignore_errors=True)
 
@@ -522,8 +531,11 @@ def test_library(tmp: Path) -> None:
         shutil.copytree(root / "frontend", fe)
         (fe / "package.json").write_text('{"type":"module"}', encoding="utf-8")
         script = ("const fin = (await import('./finance.js')).default; const s = (await import('./screens/example_finance.js')).default;"
-                  "const cal = fin.calendar(4);"
+                  "const w = (await import('./screens/example_worklist.js')).default; const cal = fin.calendar(4);"
+                  "const desk = fin.worklists.receiving({ remove: ['receipts'], add: [{ key: 'large', label: 'Large orders' }] });"
                   "console.log(JSON.stringify({ parts: Object.keys(fin).length, blueprints: Object.keys(fin.blueprints), widgets: Object.keys(fin.WIDGETS),"
+                  " worklists: Object.keys(fin.worklists), actions: Object.keys(fin.ACTIONS), tools: Object.keys(fin.TOOLS), work: [w.title, typeof w.render, typeof fin.workbench],"
+                  " desk: [desk.entity, desk.views.map((v) => v.key), fin.worklists.receiving().views.length],"
                   " screen: [s.title, typeof s.render], money: [fin.money(1234567.5), fin.money(1234567.5, { compact: true }), fin.money(null), fin.money(NaN)],"
                   " fy: [cal.fiscalYear('2026-09-25'), cal.quarter('2026-09-25'), cal.bounds('quarter', '2026-09-25'), cal.label('quarter', '2026-09-25')],"
                   " variance: fin.variance(104999, 100000), date: fin.date('2026-09-25T10:00:00Z'), spec: fin.blueprints.spend({ remove: ['pivot'] }).widgets.length }))")
@@ -535,6 +547,11 @@ def test_library(tmp: Path) -> None:
         expect("the dashboard kit loads where there is no page, as the platform's frontend check loads a screen",
                got.returncode == 0 and seen.get("screen") == ["Finance overview", "function"] and len(seen.get("blueprints", [])) == 8
                and len(seen.get("widgets", [])) >= 15, (got.stderr or got.stdout)[-600:])
+        expect("the work screens are descriptions too: eight worklists, what people do, and a tab added or taken away",
+               seen.get("worklists") == ["requisitions", "approvals", "ordering", "receiving", "invoices", "paymentRuns", "suppliers", "contracts"]
+               and {"submit", "order", "send", "receive", "match", "approve", "reject"} <= set(seen.get("actions", []))
+               and seen.get("tools") == ["propose_run"] and seen.get("work") == ["Goods in", "function", "function"]
+               and seen.get("desk") == ["purchase_order", ["due", "late", "received", "large"], 4], json.dumps(seen)[:700])
         expect("it writes amounts, fiscal periods and dates the way the library does",
                seen.get("money") == ["£1,234,567.50", "£1.23M", "—", "—"] and seen.get("date") == "25 Sep 2026"
                and seen.get("fy") == [2027, 2, ["2026-07-01", "2026-09-30"], "Q2 FY2027"]

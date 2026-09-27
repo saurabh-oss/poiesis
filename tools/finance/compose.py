@@ -3,8 +3,9 @@ finance library without a run. Written into tools/finance/out/app (ignored by gi
 
     python tools/finance/compose.py                     the scaffold with both overlays, as a run starts from
     python tools/finance/compose.py --sample            plus the standard entities, the library's starting domain, its
-                                                        demonstration data in db/init.sql, a screen per blueprint and
-                                                        the component gallery: an application that deploys
+                                                        demonstration data in db/init.sql, a screen per dashboard
+                                                        blueprint and per worklist, and the component gallery: an
+                                                        application that deploys
     python tools/finance/compose.py --sample --tables=cost_center,supplier,invoice     with only those entities
 
 See tools/finance/README.md for deploying it and driving it in a browser.
@@ -38,6 +39,25 @@ export default {
   async render(root, ctx) {
     window.__fin = fin;
     window.__board = await fin.dashboard(root, ctx, fin.blueprints.%(name)s({ targets: { po_coverage: 95, first_time_match: 85, on_time_payment: 95 } }));
+  },
+};
+'''
+
+
+WORK = {
+    "requisitions": ("My requests", "inbox", "S9"), "approvals": ("Approval queue", "shield", "S10"),
+    "ordering": ("Ordering", "cart", "S11"), "receiving": ("Goods in", "truck", "S12"),
+    "invoices": ("Invoice desk", "layers", "S13"), "paymentRuns": ("Payment runs", "dollar", "S14"),
+    "suppliers": ("Supplier list", "building", "S15"), "contracts": ("Contracts", "file", "S16"),
+}
+
+DESK = '''import fin from "../finance.js";
+
+export default {
+  title: "%(title)s", icon: "%(icon)s", story: "%(story)s",
+  async render(root, ctx) {
+    window.__fin = fin;
+    window.__desk = await fin.workbench(root, ctx, fin.worklists.%(name)s());
   },
 };
 '''
@@ -115,10 +135,14 @@ def main() -> None:
             (screens / f"{name.lower()}.js").write_text(BOARD % {"name": name, "title": title, "icon": icon, "story": story},
                                                         encoding="utf-8", newline="\n")
             entries.append(name.lower())
+        for name, (title, icon, story) in WORK.items():
+            (screens / f"work_{name.lower()}.js").write_text(DESK % {"name": name, "title": title, "icon": icon, "story": story},
+                                                             encoding="utf-8", newline="\n")
+            entries.append(f"work_{name.lower()}")
         for extra in HERE.glob("screen_*.js"):
             shutil.copy(extra, screens / extra.name[len("screen_"):])
             entries.append(extra.stem[len("screen_"):])
-        entries.append("example_finance")
+        entries.extend(["example_finance", "example_worklist"])
         (screens / "index.js").write_text(
             "const entries = [\n" + "".join(f'  {{ id: "{e}", example: false, load: () => import("./{e}.js") }},\n' for e in entries)
             + "];\n\nexport default await Promise.all(entries.map(async (e) => {\n  try {\n"

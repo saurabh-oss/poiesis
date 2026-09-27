@@ -13,6 +13,11 @@
  *       },
  *     };
  *
+ * A work screen is a description too: the records of one job as tabs with their counts, and what
+ * this person does to them, each through the record's workflow and its rules:
+ *
+ *         await fin.workbench(root, ctx, fin.worklists.receiving());
+ *
  * A whole dashboard from a description: the period picker, the filters, the headline
  * figures against last year, the charts, the rows behind every number, CSV export and
  * each person's own arrangement. The figures come from the insight API (/api/finance/…),
@@ -20,6 +25,8 @@
  *
  *   Dashboards  dashboard(root, ctx, spec), blueprints.{executive, spend, budget, payables,
  *               procureToPay, suppliers, controls, savings}, widget types (WIDGETS)
+ *   Work        workbench(root, ctx, spec), worklists.{requisitions, approvals, ordering, receiving,
+ *               invoices, paymentRuns, suppliers, contracts}, what people do (ACTIONS, TOOLS), advice
  *   Data        data(api): calendar, dimensions, kpis, breakdown, trend, budget, waterfall, aging,
  *               funnel, pivot, concentration, cycleTimes, exceptions, accruals, renewals,
  *               controls, scorecard, documents
@@ -259,6 +266,12 @@ const once = new WeakMap();
  *   await data.proposeRun({ due_by: "2026-10-09" })    a payment run of what is due, discounts taken
  *   await data.budgetPosition({ cost_center_id: 3, requested: 5000 })      what is left (FIN-02)
  *   await data.advice(requisition.id)                  approver, budget, quotes, supplier, splits
+ *   await data.createRequisition({ title, amount, cost_center_id })       a draft, with its reference
+ *   await data.raiseOrder(requisition.id, { supplier_id: 12 })            the order of an approved requisition
+ *   await data.sendOrder(order.id)                     to the supplier, and into the ERP
+ *   await data.approvals()                             what waits for my decision; data.decide(approvalId, true, "note")
+ *   await data.worklist({ entity: "invoice" })         how many records are in each state
+ *   await data.transition("invoice", id, "approve", { reason: "" })       a step of a record's lifecycle
  * calendar() and dimensions() are asked for once and remembered.
  */
 export function data(api) {
@@ -294,6 +307,13 @@ export function data(api) {
     proposeRun: (body) => send("payment-runs/propose", body),
     budgetPosition: (p) => get("budget/position", p),
     advice: (requisitionId) => get(`requisitions/${encodeURIComponent(requisitionId)}/advice`),
+    createRequisition: (body) => send("requisitions", body),
+    raiseOrder: (requisitionId, body) => send(`requisitions/${encodeURIComponent(requisitionId)}/order`, body),
+    sendOrder: (orderId) => send(`purchase-orders/${encodeURIComponent(orderId)}/send`),
+    approvals: (p) => get("approvals", p),
+    worklist: (p) => get("worklist", p),
+    decide: (approvalId, approve, note) => api(`/platform/approvals/${encodeURIComponent(approvalId)}/${approve ? "approve" : "reject"}`, { method: "POST", body: { note: note || "" } }),
+    transition: (entity, id, name, body) => api(`/platform/workflows/${encodeURIComponent(entity)}/${encodeURIComponent(id)}/${encodeURIComponent(name)}`, { method: "POST", body: body || {} }),
   };
 }
 
@@ -1723,7 +1743,7 @@ const RECORD_FIELDS = {
 };
 
 /** What a row opens when the application says nothing else: the record, its lifecycle and, for an invoice, its match. */
-function recordDrawer(entity, row, env) {
+function recordDrawer(entity, row, env, opts = {}) {
   const fields = RECORD_FIELDS[entity] || Object.keys(row).filter((k) => k !== "id" && !k.endsWith("_id") && typeof row[k] !== "object").map((k) => [words(k), k]);
   const show = (value, kind) => (value === null || value === undefined || value === "" ? null
     : kind === "some" ? (num(value) ? money(value) : null) : kind === "money" ? money(value) : kind === "date" ? date(value) : kind === "days" ? days(value) : kind === "words" ? words(value)
@@ -1751,7 +1771,7 @@ function recordDrawer(entity, row, env) {
       entity === "requisition" || entity === "purchase_order" ? approvalChain(row.amount, env.calendar.approval_matrix, { roles: roleNames(env) }) : null,
       order,
       ui.kv(pairs),
-      workflow && typeof workflow.panel === "function" ? guarded(() => workflow.panel(entity, row.id, { onChange: () => env.reload() })) : null,
+      workflow && typeof workflow.panel === "function" ? guarded(() => workflow.panel(entity, row.id, { onChange: () => env.reload(), ...(opts.panel || {}) })) : null,
     ].filter(Boolean),
   };
 }
@@ -1848,9 +1868,527 @@ export const blueprints = {
       { type: "documents", entity: "savings_initiative", title: "Initiatives", dated: false }] }),
 };
 
+/* ---------------------------------------------------------------- work screens */
+
+const LEVEL_ICON = { ok: "check-circle", warn: "alert", down: "alert", info: "info" };
+const said = (err) => (err && err.rule ? `${err.rule}: ${err.detail || err.message}` : String((err && (err.detail || err.message)) || err));
+const OWNED = { requisition: "requester_name", purchase_order: "buyer_name", contract: "owner_name", goods_receipt: "received_by",
+  savings_initiative: "owner_name", budget_change: "requested_by" };
+const MINE_WORDS = { requisition: "My requests", purchase_order: "My orders", contract: "My contracts", goods_receipt: "My receipts",
+  savings_initiative: "My initiatives", budget_change: "My requests" };
+
+/**
+ * What the rules say about a request, before it is submitted: fin.advice(await data.advice(requisition.id)).
+ * Each finding is { rule, level: ok | info | warn | down, message }.
+ */
+export function advice(result, opts = {}) {
+  css();
+  const list = ((result && result.findings) || []).filter(Boolean);
+  if (!list.length) return opts.empty === false ? null : nothing("Nothing to flag", "No rule has anything to say about this.");
+  return h("div", { class: "fin-advice" }, list.map((f) => h("div", { class: `fin-finding fin-finding-${LEVEL_ICON[f.level] ? f.level : "info"}` },
+    h("span", { class: "fin-finding-icon" }, ui.icon(LEVEL_ICON[f.level] || "info", { size: 16 })),
+    h("span", { class: "fin-finding-text" }, f.message),
+    f.rule ? h("span", { class: "fin-rule mono", title: "The rule that says so" }, f.rule) : null)));
+}
+
+/** A form in a dialog whose answer is what `send` returns; a refusal is shown in the dialog, with its rule. */
+function ask(opts) {
+  return new Promise((resolve) => {
+    let done = false;
+    const form = ui.form({ fields: opts.fields || [], submit: opts.submit || "Save", submitIcon: opts.submitIcon, reset: false,
+      onsubmit: async (values) => {
+        try { return await opts.send(values); } catch (err) { throw new Error(said(err)); }
+      },
+      onsuccess: (result) => { done = true; dialog.close(); resolve(result === undefined || result === null ? true : result); } });
+    const above = typeof opts.above === "function" ? opts.above(form) : opts.above;
+    const below = typeof opts.below === "function" ? opts.below(form) : opts.below;
+    // What the form is told as it is filled in stands above its button, where it is read before pressing.
+    if (below) form.insertBefore(below, form.querySelector(".form-actions"));
+    const dialog = ui.modal({ title: opts.title, subtitle: opts.subtitle, icon: opts.icon || "edit", size: opts.size,
+      content: h("div", { class: "stack fin-ask" }, [above, form].filter(Boolean)), onclose: () => { if (!done) resolve(null); } });
+  });
+}
+
+const optionsOf = (env, key, none) => [{ value: "", label: none }, ...(((env.dimensions || {})[key] || {}).options || []).map((o) => ({ value: o.value, label: o.label }))];
+const blank = (values) => Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v === "" ? null : v]));
+
+async function newRequisition(env, defaults = {}) {
+  const live = h("div", { class: "fin-live" });
+  let asked = 0;
+  const watch = (form) => {
+    const tell = async () => {
+      const amount = num(form.controls.amount.value);
+      const centre = form.controls.cost_center_id.value;
+      asked += 1;
+      const mine = asked;
+      if (amount === null || amount <= 0) { put(live); return; }
+      const chain = approvalChain(amount, env.calendar.approval_matrix, { roles: env.calendar.roles || {} });
+      put(live, chain);
+      if (!centre) return;
+      try {
+        const position = await env.data.budgetPosition({ cost_center_id: centre, requested: amount });
+        if (mine !== asked) return;
+        put(live, chain, position.has_budget === false ? null : advice({ findings: [{ rule: "FIN-02", message: position.message,
+          level: { ok: "ok", warning: "warn", exceeded: "down" }[position.status] || "info" }] }));
+      } catch { /* the budget is not this person's to see: the approver is still shown */ }
+    };
+    let timer = null;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(tell, 350); };
+    form.controls.amount.addEventListener("input", soon);
+    form.controls.cost_center_id.addEventListener("change", soon);
+    if (defaults.amount) soon();
+    return live;
+  };
+  return ask({ title: "New purchase requisition", subtitle: "A draft: you submit it for approval once it says what you need", icon: "plus",
+    submit: "Save as draft", size: "lg", below: watch,
+    fields: [
+      { name: "title", label: "What is needed", required: true, span: "all", value: defaults.title, placeholder: "Twelve laptops for the analytics team" },
+      { name: "amount", label: `Amount (${settings.currency})`, type: "number", required: true, min: 0, step: "0.01", value: defaults.amount },
+      { name: "cost_center_id", label: "Cost centre", type: "select", required: true, options: optionsOf(env, "cost_center_id", "Choose a cost centre"), value: defaults.cost_center_id },
+      { name: "spend_category_id", label: "Category", type: "select", options: optionsOf(env, "spend_category_id", "Choose a category"), value: defaults.spend_category_id },
+      { name: "supplier_id", label: "Suggested supplier", type: "select", options: optionsOf(env, "supplier_id", "No preference"), value: defaults.supplier_id },
+      { name: "needed_by", label: "Needed by", type: "date", value: defaults.needed_by },
+      { name: "justification", label: "Why it is needed", type: "textarea", span: "all", value: defaults.justification },
+    ],
+    send: (values) => env.data.createRequisition({ ...blank(values), justification: values.justification || "" }) });
+}
+
+const outstanding = (row) => Math.max(0, Math.round(((num(row.amount) || 0) - (num(row.received_amount) || 0)) * 100) / 100);
+
+/**
+ * What people do to the records of a work screen. A view names them: actions: ["receive"]. Each is offered on the
+ * rows it applies to, to the people whose role allows it, and says what happened. An action of one's own:
+ *   { key: "chase", label: "Chase", icon: "mail", permission: "purchase_order:update", when: (row) => row.days_late > 0,
+ *     run: async (row, env) => { await env.api(`/purchase-orders/${row.id}/chase`, { method: "POST" }); return "Chased"; } }
+ * or a step of the record's lifecycle: { transition: "approve", label: "Approve for payment", when: (row) => row.status === "matched" }.
+ */
+export const ACTIONS = {
+  submit: { label: "Submit", icon: "arrow-right", entity: "requisition", permission: "requisition:submit", when: (r) => r.status === "draft",
+    async run(row, env) {
+      let findings = null;
+      try { findings = await env.data.advice(row.id); } catch { /* the advice is a help, not a condition */ }
+      const out = await ask({ title: `Submit ${row.reference || "the request"}`, subtitle: `${money(row.amount)} · ${row.title || ""}`, icon: "arrow-right",
+        submit: "Submit for approval", above: findings ? advice(findings, { empty: false }) : null,
+        fields: [{ name: "reason", label: "Note for the approver", type: "textarea", span: "all", value: row.justification || "" }],
+        send: (v) => env.data.transition("requisition", row.id, "submit", { reason: v.reason || "" }) });
+      return out ? (out.message || "Submitted for approval") : null;
+    } },
+  order: { label: "Raise the order", icon: "cart", entity: "requisition", permission: "requisition:order", when: (r) => r.status === "approved",
+    async run(row, env) {
+      const out = await ask({ title: `Order for ${row.reference || "the request"}`, subtitle: `${money(row.amount)} · ${row.title || ""}`, icon: "cart",
+        submit: "Raise the order",
+        fields: [{ name: "supplier_id", label: "Supplier", type: "select", required: true, options: optionsOf(env, "supplier_id", "Choose a supplier"), value: row.supplier_id ?? "", span: "all" },
+          { name: "expected_delivery", label: "Expected delivery", type: "date", value: String(row.needed_by || "").slice(0, 10) }],
+        send: (v) => env.data.raiseOrder(row.id, blank(v)) });
+      return out ? `${out.reference} raised${out.supplier ? ` with ${out.supplier}` : ""}` : null;
+    } },
+  send: { label: "Send to supplier", icon: "mail", entity: "purchase_order", permission: "purchase_order:send", when: (r) => r.status === "approved",
+    async run(row, env) {
+      if (!(await ui.confirm(`Send ${row.reference || "this order"} for ${money(row.amount)} to ${row.supplier_name || "the supplier"}?`, { title: "Send the order", confirmLabel: "Send" }))) return null;
+      const out = await env.data.sendOrder(row.id);
+      const erp = out.erp || null;
+      return `${out.reference} sent${erp && erp.ok ? ` · in the ERP as ${erp.key}${erp.mode === "sandbox" ? " (sandbox)" : ""}` : ""}`;
+    } },
+  receive: { label: "Receive", icon: "truck", entity: "purchase_order", permission: "goods_receipt:create", when: (r) => ["sent", "partially_received"].includes(r.status),
+    async run(row, env) {
+      const left = outstanding(row);
+      const out = await ask({ title: `Receive ${row.reference || "the order"}`, icon: "truck", submit: "Post the receipt",
+        subtitle: `${row.supplier_name || "Supplier"} · ${money(left)} of ${money(row.amount)} still to come`,
+        fields: [{ name: "amount", label: `Value received (${settings.currency})`, type: "number", required: true, min: 0, step: "0.01", value: left || "" },
+          { name: "quantity", label: "Quantity (optional)", type: "number", min: 0, step: "any" },
+          { name: "received_by", label: "Received by", value: (env.me && (env.me.name || env.me.full_name)) || "", span: "all" },
+          { name: "note", label: "Note", type: "textarea", span: "all" }],
+        send: (v) => env.data.receive(row.id, blank(v)) });
+      return out ? `${row.reference || "Order"} ${out.in_full ? "received in full" : "partly received"}${out.on_time === false ? " · late" : ""}` : null;
+    } },
+  match: { label: "Match", icon: "layers", entity: "invoice", permission: "invoice:match", when: (r) => r.status === "received",
+    async run(row, env) {
+      const seen = await env.data.matchPreview(row.id);
+      const go = await new Promise((resolve) => {
+        let chosen = false;
+        ui.modal({ title: `Match ${row.reference || "the invoice"}`, subtitle: [row.supplier_name, money(row.amount)].filter(Boolean).join(" · "), icon: "layers",
+          content: h("div", { class: "stack" }, matchStatus(seen),
+            h("p", { class: "faint", style: { margin: 0 } }, seen.ok ? "It agrees with its order and receipt: matching moves it on to approval."
+              : "It does not agree: matching holds it as an exception, with the reason.")),
+          actions: (close) => [ui.button("Cancel", { tone: "secondary", onclick: close }),
+            ui.button(seen.ok ? "Match" : "Hold as an exception", { icon: seen.ok ? "check" : "flag", onclick: () => { chosen = true; close(); resolve(true); } })],
+          onclose: () => { if (!chosen) resolve(false); } });
+      });
+      if (!go) return null;
+      const out = await env.data.match(row.id);
+      return { text: out.ok ? `${row.reference || "Invoice"} matched` : `${row.reference || "Invoice"} held: ${words(out.status)}`, tone: out.ok ? "ok" : "warn" };
+    } },
+  approve: { label: "Approve", icon: "check", when: (r) => Boolean(r.approval_id && r.can_decide), run: (row, env) => decide(row, env, true) },
+  reject: { label: "Reject", icon: "x", tone: "secondary", when: (r) => Boolean(r.approval_id && r.can_decide), run: (row, env) => decide(row, env, false) },
+  scorecard: { label: "Scorecard", icon: "chart", entity: "supplier", quiet: true, when: () => true, run: (row, env) => { env.openSupplier(row.id); return null; } },
+};
+
+async function decide(row, env, yes) {
+  const out = await ask({ title: yes ? "Approve" : "Reject", subtitle: [row.reference, row.title, num(row.amount) !== null ? money(row.amount) : null].filter(Boolean).join(" · "),
+    icon: yes ? "check" : "x", submit: yes ? "Approve" : "Reject",
+    fields: [{ name: "note", label: yes ? "Note (optional)" : "Why?", type: "textarea", required: !yes, span: "all" }],
+    send: (v) => env.data.decide(row.approval_id, yes, v.note || "") });
+  if (!out) return null;
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("poiesis:notifications"));
+  return { text: yes ? `${row.reference || "Request"} approved` : `${row.reference || "Request"} rejected`, tone: yes ? "ok" : "warn" };
+}
+
+/** What a work screen offers above its rows: tools: ["propose_run"], or { label, icon, permission, run: async (env) => "Done" }. */
+export const TOOLS = {
+  propose_run: { label: "Propose a payment run", icon: "dollar", permission: "payment_run:create",
+    async run(env) {
+      const day = env.calendar.today;
+      const out = await ask({ title: "Propose a payment run", subtitle: "Approved invoices due by a date, and the discounts worth taking", icon: "dollar", submit: "Propose the run",
+        fields: [{ name: "due_by", label: "Pay what is due by", type: "date", required: true, value: addDays(day, 7) },
+          { name: "run_date", label: "Pay on", type: "date", value: addDays(day, 1) }],
+        send: (v) => env.data.proposeRun(blank(v)) });
+      return out ? `${out.reference || "A run"} proposed: ${number(out.invoices)} invoices, ${money(out.total_amount)}` : null;
+    } },
+};
+
+const SOURCES = {
+  documents: (view, env, state) => env.data.documents({ entity: view.entity, status: view.status, dated: false, sort: view.sort, limit: view.limit || 500,
+    mine: state.mine && OWNED[view.entity] ? true : undefined, ...(view.query || {}) }),
+  approvals: (view, env) => env.data.approvals({ entity: view.of, ...(view.query || {}) }),
+  payable: (view, env) => env.data.payable(view.query || {}).then((r) => ({ ...r, rows: (r.rows || []).map((x) => ({ ...x, id: x.invoice_id })) })),
+  renewals: (view, env) => env.data.renewals({ within: 180, ...(view.query || {}) }).then((r) => ({ ...r, amount: r.annual_value })),
+};
+
+const VIEW_COLUMNS = {
+  approvals: [refCol(), { key: "entity", label: "What", render: (r) => standardTitle(r.entity) },
+    { key: "title", label: "For", render: (r) => r.title || r.name || r.supplier_name || r.approval_title || DASH }, { key: "requested_by", label: "Asked by" },
+    amountCol("amount", "Amount"), { key: "approver", label: "Approver" },
+    { key: "requested_at", label: "Asked", render: (r) => h("span", { class: r.overdue ? "fin-bad-text" : null }, r.overdue ? `${date(r.requested_at)} · overdue` : date(r.requested_at)) }],
+  payable: [refCol(), { key: "supplier_name", label: "Supplier" }, dateCol("due_date", "Due"), amountCol("amount", "Invoice"), amountCol("discount", "Discount"),
+    amountCol("pay", "To pay"), { key: "why", label: "Why now", render: (r) => words(r.why) }],
+  renewals: [refCol(), { key: "title", label: "Contract" }, { key: "supplier_name", label: "Supplier" }, dateCol("decide_by", "Decide by"),
+    { key: "days_left", label: "Days left", align: "right" }, amountCol("annual_value", "A year"), statusCol("renewal", "Renewal")],
+};
+
+/**
+ * A work screen from a description: the records of one job as tabs, each with its count, and what this person does to them.
+ * Draws into `root` and returns { reload, env, view() }.
+ *
+ *   await fin.workbench(root, ctx, fin.worklists.receiving());             // start from the worklist nearest the story
+ *
+ *   await fin.workbench(root, ctx, {
+ *     id: "goods-in",                                   // names what this person's choice of tab is kept under
+ *     entity: "purchase_order",                         // of every view that names none
+ *     views: [
+ *       { key: "due", label: "To receive", status: "sent,partially_received", sort: "expected_delivery", actions: ["receive"] },
+ *       { key: "late", label: "Late", status: "sent,partially_received", filter: (row, env) => row.expected_delivery < env.calendar.today },
+ *       { key: "receipts", label: "Receipts", entity: "goods_receipt" },
+ *     ],
+ *     mine: true,                                       // starts with this person's own records, and offers everyone's; left out, no such choice
+ *     create: "requisition",                            // a "New" button: the library's requisition form, or { label, permission, run: async (env) => … }
+ *     tools: ["propose_run"],                           // buttons above the rows (TOOLS), or { label, icon, run: async (env) => "Done" }
+ *     columns: { purchase_order: [...] },               // columns of one's own for an entity; left out, the standard ones
+ *   });
+ *
+ * A view: { key, label, icon?, entity?, status?: "a,b", sort?, query?: { overdue: true }, filter?: (row, env) => bool,
+ *   source?: "documents" | "approvals" | "payable" | "renewals", load?: async (env) => ({ rows, count, amount }),
+ *   actions?: [names of ACTIONS | { key, label, run } | { transition }], columns?, empty?: { title, hint } }.
+ * A row opens the record: what it holds, what the rules say about it, its lifecycle with what this person may do, its history.
+ */
+export async function workbench(root, ctx, spec = {}) {
+  css();
+  const { api } = ctx;
+  const source = data(api);
+  const helpers = ctx.enterprise || {};
+  const me = helpers.me ? (typeof helpers.me === "function" ? helpers.me() : helpers.me) : null;
+  const store = memory(`fin:work:${slug(spec.id || spec.title || spec.entity || "work")}:${(me && (me.username || me.id)) || "anyone"}`);
+  const kept = store.read();
+  root.replaceChildren(ui.skeleton());
+  let cal, dims;
+  try {
+    [cal, dims] = await Promise.all([source.calendar(), source.dimensions()]);
+  } catch (err) {
+    root.replaceChildren(ui.notice(`The records could not be loaded: ${said(err)}`, "down"));
+    return { reload() {}, env: null, view: () => null };
+  }
+  configure({ currency: cal.currency, fiscalStartMonth: cal.fiscal_year_start_month });
+
+  const views = (spec.views && spec.views.length ? spec.views : [{ key: "all", label: "All" }]).map((v, i) => {
+    const kind = typeof v.load === "function" ? "custom" : v.source || "documents";
+    return { ...v, key: v.key || `view-${i}`, kind, entity: v.entity || (kind === "payable" ? "invoice" : kind === "renewals" ? "contract" : spec.entity) };
+  });
+  const state = { view: views.some((v) => v.key === (spec.view || kept.view)) ? (spec.view || kept.view) : views[0].key,
+    mine: spec.mine === undefined ? false : (kept.mine === undefined ? Boolean(spec.mine) : Boolean(kept.mine)) };
+  const found = new Map();          // what each view's rows came to, once they are known
+  let generation = 0;
+
+  const env = {
+    data: source, ctx, api, spec, calendar: cal, dimensions: dims.dimensions, me,
+    can: typeof helpers.can === "function" ? (permission) => helpers.can(permission) : () => true,
+    get scope() { return { compare: "none" }; },
+    get compare() { return ""; },
+    record: (entity) => (row) => opened(views.find((v) => v.key === state.view), { ...row, entity: row.entity || entity }),
+    drill(title, question) {
+      if (!question || !question.entity) return null;
+      return drill({ title, subtitle: "As of today", load: () => source.documents({ dated: false, ...question }), drawer: (row) => recordDrawer(question.entity, row, env) });
+    },
+    openSupplier(id) {
+      if (id === null || id === undefined) return null;
+      return ui.drawer({ title: "Supplier", subtitle: "This fiscal year to date", icon: "building",
+        content: () => source.scorecard(id, { period: "fy_to_date" }).then((card) => scorecard(card, {
+          onDocuments: () => env.drill(`Invoices: ${card.supplier.name}`, { entity: "invoice", supplier_id: id }) })) });
+    },
+    reload: () => draw(),
+  };
+
+  const named = (a) => {
+    if (typeof a === "string") return ACTIONS[a] ? { key: a, ...ACTIONS[a] } : null;
+    if (a && a.transition) {
+      return { key: a.transition, label: a.label || words(a.transition), icon: a.icon || "arrow-right", tone: a.tone, when: a.when || (() => true),
+        permission: a.permission, async run(row, env_) {
+          const entity = row.entity || a.entity || views.find((v) => v.key === state.view).entity;
+          const out = a.note === false ? await env_.data.transition(entity, row.id, a.transition, {})
+            : await ask({ title: a.label || words(a.transition), subtitle: row.reference || row.title || row.name, icon: a.icon || "arrow-right", submit: a.label || words(a.transition),
+              fields: [{ name: "reason", label: a.reason ? "Reason" : "Note (optional)", type: "textarea", required: Boolean(a.reason), span: "all" }],
+              send: (v) => env_.data.transition(entity, row.id, a.transition, { reason: v.reason || "" }) });
+          return out ? (out.status === "pending_approval" ? { text: out.message || "Sent for approval", tone: "warn" } : `${a.label || words(a.transition)}: done`) : null;
+        } };
+    }
+    return a && typeof a.run === "function" ? { key: a.key || slug(a.label), when: () => true, ...a } : null;
+  };
+  const offered = (view, row) => (view.actions || spec.actions || []).map(named).filter(Boolean)
+    .filter((a) => (!a.permission || env.can(a.permission)) && guardedTruth(() => a.when(row, env)));
+
+  async function perform(action, row, after) {
+    try {
+      const out = await action.run(row, env);
+      if (out === null || out === undefined || out === false) return;
+      const told = typeof out === "object" ? out : { text: String(out), tone: "ok" };
+      if (told.text && !action.quiet) ui.toast(told.text, told.tone || "ok");
+      if (after) after();
+      await draw();
+    } catch (err) {
+      ui.toast(said(err), "down");
+    }
+  }
+
+  function opened(view, row) {
+    const entity = row.entity && view.kind === "approvals" ? row.entity : (row.entity && !view.entity ? row.entity : view.entity);
+    const base = typeof spec.record === "function" ? spec.record(entity, row, env) : recordDrawer(entity, row, env, { panel: { approvals: !row.approval_id } });
+    const first = [];
+    if (row.approval_id) {
+      first.push(ui.notice(h("span", {}, h("b", {}, `Waiting for the ${String(row.approver || "approver").toLowerCase()}`),
+        ` · asked by ${row.requested_by || "someone"} on ${date(row.requested_at)}${row.reason ? `: ${row.reason}` : ""}`), row.overdue ? "down" : "warn"));
+    }
+    if (entity === "requisition" && ["draft", "submitted", "rejected"].includes(row.status) && row.id) {
+      const box = h("div", {}, ui.skeleton("rows"));
+      source.advice(row.id).then((r) => put(box, advice(r, { empty: false }))).catch(() => put(box));
+      first.push(box);
+    }
+    const acts = offered(view, row);
+    return { ...base, content: [...first, ...[].concat(base.content || [])],
+      actions: acts.length ? (close) => acts.map((a, i) => ui.button(a.label, { icon: a.icon, tone: a.tone || (i ? "secondary" : undefined),
+        onclick: () => perform(a, row, close) })) : base.actions };
+  }
+
+  const columnsOf = (view, rows) => {
+    const own = view.columns || (spec.columns && !Array.isArray(spec.columns) ? spec.columns[view.entity] : spec.columns);
+    const base = own || VIEW_COLUMNS[view.kind] || columnsFor(view.entity, rows);
+    if (!(view.actions || spec.actions || []).length) return base;
+    return [...base, { label: "", align: "right", render: (row) => {
+      const acts = offered(view, row).slice(0, 2);
+      return acts.length ? h("span", { class: "fin-row-actions" }, acts.map((a, i) => h("button", { type: "button", class: `sm${i || a.tone === "secondary" ? " secondary" : ""}`,
+        "data-action": a.key, onclick: (e) => { e.stopPropagation(); perform(a, row); } }, ui.icon(a.icon || "arrow-right"), h("span", {}, a.label)))) : null;
+    } }];
+  };
+
+  const tabs = h("div", { class: "fin-views", role: "tablist" });
+  const body = h("section", { class: "panel fin-work-body" });
+  const bar = h("div", { class: "fin-bar fin-work-bar" });
+
+  // A tab counts from the tally of states where that says it all; a view with a question of its own is asked for.
+  const tallied = (view) => view.kind === "documents" && !view.filter && !(view.query && Object.keys(view.query).some((k) => k !== "limit"));
+
+  function counted(view, tally) {
+    if (found.has(view.key)) return found.get(view.key);
+    const t = tally[view.entity];
+    if (!tallied(view) || !t) return null;
+    if (t.available === false) return { count: 0, amount: null };
+    const wanted = view.status ? new Set(String(view.status).split(",").map((x) => x.trim())) : null;
+    const rows = (t.statuses || []).filter((x) => !wanted || wanted.has(x.key));
+    return { count: rows.reduce((n, x) => n + x.count, 0), amount: rows.some((x) => x.amount !== null) ? rows.reduce((n, x) => n + (x.amount || 0), 0) : null };
+  }
+
+  function drawTabs(tally) {
+    put(tabs, views.map((v) => {
+      const c = counted(v, tally);
+      return h("button", { type: "button", role: "tab", class: `fin-view${v.key === state.view ? " on" : ""}`, "data-view": v.key, "aria-selected": v.key === state.view ? "true" : "false",
+        onclick: () => { if (state.view === v.key) return; state.view = v.key; store.write({ view: state.view, mine: state.mine }); draw(); } },
+        h("span", { class: "fin-view-label" }, v.icon ? ui.icon(v.icon, { size: 15 }) : null, v.label || words(v.key)),
+        h("span", { class: "fin-view-count" }, c ? number(c.count) : DASH),
+        h("span", { class: "fin-view-amount faint" }, c && c.amount !== null && c.amount !== undefined ? money(c.amount, { compact: true }) : " "));
+    }));
+  }
+
+  function shaped(view, result) {
+    const given = Array.isArray(result) ? { rows: result } : (result || {});
+    const filtered = typeof view.filter === "function";
+    const rows = filtered ? (given.rows || []).filter((r) => guardedTruth(() => view.filter(r, env))) : (given.rows || []);
+    const amountKey = view.kind === "payable" ? "pay" : view.kind === "renewals" ? "annual_value" : "amount";
+    return { ...given, rows, filtered, count: filtered ? rows.length : (given.count ?? rows.length), shown: filtered ? rows.length : (given.shown ?? rows.length),
+      amount: filtered ? (rows.some((r) => num(r[amountKey]) !== null) ? rows.reduce((n, r) => n + (num(r[amountKey]) || 0), 0) : null) : (given.amount ?? null) };
+  }
+
+  async function draw() {
+    generation += 1;
+    const mine = generation;
+    const view = views.find((v) => v.key === state.view);
+    if (!body.childElementCount) put(body, ui.skeleton("rows"));
+    const entities = [...new Set(views.filter((v) => tallied(v) && v.entity).map((v) => v.entity))];
+    const tallies = Promise.all(entities.map((e) => source.worklist({ entity: e, mine: state.mine && OWNED[e] ? true : undefined }).catch(() => null)));
+    const asked = views.filter((v) => v.key === view.key || !tallied(v));
+    const answers = await Promise.all(asked.map((v) => Promise.resolve()
+      .then(() => (v.kind === "custom" ? v.load(env, state) : SOURCES[v.kind](v, env, state)))
+      .then((r) => shaped(v, r), (err) => ({ failure: err }))));
+    const tally = Object.fromEntries((await tallies).map((t, i) => [entities[i], t]));
+    if (mine !== generation) return;
+    found.clear();
+    asked.forEach((v, i) => { if (!answers[i].failure) found.set(v.key, { count: answers[i].count, amount: answers[i].amount }); });
+    drawTabs(tally);
+    const result = answers[asked.indexOf(view)];
+    if (result.failure) {
+      const text = said(result.failure);
+      put(body, /\b(403|may not|permission)\b/i.test(text) ? nothing("Not for your role", "Your role does not include these records.") : ui.notice(`This could not be loaded: ${text}`, "down"));
+      return;
+    }
+    const entityWords = pluralWord(standardTitle(view.entity || "record"));
+    const empty = view.empty || (result.available === false
+      ? { title: `This application keeps no ${entityWords}`, hint: "Its data model has no such records." }
+      : { title: `Nothing under ${String(view.label || words(view.key)).toLowerCase()}`, hint: state.mine && OWNED[view.entity] ? "Nothing of yours is here. Choose Everyone to see the rest." : "When there is something to do here, it appears." });
+    put(body,
+      result.count > result.shown ? h("p", { class: "faint fin-work-note" }, `The first ${number(result.shown)} of ${number(result.count)} are listed; search narrows them.`) : null,
+      documents(view.entity, result.rows, { columns: columnsOf(view, result.rows), drawer: (row) => opened(view, row), exportable: `${slug(spec.id || view.entity)}-${view.key}`,
+        pageSize: spec.pageSize || 12, empty, onRow: view.kind === "documents" && view.entity === "supplier" && !(view.actions || spec.actions || []).length ? (row) => env.openSupplier(row.id) : undefined }));
+  }
+
+  const owners = views.some((v) => v.kind === "documents" && OWNED[v.entity]);
+  const create = spec.create === true ? spec.entity : spec.create;
+  const creator = create === "requisition" ? { label: "New requisition", icon: "plus", permission: "requisition:create",
+    run: async (env_) => {
+      const made = await newRequisition(env_, spec.defaults || {});
+      if (!made) return null;
+      const drafts = views.find((v) => v.entity === "requisition" && (!v.status || String(v.status).split(",").includes("draft")));
+      if (drafts && state.view !== drafts.key) { state.view = drafts.key; store.write({ view: state.view, mine: state.mine }); }
+      raf(() => ui.drawer(opened(drafts || views[0], { ...made, entity: "requisition" })));
+      return `${made.reference || "The requisition"} saved as a draft`;
+    } } : (create && typeof create.run === "function" ? { icon: "plus", label: "New", ...create } : null);
+  const tools = (spec.tools || []).map((t) => (typeof t === "string" ? (TOOLS[t] ? { key: t, ...TOOLS[t] } : null) : (t && typeof t.run === "function" ? t : null)))
+    .filter(Boolean).filter((t) => !t.permission || env.can(t.permission));
+  const press = (tool) => async () => {
+    try {
+      const out = await tool.run(env);
+      if (out === null || out === undefined || out === false) return;
+      const told = typeof out === "object" && out.text ? out : { text: String(out), tone: "ok" };
+      ui.toast(told.text, told.tone || "ok");
+      await draw();
+    } catch (err) { ui.toast(said(err), "down"); }
+  };
+  put(bar,
+    spec.mine !== undefined && owners ? ui.segmented({ options: [{ value: "mine", label: MINE_WORDS[spec.entity] || "Mine" }, { value: "all", label: "Everyone" }], value: state.mine ? "mine" : "all",
+      onchange: (v) => { state.mine = v === "mine"; store.write({ view: state.view, mine: state.mine }); draw(); } }) : h("span", { class: "faint fin-asof" }, `As of ${date(cal.today)}`),
+    h("span", { class: "fin-bar-right" },
+      ui.iconButton("refresh", { label: "Refresh", onclick: () => draw() }),
+      tools.map((t) => ui.button(t.label, { tone: "secondary", size: "sm", icon: t.icon, onclick: press(t) })),
+      creator && (!creator.permission || env.can(creator.permission)) ? ui.button(creator.label, { icon: creator.icon || "plus", onclick: press(creator) }) : null));
+
+  put(root, h("div", { class: "fin-work" }, bar, tabs, body));
+  await draw();
+  return { reload: draw, env, view: () => state.view };
+}
+
+function guardedTruth(test) {
+  try { return Boolean(test()); } catch { return false; }
+}
+
+function worklist(base) {
+  return (over = {}) => {
+    const out = { ...base, ...over };
+    if (over.views === undefined && (over.add || over.remove)) {
+      out.views = base.views.filter((v) => !(over.remove || []).includes(v.key)).concat(over.add || []);
+    }
+    delete out.add;
+    delete out.remove;
+    return out;
+  };
+}
+
+/**
+ * Work screens ready to use, each a description to change rather than write. Every one takes what workbench() takes and
+ * replaces that part; { add: [views] } and { remove: ["cancelled"] } change the tabs without restating them.
+ *   fin.worklists.requisitions({ mine: false })        fin.worklists.invoices({ remove: ["paid"] })
+ */
+export const worklists = {
+  /** A requester's page: raise a request, see what the rules say, submit it, follow it to the order. */
+  requisitions: worklist({ id: "requisitions", entity: "requisition", mine: true, create: "requisition",
+    views: [{ key: "draft", label: "Drafts", icon: "edit", status: "draft,rejected", actions: ["submit"],
+      empty: { title: "No drafts", hint: "Choose New requisition to ask for something." } },
+    { key: "waiting", label: "Waiting for approval", icon: "clock", status: "submitted" },
+    { key: "approved", label: "Approved", icon: "check-circle", status: "approved" },
+    { key: "ordered", label: "Ordered", icon: "cart", status: "ordered" },
+    { key: "cancelled", label: "Cancelled", icon: "x", status: "cancelled" }] }),
+  /** An approver's page: what waits for their decision, with the budget and the rules beside it. */
+  approvals: worklist({ id: "approvals",
+    views: [{ key: "mine", label: "Waiting for me", icon: "inbox", source: "approvals", actions: ["approve", "reject"],
+      empty: { title: "Nothing waits for you", hint: "When someone asks for a decision your role makes, it appears here." } },
+    { key: "all", label: "Everything waiting", icon: "list", source: "approvals", query: { mine: false }, actions: ["approve", "reject"],
+      empty: { title: "Nothing is waiting", hint: "No request is waiting for anyone's decision." } }] }),
+  /** A buyer's page: approved requests to turn into orders, orders to send, orders with suppliers. */
+  ordering: worklist({ id: "ordering", entity: "purchase_order",
+    views: [{ key: "to_order", label: "To order", icon: "inbox", entity: "requisition", status: "approved", actions: ["order"],
+      empty: { title: "Nothing to order", hint: "Approved requisitions appear here." } },
+    { key: "to_send", label: "To send", icon: "mail", status: "approved", actions: ["send"] },
+    { key: "in_approval", label: "Drafts and in approval", icon: "clock", status: "draft,pending_approval" },
+    { key: "with_suppliers", label: "With suppliers", icon: "truck", status: "sent,partially_received", sort: "expected_delivery" },
+    { key: "received", label: "Received", icon: "check-circle", status: "received,closed" }] }),
+  /** Goods in: what is expected, what is late, what has arrived. */
+  receiving: worklist({ id: "receiving", entity: "purchase_order",
+    views: [{ key: "due", label: "To receive", icon: "truck", status: "sent,partially_received", sort: "expected_delivery", actions: ["receive"],
+      empty: { title: "Nothing to receive", hint: "Orders sent to suppliers appear here until they arrive." } },
+    { key: "late", label: "Late", icon: "alert", status: "sent,partially_received", sort: "expected_delivery", actions: ["receive"],
+      filter: (row, env) => Boolean(row.expected_delivery) && String(row.expected_delivery).slice(0, 10) < env.calendar.today,
+      empty: { title: "Nothing is late", hint: "Every order still to come is within its date." } },
+    { key: "received", label: "Received", icon: "check-circle", status: "received" },
+    { key: "receipts", label: "Receipts", icon: "file", entity: "goods_receipt", query: { limit: 300 } }] }),
+  /** Accounts payable: invoices to match, held, to approve, to pay. */
+  invoices: worklist({ id: "invoices", entity: "invoice",
+    views: [{ key: "to_match", label: "To match", icon: "layers", status: "received", sort: "due_date", actions: ["match"],
+      empty: { title: "Nothing to match", hint: "Invoices appear here as they arrive." } },
+    { key: "held", label: "Held", icon: "flag", status: "exception", sort: "due_date" },
+    { key: "to_approve", label: "To approve", icon: "shield", status: "matched", sort: "due_date" },
+    { key: "to_pay", label: "To pay", icon: "dollar", status: "approved,scheduled", sort: "due_date" },
+    { key: "overdue", label: "Overdue", icon: "alert", query: { overdue: true }, sort: "due_date" },
+    { key: "paid", label: "Paid", icon: "check-circle", status: "paid", query: { limit: 300 } }] }),
+  /** Payment runs: what is due, propose a run, follow it to the bank. */
+  paymentRuns: worklist({ id: "payment-runs", entity: "payment_run", tools: ["propose_run"],
+    views: [{ key: "payable", label: "Due to pay", icon: "dollar", source: "payable",
+      empty: { title: "Nothing is due", hint: "Approved invoices appear here as they fall due." } },
+    { key: "proposed", label: "Proposed", icon: "clock", status: "proposed" },
+    { key: "approved", label: "Approved", icon: "shield", status: "approved" },
+    { key: "released", label: "Released", icon: "check-circle", status: "released,completed" }] }),
+  /** Supplier management: onboarding, the approved list, who is suspended. */
+  suppliers: worklist({ id: "supplier-list", entity: "supplier", actions: ["scorecard"],
+    views: [{ key: "onboarding", label: "Onboarding", icon: "clock", status: "prospective,under_review" },
+      { key: "active", label: "Approved", icon: "check-circle", status: "approved,active" },
+      { key: "suspended", label: "Suspended", icon: "alert", status: "suspended" },
+      { key: "retired", label: "Retired", icon: "x", status: "retired" }] }),
+  /** Contracts: the ones to decide on, in force, in negotiation, ended. */
+  contracts: worklist({ id: "contracts", entity: "contract",
+    views: [{ key: "decide", label: "To decide", icon: "alert", source: "renewals",
+      empty: { title: "No contract to decide on", hint: "Contracts appear here ahead of their notice date." } },
+    { key: "in_force", label: "In force", icon: "check-circle", status: "signed,active,expiring", sort: "end_date" },
+    { key: "negotiation", label: "In negotiation", icon: "edit", status: "draft,in_negotiation" },
+    { key: "ended", label: "Ended", icon: "x", status: "expired,terminated" }] }),
+};
+
 const fin = {
   configure, num, money, percent, number, days, format, words, date, variance, calendar, query, data, status, delta, varianceBadge,
   kpis, kpi, gauge, trend, budgetBars, waterfall, pareto, treemap, donut, aging, funnel, pivot, cycleTimes, matchStatus, approvalChain, lifecycle,
   controlList, renewalList, scorecard, exportCsv, columnsFor, documents, drill, periodPicker, filterBar, dashboard, blueprints, WIDGETS,
+  workbench, worklists, advice, ACTIONS, TOOLS,
 };
 export default fin;

@@ -330,7 +330,55 @@
   .fin-kpi .sparkline { display: none; }
 }
 
+/* ---- work screens */
+.fin-work { container-type: inline-size; }
+.fin-work-bar { margin-bottom: 14px; }
+.fin-views { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.fin-view { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 2px; min-width: 0; padding: 12px 14px 11px;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: var(--r-lg); box-shadow: var(--sh-sm); position: relative; overflow: hidden;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }
+.fin-view::after { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--grad); opacity: 0; transition: opacity .18s ease; }
+.fin-view:hover { transform: translateY(-2px); box-shadow: var(--sh-md); border-color: var(--rule-strong); }
+.fin-view:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fin-view.on { border-color: var(--accent); box-shadow: var(--sh-md); }
+.fin-view.on::after { opacity: 1; }
+.fin-view-label { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--muted); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fin-view.on .fin-view-label { color: var(--accent); }
+.fin-view-count { font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.fin-view-amount { font-size: 12px; font-variant-numeric: tabular-nums; }
+.fin-work-body { padding: 14px 16px 16px; }
+.fin-work-note { margin: 0 0 10px; font-size: 12.5px; }
+.fin-row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
+.fin-row-actions button { white-space: nowrap; }
+.fin-advice { display: grid; gap: 8px; }
+.fin-finding { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 12px; border-radius: var(--r);
+  border: 1px solid var(--rule); background: var(--surface-2); font-size: 13px; line-height: 1.45; }
+.fin-finding-icon { display: inline-flex; padding-top: 1px; color: var(--info-2); }
+.fin-finding-ok .fin-finding-icon { color: var(--ok-2); }
+.fin-finding-warn { border-color: color-mix(in srgb, var(--warn-2) 45%, var(--rule)); }
+.fin-finding-warn .fin-finding-icon { color: var(--warn-2); }
+.fin-finding-down { border-color: color-mix(in srgb, var(--down-2) 50%, var(--rule)); }
+.fin-finding-down .fin-finding-icon { color: var(--down-2); }
+.fin-rule { font-size: 11px; color: var(--faint); padding-top: 2px; white-space: nowrap; }
+.fin-live { display: grid; gap: 10px; }
+.fin-live:empty { display: none; }
+.fin-ask .form-grid { align-items: start; }
+@container (max-width: 760px) {
+  .fin-views { grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+  .fin-view { padding: 10px 11px 9px; }
+  .fin-view-count { font-size: 20px; }
+  .fin-row-actions button > span { display: none; }
+  .fin-work-body { padding: 10px; }
+}
+@container (max-width: 430px) {
+  .fin-views { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fin-finding { grid-template-columns: 20px minmax(0, 1fr); }
+  .fin-rule { grid-column: 2; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .fin-view { transition: none; }
   .fin-widget, .fin-cell, .fin-wf, .fin-gauge-value { animation: none; }
   .fin-gauge-value { stroke-dashoffset: 0; }
   .fin-fill, .fin-seg, .fin-funnel-bar, .fin-cycle-avg, .fin-cycle-p90, .fin-goal-track span, .fin-part-track span { transition: none; }

@@ -88,6 +88,23 @@ def main() -> int:
                str(profile["workflows"]))
         expect("without signing in, the figures answer 401", client.get("/api/finance/kpis").status_code == 401)
 
+        # ---- what was loaded waiting for a decision can be decided
+        from app.db import _sessionmaker  # noqa: E402
+        from app.kernel import workflow as wf_  # noqa: E402
+        from app.kernel.context import SYSTEM, acting_as  # noqa: E402
+        with _sessionmaker()() as db, acting_as(SYSTEM):
+            adopted, again = wf_.adopt(db), wf_.adopt(db)
+        asked_ = [q for q in data["requisition"] if q["status"] == "submitted"]
+        queue = get("/approvals?mine=false&entity=requisition")
+        expect("requisitions loaded as submitted are given their approval request, once",
+               len(asked_) > 0 and adopted >= len(asked_) and again == 0 and queue["count"] == len(asked_)
+               and all(r["approver"] and r["requested_by"] and r["status"] == "submitted" for r in queue["rows"])
+               and abs(queue["amount"] - round(sum(q["amount"] for q in asked_), 2)) < 0.01, f"{adopted} {again} {queue['count']} {len(asked_)}")
+        by_role = {}
+        for r in queue["rows"]:
+            by_role[r["approver_role"]] = by_role.get(r["approver_role"], 0) + 1
+        print("        waiting, by approver:", by_role)
+
         cal = get("/calendar")
         expect("the calendar is an April year, in its second quarter", cal["fiscal_year"] == 2027 and cal["quarter"] == 2
                and cal["fiscal_year_label"] == "FY2027" and cal["today"] == TODAY, json.dumps(cal)[:300])
@@ -318,6 +335,77 @@ def main() -> int:
         expect("a requester is told who approves, and that this looks like a split",
                advice["approver"] == "budget_holder" and "PROC-11" in rules_ and "PROC-02" in rules_
                and advice["level"] in ("warn", "down"), json.dumps(advice["findings"]))
+
+        # ---- a purchase from the request to the supplier
+        tom, daniel = as_("tom"), as_("daniel")
+        good = next(n + 1 for n, s in enumerate(data["supplier"]) if s["status"] in ("active", "approved"))
+        barred = next(n + 1 for n, s in enumerate(data["supplier"]) if s["status"] == "suspended")
+        asked = post("/requisitions", nadia, {"title": "Label printers for goods in", "amount": 1800, "cost_center_id": 7,
+                                              "spend_category_id": 1, "supplier_id": good, "needed_by": "2026-10-20"}, status=201)
+        expect("a requester raises a requisition: a draft with its reference and their name",
+               asked["status"] == "draft" and asked["reference"].startswith("PR-") and asked["requester_name"] == "Nadia Rahman"
+               and asked["needed_by"] == "2026-10-20" and asked["supplier_name"], json.dumps(asked, default=str)[:400])
+        post("/requisitions", clerk, {"title": "Not mine to ask", "amount": 10}, status=403)
+        r = client.post("/api/finance/requisitions", headers=nadia, json={"title": "Nothing", "amount": 0})
+        expect("a requisition for nothing is refused with its rule", r.status_code == 409 and r.json().get("rule") == "PROC-02",
+               r.text[:300])
+        r = client.post(f"/api/finance/requisitions/{asked['id']}/order", headers=daniel, json={})
+        expect("no order before the requisition is approved (409, PROC-02)", r.status_code == 409
+               and r.json().get("rule") == "PROC-02" and "draft" in r.text, r.text[:300])
+        sent = client.post(f"/api/platform/workflows/requisition/{asked['id']}/submit", headers=nadia, json={})
+        assert sent.status_code == 200, sent.text
+        theirs = get("/approvals", tom)
+        hers = get("/approvals", nadia)
+        every = get("/approvals?mine=false&entity=requisition", nadia)
+        item = next((x for x in theirs["rows"] if x["entity"] == "requisition" and x["id"] == asked["id"]), None)
+        expect("what waits for the budget holder: the request, who asked, and that they may decide it",
+               item is not None and item["can_decide"] and item["requested_by"] == "Nadia Rahman" and item["approval_id"]
+               and item["approver"] == "Budget holder" and item["reference"] == asked["reference"] and theirs["amount"] > 0,
+               json.dumps(theirs, default=str)[:500])
+        expect("nothing waits for the requester, who sees her own request when she asks for every one",
+               not any(x["id"] == asked["id"] and x["entity"] == "requisition" for x in hers["rows"])
+               and any(x["id"] == asked["id"] and not x["can_decide"] for x in every["rows"]), json.dumps(hers, default=str)[:300])
+        ok_ = client.post(f"/api/platform/approvals/{item['approval_id']}/approve", headers=tom, json={"note": "Needed for peak"})
+        assert ok_.status_code == 200, ok_.text
+        post(f"/requisitions/{asked['id']}/order", nadia, {}, status=403)
+        r = client.post(f"/api/finance/requisitions/{asked['id']}/order", headers=daniel, json={"supplier_id": barred})
+        expect("no order to a suspended supplier (409, PROC-09)", r.status_code == 409 and r.json().get("rule") == "PROC-09",
+               r.text[:300])
+        order = post(f"/requisitions/{asked['id']}/order", daniel, {})
+        po_ = client.get(f"/api/purchase_orders/{order['purchase_order_id']}", headers=daniel)
+        po_ = po_.json() if po_.status_code == 200 else client.get(
+            f"/api/purchase-orders/{order['purchase_order_id']}", headers=daniel).json()
+        expect("the buyer raises the order of an approved requisition: approved as the requisition was, and the requisition ordered",
+               order["status"] == "approved" and order["requisition_status"] == "ordered" and order["reference"].startswith("PO-")
+               and po_["requisition_id"] == asked["id"] and po_["supplier_id"] == good and abs(po_["amount"] - 1800) < 0.01
+               and po_["buyer_name"] == "Daniel Moreau", json.dumps(order, default=str))
+        r = client.post(f"/api/finance/requisitions/{asked['id']}/order", headers=daniel, json={})
+        expect("a requisition is ordered once", r.status_code == 409, r.text[:200])
+        gone = post(f"/purchase-orders/{order['purchase_order_id']}/send", daniel)
+        expect("the order is sent, and created in the ERP's sandbox", gone["status"] == "sent" and gone["erp"]
+               and gone["erp"]["ok"] and gone["erp"]["mode"] == "sandbox" and gone["erp"]["key"], json.dumps(gone, default=str))
+        r = client.post(f"/api/finance/purchase-orders/{order['purchase_order_id']}/send", headers=daniel)
+        expect("an order is sent once", r.status_code == 409, r.text[:200])
+        trail = client.get(f"/api/platform/audit?entity=purchase_order&entity_id={order['purchase_order_id']}", headers=daniel).json()
+        expect("the order's trail says it was approved as a requisition, and that the ERP has it",
+               any(asked["reference"] in (e.get("summary") or "") + json.dumps(e.get("changes") or {}) for e in trail)
+               and any(e["action"] == "connector" for e in trail), json.dumps(trail, default=str)[:500])
+
+        # ---- what a work screen asks: how many in each state, and which are mine
+        wl = get("/worklist?entity=requisition", daniel)
+        by_state = {x["key"]: x for x in wl["statuses"]}
+        mine_ = get("/worklist?entity=requisition&mine=true", nadia)
+        hers_ = get("/documents?entity=requisition&mine=true&dated=false", nadia)
+        expect("how many requisitions are in each state, in the order of the lifecycle, whatever the period",
+               wl["count"] == len(data["requisition"]) + 1 and sum(x["count"] for x in wl["statuses"]) == wl["count"]
+               and by_state["ordered"]["label"] == "Ordered" and by_state["ordered"]["amount"] > 0
+               and [x["key"] for x in wl["statuses"]] == [k for k in ("draft", "submitted", "approved", "rejected", "ordered", "cancelled")
+                                                         if k in by_state], json.dumps(wl)[:400])
+        expect("my own records: the ones I raised", 0 < mine_["count"] < wl["count"] and hers_["count"] == mine_["count"]
+               and all(r["requester_name"] == "Nadia Rahman" for r in hers_["rows"]), f"{mine_['count']} {hers_['count']}")
+        expect("an entity with no owner is counted whole, and one the library does not have is refused",
+               get("/worklist?entity=invoice&mine=true", clerk)["count"] == len(data["invoice"])
+               and client.get("/api/finance/worklist?entity=widget", headers=clerk).status_code == 404)
 
         as_clerk = get("/kpis", clerk)
         expect("everyone who may read sees the same figures", len(as_clerk["kpis"]) == 31)

@@ -163,12 +163,20 @@ def purchase_order(model: type, *, buyer: Sequence[str] = ("buyer",), receiver: 
                 rules.check_supplier(supplier)          # PROC-09
         return None
 
+    def from_a_request(record: Any, ctx: Any) -> Any:
+        # An order raised from a requisition was approved as that requisition: it is not approved twice.
+        if not rules.get(record, "requisition_id"):
+            return "Only an order raised from an approved requisition is released without an approval of its own"
+        return can_order(record, ctx)
+
     return Workflow(
         name, model, field=field, title="Purchase order", states=states("purchase_order"), initial="draft",
         transitions=[
             Transition("submit", "draft", "approved", label="Submit for approval", roles=tuple(buyer),
                        approval=_approval(doa, amount), pending="pending_approval", on_reject="draft", guard=can_order,
                        rule="PROC-02", effects=_fx(effects, "submit"), tone="ok"),
+            Transition("release", "draft", "approved", label="Release (approved as a requisition)", roles=tuple(buyer),
+                       guard=from_a_request, rule="PROC-02", effects=_fx(effects, "release"), tone="ok"),
             Transition("send", "approved", "sent", label="Send to supplier", roles=tuple(buyer),
                        effects=_fx(effects, "send"), tone="ok"),
             Transition("receive_part", ("sent", "partially_received"), "partially_received", label="Receive part",

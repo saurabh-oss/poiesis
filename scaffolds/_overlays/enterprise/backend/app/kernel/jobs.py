@@ -2,6 +2,8 @@
 
 One thread in the api service (never the data service) wakes every JOB_SECONDS
 (default 30) and, acting as System:
+  - gives records that arrived already waiting for a decision (loaded, imported) the approval
+    request they wait on (workflow.adopt), the first time a few seconds after starting;
   - escalates every workflow clock past its SLA (workflow.tick);
   - replays connector calls that failed with a retryable error or were deferred by the
     breaker, once their retry time has come — at most MAX_ATTEMPTS attempts in all,
@@ -72,8 +74,9 @@ def retry_connectors(db: Session) -> int:
 
 def run_once() -> dict[str, int]:
     from . import workflow
-    done = {"sla": 0, "retries": 0, "jobs": 0}
+    done = {"sla": 0, "retries": 0, "jobs": 0, "adopted": 0}
     with acting_as(SYSTEM), _sessionmaker()() as db:
+        done["adopted"] = workflow.adopt(db)
         done["sla"] = workflow.tick(db)
         done["retries"] = retry_connectors(db)
         now = time.time()
@@ -92,6 +95,14 @@ def run_once() -> dict[str, int]:
 
 def _loop() -> None:
     interval = float(os.getenv("JOB_SECONDS", "30") or 30)
+    # Soon after starting, so that what was loaded waiting for a decision can be decided.
+    if not _stop.wait(min(interval, 3.0)):
+        try:
+            from . import workflow
+            with acting_as(SYSTEM), _sessionmaker()() as db:
+                workflow.adopt(db)
+        except Exception as exc:  # noqa: BLE001 — the tables may not be there yet; the next round asks again
+            log.info("records waiting for approval: %s", str(exc).splitlines()[0])
     while not _stop.wait(interval):
         try:
             run_once()

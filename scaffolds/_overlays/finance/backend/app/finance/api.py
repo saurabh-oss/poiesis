@@ -31,6 +31,11 @@ and what people do to their records (operations.py), each through the record's w
     GET  /api/finance/payment-runs/payable             what a run proposed now would pay
     GET  /api/finance/budget/position                  ?cost_center_id=3&requested=5000   what is left (FIN-02)
     GET  /api/finance/requisitions/{id}/advice         approver, budget, quotes, supplier, splits
+    POST /api/finance/requisitions                     {"title": "…", "amount": 1800, "cost_center_id": 7}   a draft
+    POST /api/finance/requisitions/{id}/order          {"supplier_id": 12}   the order of an approved requisition
+    POST /api/finance/purchase-orders/{id}/send        to the supplier, and into the ERP
+    GET  /api/finance/approvals                        what waits for my decision (?mine=false: for anyone's)
+    GET  /api/finance/worklist                         ?entity=requisition&mine=true   how many in each state
 
 Every endpoint takes the same scope:
 
@@ -346,6 +351,10 @@ DATE_OF = {"invoice": "invoice_date", "purchase_order": "order_date", "requisiti
            "goods_receipt": "received_at", "payment": "paid_at", "payment_run": "run_date", "contract": "end_date",
            "budget_line": "period_start", "savings_initiative": "created_at", "budget_change": "created_at",
            "supplier": "onboarded_at"}
+# Whose a record is: the column that holds the name of the person working on it.
+OWNER_OF = {"requisition": "requester_name", "purchase_order": "buyer_name", "contract": "owner_name",
+            "goods_receipt": "received_by", "savings_initiative": "owner_name", "budget_change": "requested_by",
+            "cost_center": "owner_name"}
 AMOUNT_OF = {"invoice": "amount", "purchase_order": "amount", "requisition": "amount", "goods_receipt": "amount",
              "payment": "amount", "payment_run": "total_amount", "contract": "value", "budget_line": "amount",
              "savings_initiative": "identified_saving", "budget_change": "amount_delta"}
@@ -1126,11 +1135,12 @@ def document(book: Book, table: str, row: Any) -> dict[str, Any]:
 @router.get("/documents")
 def get_documents(entity: str = "invoice", status: str = "", match_status: str = "", overdue: bool = False,
                   bucket: str = "", dated: bool = True, date: str = "", q: str = "", sort: str = "",
-                  limit: int = 500, where: str = "", db: Session = Depends(get_session),
+                  limit: int = 500, where: str = "", mine: bool = False, db: Session = Depends(get_session),
                   scope: Scope = Depends(requested)) -> dict[str, Any]:
     """The rows behind a number: an entity's documents in the scope, newest first.
     ?status=a,b  ?match_status=  ?overdue=true  ?bucket=31-60  ?dated=false (whatever the period)
-    ?date=due_date (the date the period applies to)  ?where=buyer_name:Daniel Moreau  ?q=text  ?sort=-amount"""
+    ?date=due_date (the date the period applies to)  ?where=buyer_name:Daniel Moreau  ?q=text  ?sort=-amount
+    ?mine=true (the ones I raised, buy or own)"""
     if entity not in standard.ENTITIES:
         raise HTTPException(status_code=404, detail=f"{entity} is not one of {', '.join(standard.ORDER)}")
     if not allowed(entity):
@@ -1147,6 +1157,7 @@ def get_documents(entity: str = "invoice", status: str = "", match_status: str =
     for column, wanted in (("status", status), ("match_status", match_status)):
         if wanted and column in have:
             rows = [r for r in rows if _same(getattr(r, column), _ids(wanted))]
+    rows = _mine(rows, entity, have) if mine else rows
     for clause in [c for c in where.split(";") if ":" in c]:
         column, _, wanted = clause.partition(":")
         key = dimension(book, column.strip(), entity, field)[0]
@@ -1180,6 +1191,41 @@ def get_documents(entity: str = "invoice", status: str = "", match_status: str =
     return {"scope": scope.describe(), "entity": entity, "title": standard.ENTITIES[entity]["title"],
             "count": len(rows), "amount": _money(whole) if whole is not None else None, "shown": min(limit, len(rows)),
             "rows": [document(book, entity, r) for r in rows[:limit]]}
+
+
+def _mine(rows: list[Any], entity: str, have: set[str]) -> list[Any]:
+    """The records of the person asking: the ones they requested, buy, received or own."""
+    column = OWNER_OF.get(entity)
+    if not column or column not in have:
+        return rows
+    me = str(current().name or "").strip().lower()
+    return [r for r in rows if str(getattr(r, column) or "").strip().lower() == me]
+
+
+@router.get("/worklist")
+def get_worklist(entity: str = "requisition", mine: bool = False, db: Session = Depends(get_session),
+                 scope: Scope = Depends(requested)) -> dict[str, Any]:
+    """How many of an entity's records are in each state, whatever the period: what the tabs of a
+    work screen count. ?mine=true counts only the ones I raised, buy or own."""
+    if entity not in standard.ENTITIES:
+        raise HTTPException(status_code=404, detail=f"{entity} is not one of {', '.join(standard.ORDER)}")
+    title = standard.ENTITIES[entity]["title"]
+    if not allowed(entity):
+        return {"entity": entity, "title": title, "available": False, "count": 0, "amount": None, "statuses": []}
+    book = Book(db, scope)
+    have = book.columns(entity)
+    rows = _mine(book.all(entity), entity, have) if mine else book.all(entity)
+    amount = AMOUNT_OF.get(entity)
+    counted: dict[str, list[Any]] = {}
+    for r in rows:
+        found = counted.setdefault(str(get(r, "status", "") or ""), [0, ZERO])
+        found[0] += 1
+        found[1] += book.in_base(r, get(r, amount, 0)) if amount in have else ZERO
+    order = list(standard.STATES.get(entity, [])) + sorted(k for k in counted if k not in standard.STATES.get(entity, []))
+    return {"entity": entity, "title": title, "available": True, "mine": mine, "count": len(rows),
+            "amount": _money(sum((v[1] for v in counted.values()), ZERO)) if amount in have else None,
+            "statuses": [{"key": k, "label": _words(k) if k else "Not set", "count": counted[k][0],
+                          "amount": _money(counted[k][1]) if amount in have else None} for k in order if k in counted]}
 
 
 @router.get("/exceptions")
@@ -1451,3 +1497,57 @@ def get_position(cost_center_id: int | None = None, requested: float = 0, spend_
 def get_advice(requisition_id: int, db: Session = Depends(get_session)) -> dict[str, Any]:
     ensure("requisition:read", what="see requisitions")
     return ops.check_request(db, requisition_id)
+
+
+class NewRequisition(BaseModel):
+    title: str
+    amount: float
+    cost_center_id: int | None = None
+    spend_category_id: int | None = None
+    supplier_id: int | None = None
+    justification: str = ""
+    needed_by: str | None = None
+
+
+class Order(BaseModel):
+    supplier_id: int | None = None
+    expected_delivery: str | None = None
+
+
+@router.post("/requisitions", status_code=201)
+def post_requisition(payload: NewRequisition, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """A draft requisition, with its reference and its requester; it is submitted through its workflow."""
+    ensure("requisition:create", what="raise a requisition")
+    req = ops.create_requisition(db, payload.model_dump())
+    return document(Book(db, Scope(compare="none")), "requisition", req)
+
+
+@router.post("/requisitions/{requisition_id}/order")
+def post_order(requisition_id: int, payload: Order | None = None, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """Raise the purchase order of an approved requisition."""
+    ensure("requisition:order", what="raise an order")
+    payload = payload or Order()
+    return ops.raise_order(db, requisition_id, supplier_id=payload.supplier_id, expected_delivery=payload.expected_delivery)
+
+
+@router.post("/purchase-orders/{order_id}/send")
+def post_send(order_id: int, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """Send an approved order to the supplier and create it in the ERP."""
+    ensure("purchase_order:send", what="send an order")
+    return ops.send_order(db, order_id)
+
+
+@router.get("/approvals")
+def get_approvals(entity: str = "", mine: bool = True, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """What waits for a decision: each approval with its record, and whether this person may decide it.
+    ?mine=false lists every one; ?entity=requisition only those."""
+    book = Book(db, Scope(compare="none"))
+    rows = []
+    for item in ops.waiting(db, entity):
+        if not can(f"{item['entity']}:read") or (mine and not item["can_decide"]):
+            continue
+        rec = item.pop("record")
+        asked = item.pop("title")
+        rows.append({**document(book, item["entity"], rec), **item, "approval_title": asked, "id": rec.id})
+    amount = sum((book.in_base(r, r.get("amount") or r.get("value") or 0) for r in rows), ZERO)
+    return {"count": len(rows), "amount": _money(amount), "overdue": sum(1 for r in rows if r["overdue"]), "rows": rows}

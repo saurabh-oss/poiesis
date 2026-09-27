@@ -22,7 +22,7 @@ department is adding a directory, not editing the orchestrator:
     standard: backend/app/finance/standard.py    # ENTITIES, summary(), gaps(): the entities it expects
     demo: backend/app/finance/demo.py            # rows(tables, today=): data for those entities
     library_tests: [tests/test_finance_library.py]
-    reference: [[frontend/screens/example_finance.js, 2600]]     # worked examples shown to the Developer
+    reference: [[frontend/screens/example_finance.js, 3400]]     # worked examples shown to the Developer
     settings: [ERP_, FISCAL_, FINANCE_, BASE_CURRENCY]           # APPS_<these> reach the app's environment
     components: |                # what the Architect is told every app of the pack already has
       - finance library: …

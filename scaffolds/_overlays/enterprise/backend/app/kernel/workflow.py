@@ -417,6 +417,56 @@ def decide(db: Session, approval_id: int, approve: bool, note: str = "", actor: 
     return {"status": "approved", "approval_id": a.id, "state": getattr(obj, wf.field)}
 
 
+# --------------------------------------------------------------------------- records that arrive waiting
+
+_ASKED_BY = ("requester_name", "requested_by", "buyer_name", "owner_name", "created_by", "raised_by")
+
+
+def adopt(db: Session, limit: int = 500) -> int:
+    """Records that arrived already waiting for a decision (loaded, imported, migrated) are given
+    the approval request they are waiting on, so that someone can decide them. Returns how many."""
+    from .models import AppUser
+    found = 0
+    people: dict[str, int] | None = None
+    for wf in list(WORKFLOWS.values()):
+        column = getattr(wf.model, wf.field, None)
+        for t in wf.transitions:
+            if column is None or not t.approval or not t.pending or t.pending in t.sources():
+                continue
+            waiting = db.query(wf.model).filter(column == t.pending).limit(limit).all()
+            if not waiting:
+                continue
+            asked = {a.entity_id for a in db.query(Approval).filter_by(entity=wf.entity, status="pending")}
+            for obj in waiting:
+                if obj.id in asked:
+                    continue
+                ctx = Context(db, current(), wf, t, t.pending, t.target, "", {})
+                try:
+                    approver = t.approver(obj, ctx)
+                except Exception:  # noqa: BLE001 — a record the rule cannot read is left as it is
+                    approver = None
+                if not approver:
+                    continue
+                if people is None:
+                    people = {str(u.full_name).strip().lower(): u.id for u in db.query(AppUser).all()}
+                name = next((str(getattr(obj, k)).strip() for k in _ASKED_BY if isinstance(getattr(obj, k, None), str)
+                             and str(getattr(obj, k)).strip()), "")
+                label = _label(obj)
+                db.add(Approval(workflow=wf.name, entity=wf.entity, entity_id=obj.id, transition=t.name, from_state=t.pending,
+                                to_state=t.target, approver_role=approver,
+                                title=f"{t.label or t.name.replace('_', ' ').capitalize()}: {wf.entity.replace('_', ' ')} {obj.id}"
+                                      + (f" — {label}" if label else ""),
+                                reason="", requested_by_id=people.get(name.lower()), requested_by_name=name or "Not recorded",
+                                due_at=utcnow() + dt.timedelta(hours=float(wf.sla.get("__approval__", 24)))))
+                audit.record(db, "approval", f"Approval requested from {policy().roles.get(approver, approver)} to "
+                                             f"{t.label or t.name}: {wf.entity} {obj.id} (it arrived waiting)",
+                             entity=wf.entity, entity_id=obj.id, rule_id=t.rule)
+                found += 1
+    if found:
+        db.commit()
+    return found
+
+
 # --------------------------------------------------------------------------- SLAs
 
 def tick(db: Session) -> int:

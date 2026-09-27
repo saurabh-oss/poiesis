@@ -14,6 +14,7 @@ owned:
     - frontend/finance.js
     - frontend/finance.css
     - frontend/screens/example_finance.js
+    - frontend/screens/example_worklist.js
     - tests/test_finance_library.py
 
 # Added to an agent's prompt, by who reads it.
@@ -35,9 +36,11 @@ starter: backend/app/finance/starter.py
 library_tests:
   - tests/test_finance_library.py
 
-# The worked example the Developer is shown, and how much of it.
+# The worked examples the Developer is shown, and how much of each: a screen people read
+# figures on, and a screen people work on.
 reference:
   - [frontend/screens/example_finance.js, 3400]
+  - [frontend/screens/example_worklist.js, 2700]
 
 # Settings its code reads in a deployed application: APPS_ERP_BASE_URL reaches the
 # application as ERP_BASE_URL.
@@ -45,8 +48,9 @@ settings: [ERP_, FISCAL_, FINANCE_, BASE_CURRENCY]
 
 # What the Architect is told every application of the pack already has.
 components: |
-  - finance library (backend/app/finance): money and the fiscal calendar; 22 tested rules (three-way match, delegation of authority, segregation of duties, budget availability, duplicate invoices, payment terms and discounts, tax, variance, accruals, supplier risk, contract renewal, no order no pay, quotes, split orders); lifecycles for requisitions, purchase orders, invoices, payment runs, suppliers, contracts and budget changes; operations (match an invoice, receive goods, propose a payment run, check a budget); the roles and personas of the function
+  - finance library (backend/app/finance): money and the fiscal calendar; 22 tested rules (three-way match, delegation of authority, segregation of duties, budget availability, duplicate invoices, payment terms and discounts, tax, variance, accruals, supplier risk, contract renewal, no order no pay, quotes, split orders); lifecycles for requisitions, purchase orders, invoices, payment runs, suppliers, contracts and budget changes; operations (raise a requisition, raise and send its order, receive goods, match an invoice, propose a payment run, check a budget, what waits for whose approval); the roles and personas of the function
   - insight API (/api/finance/…): headline figures against the comparison period, breakdowns, trends with budget and last year, budget against actual, ageing, the purchase-to-pay funnel, cross-tabs, concentration, cycle times, exceptions, accruals, renewals, controls, supplier scorecards and the rows behind every number
   - dashboard kit (frontend/finance.js): whole dashboards from a description (executive, spend, budget, payables, purchase to pay, suppliers, controls, savings) with period picker, filters, drill-down, CSV export and personal arrangement; charts and record components
+  - work screens (frontend/finance.js): a queue or a desk from a description (my requests, approval queue, ordering, goods in, invoice desk, payment runs, supplier list, contracts) with tabs and their counts, search, export, the record with its rules, lifecycle and history, the forms and what each role may do
   - ERP connector: suppliers, purchase orders, invoices, payments, ledger balances and exchange rates, sandboxed until credentials are set
   - a year and more of coherent demonstration data for the standard finance entities

@@ -78,13 +78,16 @@ which the platform writes into the data model itself, with more than two years o
 **demonstration data**; **22 rules** with ids and tests (three-way match, delegation of
 authority, segregation of duties, budget availability, duplicate invoices, payment terms and
 discounts, tax, variance, accruals, supplier risk…); the **lifecycle** of each record, with
-approval by amount; the **operations** people perform (match an invoice, receive goods, propose
-a payment run, check a budget); an **insight API** (headline figures against the comparison
+approval by amount; the **operations** people perform (raise a requisition, raise and send its
+order, receive goods, match an invoice, propose a payment run, check a budget); an **insight API** (headline figures against the comparison
 period, breakdowns, trends with budget and last year, budget against actual, ageing, the
 purchase-to-pay funnel, controls, supplier scorecards, the rows behind every number); a
 **dashboard kit** in which a dashboard is a description — with its fiscal period picker,
-comparison, filters, drill-down, CSV export and each person's own arrangement; and an **ERP
-connector**. The Developer describes what a dashboard shows and to whom; it does not draw a chart.
+comparison, filters, drill-down, CSV export and each person's own arrangement; **work screens**
+that are descriptions too (my requests, the approval queue, ordering, goods in, the invoice
+desk, payment runs, suppliers, contracts), with their tabs and counts, forms, actions by role
+and refusals that name their rule; and an **ERP connector**. The Developer describes what a
+screen shows and to whom; it does not draw a chart or write a queue.
 See [docs/FINANCE.md](docs/FINANCE.md), which also says how the next department is added.
 
 ## MVP mode: screens first
@@ -450,7 +453,7 @@ scaffolds/web-app/           What every generated app starts from: gateway, api,
                              (ui.js), shell (app.js), design system (styles.css)
 scaffolds/_overlays/         What a pack lays over it: enterprise (kernel, connectors, platform screens)
                              and finance (the finance library, its dashboard kit, the ERP connector)
-tools/finance/               Compose a finance application without a run; drive the kit in a browser
+tools/finance/               Compose a finance application without a run; drive the kit and the work screens in a browser
 packs/                       Domain packs: gates, build and review policy, definition of done
                              (both are mounted into the orchestrator by the compose file; the copies
                              under services/orchestrator/ are what its image carries without the mount —

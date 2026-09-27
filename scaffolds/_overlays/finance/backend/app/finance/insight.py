@@ -114,6 +114,16 @@ def scorecard(db: Session, supplier_id: int, **params: Any) -> dict[str, Any]:
 
 def documents(db: Session, entity: str = "invoice", **params: Any) -> dict[str, Any]:
     defaults = {"status": "", "match_status": "", "overdue": False, "bucket": "", "dated": True, "date": "", "q": "",
-                "sort": "", "limit": 500, "where": ""}
+                "sort": "", "limit": 500, "where": "", "mine": False}
     own = {k: params.pop(k) for k in list(params) if k in defaults}
     return api.get_documents(entity=entity, **{**defaults, **own}, db=db, scope=scope(**params))
+
+
+def worklist(db: Session, entity: str = "requisition", mine: bool = False, **params: Any) -> dict[str, Any]:
+    """How many of an entity's records are in each state."""
+    return api.get_worklist(entity=entity, mine=mine, db=db, scope=scope(**params))
+
+
+def approvals(db: Session, entity: str = "", mine: bool = True) -> dict[str, Any]:
+    """What waits for a decision by the person this request is for."""
+    return api.get_approvals(entity=entity, mine=mine, db=db)

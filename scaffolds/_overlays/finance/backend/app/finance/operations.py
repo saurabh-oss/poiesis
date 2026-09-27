@@ -11,6 +11,10 @@ on the standard entities (standard.py) whichever model classes the application g
     ops.propose_payment_run(db, due_by=date)           gathers approved invoices into a run, taking discounts worth taking
     ops.budget_position(db, cost_center_id, requested=5000)      what is left of the year's budget (FIN-02)
     ops.check_request(db, requisition)                 what to tell a requester before they submit
+    ops.create_requisition(db, {"title": …, "amount": 1800, "cost_center_id": 7})     a draft, with its reference
+    ops.raise_order(db, requisition_id, supplier_id=12)          the order of an approved requisition (PROC-02, PROC-09)
+    ops.send_order(db, order_id)                       to the supplier, and into the ERP
+    ops.waiting(db)                                    the approvals waiting, and whether I may decide each
 
 Also served, for the person signed in, under /api/finance/ (api.py):
 
@@ -19,6 +23,10 @@ Also served, for the person signed in, under /api/finance/ (api.py):
     POST /api/finance/payment-runs/propose             {"due_by": "2026-10-09", "run_date": "2026-10-01"}
     GET  /api/finance/budget/position?cost_center_id=3&requested=5000
     GET  /api/finance/requisitions/{id}/advice
+    POST /api/finance/requisitions                     {"title": "Label printers", "amount": 1800, "cost_center_id": 7}
+    POST /api/finance/requisitions/{id}/order          {"supplier_id": 12, "expected_delivery": "2026-10-20"}
+    POST /api/finance/purchase-orders/{id}/send
+    GET  /api/finance/approvals
 
 Every move goes through the record's workflow when the application registered one, so
 roles, approvals and the audit trail apply; without one, the status is set as it stands.
@@ -126,6 +134,138 @@ def _move(db: Session, obj: Any, name: str, *, reason: str = "", fields: dict[st
 def _next_reference(db: Session, cls: type, prefix: str, start: int) -> str:
     last = db.execute(select(cls.id).order_by(cls.id.desc()).limit(1)).scalar() or 0
     return f"{prefix}{start + last + 1}"
+
+
+# ----------------------------------------------------------------------- requesting and ordering
+
+def create_requisition(db: Session, values: dict[str, Any], *, commit: bool = True) -> Any:
+    """A draft requisition from what a requester filled in: its reference, who asked and when are
+    the application's to say, not the form's."""
+    from ..kernel import current
+    _session(db, "create_requisition")
+    cls = need("requisition")
+    fin.check(D(values.get("amount") or 0) > 0, "PROC-02", "Enter the amount: it must be more than zero")
+    fin.check(bool(str(values.get("title") or "").strip()), "PROC-02", "Say what is being bought: the title is empty")
+    actor = current()
+    req = cls()
+    have = columns("requisition")
+    _put(req, **{k: v for k, v in values.items() if k in have and k not in ("id", "status", "reference", "approver_name",
+                                                                               "approved_at", "submitted_at", "purchase_order_id")})
+    for name in ("needed_by",):
+        if isinstance(get(req, name), str):
+            _put(req, **{name: as_date(get(req, name))})
+    _put(req, reference=_next_reference(db, cls, "PR-", 110_000), status="draft", created_at=now(),
+         requester_name=str(values.get("requester_name") or actor.name), currency=values.get("currency") or base_currency())
+    db.add(req)
+    db.flush()
+    if commit:
+        db.commit()
+    return req
+
+
+def raise_order(db: Session, requisition: Any, *, supplier_id: Any = None, expected_delivery: Any = None,
+                commit: bool = True) -> dict[str, Any]:
+    """The purchase order of an approved requisition: with an approved supplier (PROC-09), released
+    without a second approval because it was approved as a requisition (PROC-02), and the requisition
+    marked ordered."""
+    from ..kernel import current
+    _session(db, "raise_order")
+    req = row(db, "requisition", requisition)
+    if get(req, "status", "") != "approved":
+        raise violation("PROC-02", f"{get(req, 'reference', 'This requisition')} is "
+                                   f"{str(get(req, 'status', '')).replace('_', ' ')}: an order is raised once it is approved")
+    orders = need("purchase_order")
+    chosen = supplier_id or get(req, "supplier_id")
+    fin.check(bool(chosen), "PROC-09", "Choose the supplier the order goes to")
+    supplier = db.get(need("supplier"), int(chosen)) if model("supplier") is not None else None
+    if model("supplier") is not None:
+        fin.check(supplier is not None, "PROC-09", "Choose a supplier that exists")
+        fin.check_supplier(supplier)
+    po = orders()
+    day = today()
+    _put(po, reference=_next_reference(db, orders, "PO-46", 10_000_000), supplier_id=int(chosen), requisition_id=req.id,
+         cost_center_id=get(req, "cost_center_id"), spend_category_id=get(req, "spend_category_id"),
+         buyer_name=current().name, status="draft", amount=float(D(get(req, "amount", 0))),
+         currency=get(req, "currency", base_currency()), received_amount=0.0, invoiced_amount=0.0, order_date=day,
+         expected_delivery=as_date(expected_delivery) or get(req, "needed_by"),
+         payment_terms=get(supplier, "payment_terms", "NET30") or "NET30", created_at=now())
+    db.add(po)
+    db.flush()
+    lines = model("purchase_order_line")
+    if lines is not None:
+        line = lines()
+        _put(line, purchase_order_id=po.id, line_no=1, description=str(get(req, "title", ""))[:300], quantity=1.0, unit="each",
+             unit_price=get(po, "amount"), amount=get(po, "amount"), received_quantity=0.0, invoiced_quantity=0.0,
+             spend_category_id=get(req, "spend_category_id"))
+        db.add(line)
+    _move(db, po, "release", rule="PROC-02", status="approved",
+          reason=f"Approved as requisition {get(req, 'reference', req.id)}")
+    _move(db, req, "order", fields={"purchase_order_id": po.id}, status="ordered")
+    _put(req, purchase_order_id=po.id)
+    if commit:
+        db.commit()
+    return {"purchase_order_id": po.id, "reference": get(po, "reference", ""), "status": get(po, "status"),
+            "requisition_id": req.id, "requisition_status": get(req, "status"), "supplier": get(supplier, "name", ""),
+            "amount": get(po, "amount")}
+
+
+def send_order(db: Session, order: Any, *, commit: bool = True) -> dict[str, Any]:
+    """Send an approved order to the supplier, and create it in the ERP (in its sandbox until the
+    ERP's credentials are set). Sending it twice creates it once. The move is committed before the
+    ERP is called, whatever `commit` says: an order the ERP holds is an order that was sent."""
+    from .. import connectors
+    _session(db, "send_order")
+    po = row(db, "purchase_order", order)
+    supplier = db.get(model("supplier"), po.supplier_id) if model("supplier") is not None and get(po, "supplier_id") else None
+    _move(db, po, "send", status="sent")
+    result = None
+    if "erp" in getattr(connectors, "CONNECTORS", {}):
+        db.commit()              # the connector keeps its outbox in a session of its own: the order is sent first
+        lines = []
+        if model("purchase_order_line") is not None:
+            cls = model("purchase_order_line")
+            lines = [{"description": get(ln, "description", ""), "quantity": get(ln, "quantity", 1), "unit_price": get(ln, "unit_price", 0),
+                      "amount": get(ln, "amount", 0)}
+                     for ln in db.execute(select(cls).where(cls.purchase_order_id == po.id)).scalars().all()]
+        centre = db.get(model("cost_center"), po.cost_center_id) if model("cost_center") is not None and get(po, "cost_center_id") else None
+        result = connectors.get("erp").create_purchase_order(
+            get(po, "reference", ""), get(supplier, "code", str(get(po, "supplier_id", ""))), get(po, "amount", 0), lines=lines,
+            cost_center=get(centre, "code", ""), currency=get(po, "currency", base_currency()),
+            idempotency_key=f"po-{get(po, 'reference', po.id)}", ref=f"purchase_order:{po.id}")
+        record(db, "connector", f"{get(po, 'reference', 'Order')} created in the ERP as {result.key} ({result.mode})" if result.ok
+               else f"{get(po, 'reference', 'Order')} could not be created in the ERP: {result.error}",
+               entity="purchase_order", entity_id=po.id)
+    if commit:
+        db.commit()
+    return {"purchase_order_id": po.id, "reference": get(po, "reference", ""), "status": get(po, "status"),
+            "erp": result.as_dict() if result is not None else None}
+
+
+def waiting(db: Session, entity: str = "") -> list[dict[str, Any]]:
+    """The approvals that are waiting, each with the record it is about and whether the person
+    asking may decide it (their role, and not their own request: four eyes)."""
+    from ..kernel import current
+    from ..kernel.models import Approval, aware, utcnow
+    from ..kernel.policy import policy
+    _session(db, "waiting")
+    actor = current()
+    q = db.query(Approval).filter(Approval.status == "pending")
+    if entity:
+        q = q.filter(Approval.entity == entity)
+    out = []
+    labels = policy().roles
+    for a in q.order_by(Approval.id).all():
+        cls = model(a.entity)
+        rec = db.get(cls, a.entity_id) if cls is not None else None
+        if rec is None:
+            continue
+        mine = actor.has_role(a.approver_role) or actor.kind in ("system", "service")
+        out.append({"approval_id": a.id, "entity": a.entity, "entity_id": a.entity_id, "transition": a.transition,
+                    "title": a.title, "approver_role": a.approver_role, "approver": labels.get(a.approver_role, a.approver_role),
+                    "requested_by": a.requested_by_name, "requested_at": a.requested_at, "reason": a.reason,
+                    "due_at": a.due_at, "overdue": bool(a.due_at and aware(a.due_at) < utcnow()),
+                    "can_decide": bool(mine and a.requested_by_id != actor.id), "record": rec})
+    return out
 
 
 # ------------------------------------------------------------------------------ matching
