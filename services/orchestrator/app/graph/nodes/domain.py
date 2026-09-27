@@ -19,6 +19,7 @@ or workflows; services.py stays theirs to extend.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import json
@@ -110,6 +111,8 @@ try:
             if r not in roles:
                 out["problems"].append(f"workflow {w.name}: escalate role '{r}' is not in ROLES")
         out["workflows"].append(w.describe())
+    # What a library could not use of the application's configuration (kernel/rules.py: PROBLEMS).
+    out["problems"] += [str(p) for p in getattr(R, "PROBLEMS", [])]
     rules = [r for r in R.catalogue() if not r["id"].startswith("WF-")]
     if any(r["id"].startswith("EX-") for r in rules):
         out["problems"].append("the worked example's EX- rules are still there: replace rules.py entirely")
@@ -124,6 +127,13 @@ except Exception:
     tb = traceback.format_exc()
     lines = [l for l in tb.splitlines() if "site-packages" not in l and "<frozen" not in l]
     out["error"] = "\n".join(lines[-14:])
+# To a file as well: a domain with seven lifecycles describes itself in more than the sandbox
+# keeps of what is printed, and the rule tests print after it.
+try:
+    with open(".poiesis/domain_report.json", "w", encoding="utf-8") as f:
+        json.dump(out, f, default=str)
+except OSError:
+    pass
 print("POIESIS_DOMAIN_JSON")
 print(json.dumps(out, default=str))
 '''
@@ -298,25 +308,58 @@ def results_by_rule(rules: list[dict[str, Any]], cases: list[dict[str, Any]]) ->
             "untested": [r["id"] for r in rules if r["id"] not in by_rule]}
 
 
-async def _check(run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+# What the sandbox installs before anything of the application's is imported. When one of these
+# is what cannot be imported, the package index was out of reach: nothing was learned about the domain.
+_PLATFORM_MODULES = ("sqlalchemy", "fastapi", "pydantic", "starlette", "httpx", "pytest")
+_NOT_INSTALLED = re.compile(r"No module named '?(" + "|".join(_PLATFORM_MODULES) + r")\b")
+CHECK_RETRIES = 3
+
+
+async def _check_once(run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], str, str]:
     tools = repo.workspace_path(run_id) / ".poiesis"
     tools.mkdir(exist_ok=True)
     (tools / "domain_check.py").write_text(CHECK_SCRIPT, encoding="utf-8", newline="\n")
     (tools / "rules.xml").unlink(missing_ok=True)
+    (tools / "domain_report.json").unlink(missing_ok=True)
     result = await run_in_sandbox(run_id, command(run_id), timeout=600, network=True)
     marker = "POIESIS_DOMAIN_JSON\n"
     report: dict[str, Any] = {"error": "the domain check produced no report", "problems": [], "rules": []}
-    if marker in result.stdout:
+    written = tools / "domain_report.json"
+    if written.is_file():
+        try:
+            report = json.loads(written.read_text(encoding="utf-8"))
+        except ValueError:
+            pass
+    elif marker in result.stdout:
         try:
             report = json.loads(result.stdout.split(marker, 1)[1].splitlines()[0])
         except (ValueError, IndexError):
             pass
-    if not report.get("error"):
-        (tools / "domain.json").write_text(json.dumps({"workflows": report.get("workflows", [])}), encoding="utf-8")
     else:
         report["error"] += ":\n" + "\n".join((result.stderr or result.stdout).strip().splitlines()[-12:])
-    tail = result.stdout.split(marker, 1)[1].split("\n", 2)[-1] if marker in result.stdout else ""
-    return report, _junit(run_id), tail
+    tail = result.stdout.split(marker, 1)[1].split("\n", 2)[-1] if marker in result.stdout \
+        else "\n".join((result.stdout or "").strip().splitlines()[-25:])
+    return report, _junit(run_id), tail, (result.stdout or "") + (result.stderr or "")
+
+
+async def _check(run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+    """The domain check and the rule tests. When the sandbox could not install its packages the
+    check is run again: the first finance run judged a domain that was never imported, because
+    the package index was out of reach for a minute after a restart."""
+    report, cases, tail = {"error": "not checked", "problems": [], "rules": []}, [], ""
+    for attempt in range(CHECK_RETRIES):
+        report, cases, tail, output = await _check_once(run_id)
+        if not _NOT_INSTALLED.search(str(report.get("error") or "") + "\n" + tail + "\n" + output[-3000:]):
+            break
+        await emit(run_id, "The sandbox could not install its packages (the package index was out of reach); "
+                           + ("checking again in a moment" if attempt < CHECK_RETRIES - 1 else "giving up on the check"),
+                   agent="developer", stage="foundation", level="warn")
+        if attempt < CHECK_RETRIES - 1:
+            await asyncio.sleep(30 * (attempt + 1))
+    if not report.get("error"):
+        (repo.workspace_path(run_id) / ".poiesis" / "domain.json").write_text(
+            json.dumps({"workflows": report.get("workflows", [])}), encoding="utf-8")
+    return report, cases, tail
 
 
 def _feedback(report: dict[str, Any], cases: list[dict[str, Any]], results: dict[str, Any], tail: str) -> list[str]:
@@ -449,7 +492,7 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
         # identically again gets a worked instruction instead.
         failing_now = {c["name"]: c["message"] for c in cases if not c["passed"]}
         stuck = [n for n, m in failing_now.items() if previous_failures.get(n) == m]
-        if stuck:
+        if stuck and not report.get("error"):      # a domain that does not import fails every test the same way
             problems.insert(0,
                 "these tests failed exactly the same way last time: " + ", ".join(stuck[:6]) + ". For each, "
                 "evaluate the rule by hand on the test's own inputs, step by step, and write the result down; "

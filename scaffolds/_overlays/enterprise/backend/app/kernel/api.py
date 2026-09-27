@@ -58,7 +58,8 @@ def profile() -> dict[str, Any]:
         "workflows": [w.name for w in wf.iter_workflows()], "rules": len(rule_registry.RULES),
         "connectors": {c["name"]: c["mode"] for c in connectors.catalogue()},
         "libraries": _libraries(),
-        "errors": {k: v for k, v in {"policy": p.error, **DOMAIN_ERROR}.items() if v},
+        "errors": {k: v for k, v in {"policy": p.error, **DOMAIN_ERROR,
+                                     "configuration": "; ".join(rule_registry.PROBLEMS)}.items() if v},
     }
 
 

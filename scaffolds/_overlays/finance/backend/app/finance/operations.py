@@ -151,7 +151,7 @@ def match_invoice(db: Session, invoice: Any, *, tolerance: fin.Tolerance | None 
     elif order is None:
         category = db.get(model("spend_category"), inv.spend_category_id) \
             if model("spend_category") is not None and get(inv, "spend_category_id") else None
-        exempt = get(category, "code", "") in fin.POLICY.po_exempt_categories
+        exempt = fin.exempt_from_order(category)
         if fin.po_required(get(inv, "amount", 0), exempt=exempt):
             rule, status = "PROC-06", "no_po"
             notes = [f"an invoice above {money.fmt(fin.POLICY.po_required_above, currency)} must name a purchase order"]

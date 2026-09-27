@@ -189,6 +189,10 @@ SETTINGS = (
     ("budget_warning_pct", ("budget_line",), "90", "the share of the year's budget at which a request warns"),
     ("material_pct", ("budget_line",), "5", "a variance of this share of budget, and at least 1,000, is material"),
     ("expiring_days", ("contract",), "90", "a contract is flagged this many days before it ends"),
+    ("approval_hours", ("requisition", "purchase_order"), "48", "an approval may wait this long before it is escalated"),
+    ("exception_hours", ("invoice",), "72", "a held invoice may wait this long before it is escalated"),
+    ("escalate_to", ("requisition", "purchase_order", "invoice"), '"finance_director"',
+     "the role told when an approval or an exception waits too long"),
 )
 
 

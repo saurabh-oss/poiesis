@@ -37,10 +37,14 @@ def library_defaults():
     """These tests state the library's own numbers. An application sets its own (fin.configure),
     and its tests run in the same process: each test here starts from the defaults and puts the
     application's back."""
+    from app.kernel import rules as registry
     kept = {name: getattr(fin.POLICY, name) for name in fin.Policy.__dataclass_fields__}
+    said, told = list(fin.PROBLEMS), list(registry.PROBLEMS)
     fin.reset()
     yield
-    fin.configure(**kept)
+    for name, value in kept.items():
+        setattr(fin.POLICY, name, value)
+    fin.PROBLEMS[:], registry.PROBLEMS[:] = said, told
 
 
 # =============================================================================== money
@@ -473,17 +477,63 @@ def test_policy_an_organisation_sets_its_numbers_once():
     assert fin.budget_position(100_000, 60_000, 0, 20_000).status == "warning"                          # 80%
     assert fin.renewal(dt.date(2027, 1, 23), TODAY).status == "expiring"                                # 120 days
     assert fin.split_orders([request_(1_500, 1), request_(1_200, 3)]) != []                              # together above 2,000
+    fin.configure(exception_hours=24, approval_hours=12, escalate_to="finance_controller")
+    held = flows.invoice(FinInvoice, name="check_hours")
+    asked = flows.requisition(FinRequisition, name="check_hours_too")
+    assert held.sla["exception"] == 24 and held.escalate == {"exception": "finance_controller", "matched": "finance_controller"}
+    assert asked.sla["submitted"] == 12 and asked.escalate == {"submitted": "finance_controller"}
+    assert flows.invoice(FinInvoice, name="its_own", exception_hours=8).sla["exception"] == 8
     fin.reset()
     assert fin.approver_for(5_000) == "budget_holder" and fin.po_required(1_000) is False
+    assert flows.invoice(FinInvoice, name="defaults").escalate == {}
 
 
-def test_policy_refuses_what_it_does_not_know():
-    with pytest.raises(TypeError) as err:
-        fin.configure(tolerence=fin.Tolerance())
-    assert "tolerence" in str(err.value) and "tolerance" in str(err.value)
-    with pytest.raises(ValueError):
-        fin.configure(doa=[(2_000, "budget_holder"), (20_000, "cfo")])          # nobody approves above 20,000
+def test_results_read_as_objects_and_as_mappings():
+    m = fin.three_way_match(order(2_000), [receipt(2_000)], Rec(net_amount=2_000))
+    assert m.ok is True and m["ok"] is True and m.get("status") == "matched" and "discrepancies" in m
+    assert dict(m)["invoiced"] == 2000.0 and m.get("nothing", 7) == 7 and m.as_dict()["ordered"] == 2000.0
+    p = fin.budget_position(100_000, 60_000, 20_000, 5_000)
+    assert p["status"] == p.status == "ok" and p.get("remaining") == 15000.0 and p.remaining == D(15_000)
+    r = fin.renewal(dt.date(2026, 12, 24), TODAY)
+    assert r["status"] == "expiring" and "days_left" in r and sorted(r.keys()) == ["days_left", "decide_by", "note", "status"]
+    assert fin.variance(94_000, 100_000).get("favourable") is True
+    assert fin.supplier_risk(otif_pct=98)["rating"] == "low"
+
+
+def test_policy_reads_quotes_as_a_brief_states_them():
+    fin.configure(quote_bands=[(10_000, 3, None)])                          # "above 10,000, three quotes"
+    assert fin.POLICY.quote_bands == ((10_000, 1, False), (None, 3, False)) and not fin.PROBLEMS
+    assert fin.quotes_needed(10_000) == {"quotes": 1, "tender": False}
+    assert fin.quotes_needed("10000.01") == {"quotes": 3, "tender": False}
+    fin.configure(quote_bands=[(5_000, 2), (25_000, 3, False), (100_000, 3, True)])
+    assert [fin.quotes_needed(a) for a in (5_000, 5_001, 25_001, 100_001)] == [
+        {"quotes": 1, "tender": False}, {"quotes": 2, "tender": False}, {"quotes": 3, "tender": False}, {"quotes": 3, "tender": True}]
+    fin.configure(quote_bands=[(10_000, 1, False), (None, 3, False)])       # and as bands, the last without a limit
+    assert fin.quotes_needed(10_001)["quotes"] == 3 and not fin.PROBLEMS
+
+
+def test_policy_says_what_it_could_not_use_and_keeps_what_it_had():
+    from app.kernel import rules as registry
+    fin.configure(tolerence=fin.Tolerance(price_pct=9), early_discount_threshold=1, po_required_above=500)
+    assert fin.POLICY.po_required_above == 500 and fin.POLICY.tolerance == fin.Tolerance()
+    assert len(fin.PROBLEMS) == 2 and "no setting `tolerence`" in fin.PROBLEMS[0] and "tolerance" in fin.PROBLEMS[0]
+    assert "early_discount_threshold" in fin.PROBLEMS[1] and "constant" in fin.PROBLEMS[1]
+    assert set(fin.PROBLEMS) <= set(registry.PROBLEMS)
+    fin.configure(doa=[(2_000, "budget_holder"), (20_000, "cfo")])          # nobody approves above 20,000
+    fin.configure(doa=[(20_000, "head_of_department"), (2_000, "budget_holder"), (None, "cfo")])
+    fin.configure(quote_bands="three", expiring_days="ninety", escalate_to=["a", "b"])
+    assert fin.POLICY.doa == fin.DEFAULT_DOA and fin.POLICY.expiring_days == 90 and fin.POLICY.escalate_to is None
+    said = " | ".join(fin.PROBLEMS[2:])
+    assert "nobody approves an amount above 20000" in said and "smallest amount to the largest" in said
+    assert "fin.configure(quote_bands=…)" in said and "expiring_days=90" in said and "one role" in said
     assert fin.configure(tolerance={"price_pct": 3}).tolerance == fin.Tolerance(price_pct=3)
+    fin.configure(po_exempt_categories=["rent", "utilities", "telecoms"])
+    assert fin.exempt_from_order(Rec(code="FA-RN", name="Rent & rates")) and fin.exempt_from_order("Utilities")
+    assert fin.exempt_from_order(Rec(code="IT-TC", name="Telecoms & connectivity"))
+    assert not fin.exempt_from_order(Rec(code="IT-SW", name="Software & SaaS")) and not fin.exempt_from_order(None)
+    fin.reset()
+    assert not fin.PROBLEMS
+    assert fin.exempt_from_order(Rec(code="FA-UT", name="Utilities")) and not fin.exempt_from_order(Rec(code="MK-MD", name="Media"))
 
 
 def test_every_library_rule_is_in_the_catalogue():

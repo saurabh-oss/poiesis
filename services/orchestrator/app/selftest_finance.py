@@ -238,8 +238,10 @@ def domain_report(root: Path) -> dict[str, Any]:
     (root / ".poiesis" / "domain_check.py").write_text(domain_stage.CHECK_SCRIPT, encoding="utf-8")
     out = run(root, ".poiesis/domain_check.py", env={"PYTHONPATH": ""})
     try:
-        return json.loads(out.stdout.split("POIESIS_DOMAIN_JSON\n", 1)[1].splitlines()[0])
-    except (IndexError, ValueError):
+        # From the file, as the domain stage reads it: the sandbox keeps only the tail of what is
+        # printed, and a finance domain describes itself in more than that.
+        return json.loads((root / ".poiesis" / "domain_report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return {"error": (out.stderr or out.stdout)[-1500:], "problems": [], "rules": [], "workflows": []}
 
 

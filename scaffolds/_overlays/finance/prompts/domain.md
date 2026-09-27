@@ -7,6 +7,10 @@ finance and procurement application shares. Build on it; never restate what it d
   from ..finance import operations as ops     match_invoice, receive_goods, propose_payment_run, budget_position, check_request
   from ..finance import personas              the roles of the function, a persona for each, their permissions
 
+WHAT A LIBRARY RULE RETURNS is an object with the attributes shown after `->` below (`m.ok`, `p.status`,
+`r.days_left`); it also reads as a mapping (`m["ok"]`, `m.get("status")`). Amounts in it are Decimal as
+attributes and plain numbers in the mapping: compare with `float(m.invoiced) == 2000.0`.
+
 THE LIBRARY'S RULES (already in the catalogue; do not register them again):
   FIN-01 segregation of duties           fin.check_segregation({"request": name, "approve": name})
   FIN-02 budget availability             fin.budget_position(budget, actual, committed, requested) -> .status ok|warning|exceeded; fin.check_budget(...)
@@ -38,9 +42,13 @@ WHAT YOU DO WITH THE FIVE FILES. Return each complete.
           tolerance=fin.Tolerance(price_pct=1, quantity_pct=0, amount_abs=25),                 # BR-05: within 1% and 25
           po_required_above=500,                                                                # BR-06
       )
-  Its settings: doa, tolerance, po_required_above, po_exempt_categories, quote_bands [(up to, quotes, tender)],
+  Its settings: doa, tolerance, po_required_above, po_exempt_categories (category codes or words of their names:
+  ["rent", "utilities", "telecoms"]), quote_bands as the brief states them, (above this amount, quotes needed, tender needed):
+  [(10_000, 3, False)] is three quotes above 10,000 and one below,
   budget_warning_pct, material_pct, material_amount, expiring_days, duplicate_days, split_days, orderable,
-  late_interest_pct, tax_rates. The last entry of `doa` is `(None, role)`: someone approves any amount. The
+  late_interest_pct, tax_rates, approval_hours, exception_hours, escalate_to (a role in ROLES). ONLY these
+  names. A number of the brief that is none of them (a discount threshold, a retention period) is a constant of
+  rules.py, used by the rule that states it. The last entry of `doa` is `(None, role)`: someone approves any amount. The
   library's rules, the lifecycles, the operations and the dashboards all read these, so set them ONCE, here.
   Then register EVERY rule the brief states under the brief's own id. Where the library decides the
   matter, the brief's rule calls it, without repeating the number:

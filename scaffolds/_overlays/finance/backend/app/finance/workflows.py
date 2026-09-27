@@ -101,6 +101,15 @@ def _own(model: type, *names: str) -> tuple[str, ...]:
     return tuple(n for n in names if table is None or n in table.columns)
 
 
+def _hours(value: float | None, setting: str) -> float:
+    """The hours a lifecycle was given, or the organisation's own (fin.configure(approval_hours=…))."""
+    return float(getattr(rules.POLICY, setting) if value is None else value)
+
+
+def _told(role: str | None) -> str | None:
+    return rules.POLICY.escalate_to if role is None else role
+
+
 def _fx(effects: Effects | None, name: str) -> tuple[Callable[..., Any], ...]:
     return tuple((effects or {}).get(name, ()))
 
@@ -109,10 +118,11 @@ def _fx(effects: Effects | None, name: str) -> tuple[Callable[..., Any], ...]:
 
 def requisition(model: type, *, requester: Sequence[str] = ("requester",), buyer: Sequence[str] = ("buyer",),
                 doa: Any = None, amount: str = "amount", field: str = "status",
-                escalate_to: str | None = None, approval_hours: float = 48, effects: Effects | None = None,
+                escalate_to: str | None = None, approval_hours: float | None = None, effects: Effects | None = None,
                 name: str = "requisition") -> Workflow:
     """Draft → awaiting approval → approved → ordered, with rejection and cancellation."""
     approval = _approval(doa, amount)
+    escalate_to, approval_hours = _told(escalate_to), _hours(approval_hours, "approval_hours")
     flow = Workflow(
         name, model, field=field, title="Purchase requisition", states=states("requisition"), initial="draft",
         transitions=[
@@ -137,9 +147,12 @@ def requisition(model: type, *, requester: Sequence[str] = ("requester",), buyer
 
 def purchase_order(model: type, *, buyer: Sequence[str] = ("buyer",), receiver: Sequence[str] = ("requester", "buyer"),
                    doa: Any = None, amount: str = "amount", field: str = "status",
-                   supplier_model: type | None = None, escalate_to: str | None = None, approval_hours: float = 48,
-                   effects: Effects | None = None, name: str = "purchase_order") -> Workflow:
+                   supplier_model: type | None = None, escalate_to: str | None = None,
+                   approval_hours: float | None = None, effects: Effects | None = None,
+                   name: str = "purchase_order") -> Workflow:
     """Draft → awaiting approval → approved → sent → (partly) received → closed."""
+    escalate_to, approval_hours = _told(escalate_to), _hours(approval_hours, "approval_hours")
+
     def can_order(record: Any, ctx: Any) -> Any:
         said = _has_amount(amount)(record, ctx)
         if said:
@@ -177,10 +190,13 @@ def purchase_order(model: type, *, buyer: Sequence[str] = ("buyer",), receiver: 
 
 def invoice(model: type, *, clerk: Sequence[str] = ("ap_clerk",), payer: Sequence[str] = ("treasury",),
             doa: Any = "budget_holder", amount: str = "amount", field: str = "status",
-            escalate_to: str | None = None, exception_hours: float = 72, approval_hours: float = 72,
-            effects: Effects | None = None, name: str = "invoice") -> Workflow:
+            escalate_to: str | None = None, exception_hours: float | None = None,
+            approval_hours: float | None = None, effects: Effects | None = None, name: str = "invoice") -> Workflow:
     """Received → matched or exception → approved → scheduled → paid. `doa` is the role
     that approves a matched invoice, or a delegation of authority by amount."""
+    escalate_to = _told(escalate_to)
+    exception_hours = _hours(exception_hours, "exception_hours")
+    approval_hours = _hours(approval_hours, "approval_hours")
     return Workflow(
         name, model, field=field, title="Supplier invoice", states=states("invoice"), initial="received",
         transitions=[

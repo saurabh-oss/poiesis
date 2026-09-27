@@ -51,6 +51,15 @@ class Rule:
 
 
 RULES: dict[str, Rule] = {}
+# What a library could not use of what the application configured (a setting it does not have, a
+# value of the wrong shape). Said, not raised: the application starts, the platform's domain check
+# lists each one for the Developer, and the profile shows them.
+PROBLEMS: list[str] = []
+
+
+def problem(text: str) -> None:
+    if text not in PROBLEMS:
+        PROBLEMS.append(text)
 _lock = threading.Lock()
 
 

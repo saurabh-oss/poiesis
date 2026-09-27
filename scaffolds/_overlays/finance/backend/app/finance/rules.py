@@ -42,6 +42,33 @@ from .periods import add_months, as_date, days_overdue, end_of_month
 SOURCE = "Poiesis finance library"
 
 
+class Record:
+    """What a rule returns. It reads as an object (`m.ok`, `m.status`) and as a mapping
+    (`m["ok"]`, `m.get("status")`, `"ok" in m`, `dict(m)`), amounts as plain numbers in the
+    mapping, so a caller that expected either finds what it looks for."""
+
+    def as_dict(self) -> dict[str, Any]:
+        return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in self.__dict__.items()}
+
+    def keys(self) -> list[str]:
+        return list(self.__dict__)
+
+    def items(self) -> list[tuple[str, Any]]:
+        return list(self.as_dict().items())
+
+    def get(self, name: str, default: Any = None) -> Any:
+        return self.as_dict().get(name, default)
+
+    def __getitem__(self, name: str) -> Any:
+        return self.as_dict()[name]
+
+    def __contains__(self, name: object) -> bool:
+        return name in self.__dict__
+
+    def __iter__(self) -> Any:
+        return iter(self.__dict__)
+
+
 def _p(value: Any, name: str) -> Any:
     """The value a rule was passed, or the organisation's own from POLICY."""
     return getattr(POLICY, name) if value is None else value
@@ -94,7 +121,7 @@ BUDGET_WARNING_PCT = 90      # utilisation at which a budget holder is warned
 
 
 @dataclass(frozen=True)
-class BudgetPosition:
+class BudgetPosition(Record):
     budget: Decimal
     actual: Decimal           # invoiced or paid
     committed: Decimal        # ordered, not yet invoiced
@@ -104,8 +131,6 @@ class BudgetPosition:
     utilisation_pct: float | None
     status: str               # ok | warning | exceeded
 
-    def as_dict(self) -> dict[str, Any]:
-        return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in self.__dict__.items()}
 
 
 @rule("FIN-02", "Budget availability: spend is checked against budget less actuals and commitments",
@@ -142,7 +167,7 @@ def check_budget(budget: Any, actual: Any = 0, committed: Any = 0, requested: An
 # --- FIN-03 payment terms, FIN-04 early payment discount ---------------------------------
 
 @dataclass(frozen=True)
-class Terms:
+class Terms(Record):
     code: str
     days: int = 30                 # days until due
     end_of_month: bool = False     # counted from the end of the invoice's month
@@ -182,7 +207,7 @@ def due_date(invoice_date: Any, terms: Any = "NET30") -> dt.date:
 
 
 @dataclass(frozen=True)
-class Discount:
+class Discount(Record):
     available: bool
     amount: Decimal             # what is saved by paying in time
     pay: Decimal                # what is paid when the discount is taken
@@ -232,7 +257,7 @@ TAX_RATES = {"standard": 20.0, "reduced": 5.0, "zero": 0.0, "exempt": 0.0}     #
 
 
 @dataclass(frozen=True)
-class Tax:
+class Tax(Record):
     net: Decimal
     tax: Decimal
     gross: Decimal
@@ -276,7 +301,7 @@ MATERIAL_AMOUNT = 1000
 
 
 @dataclass(frozen=True)
-class Variance:
+class Variance(Record):
     actual: Decimal
     budget: Decimal
     amount: Decimal            # actual − budget
@@ -284,8 +309,6 @@ class Variance:
     favourable: bool           # under budget on a cost, over budget on revenue
     material: bool             # large enough to need an explanation
 
-    def as_dict(self) -> dict[str, Any]:
-        return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in self.__dict__.items()}
 
 
 @rule("FIN-07", "Variance: actual against budget, favourable or adverse, and whether it is material",
@@ -359,7 +382,7 @@ def check_period_open(posting_date: Any, closed_through: Any) -> None:
 # --- FIN-11 foreign currency -------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class FxResult:
+class FxResult(Record):
     booked: Decimal         # in the base currency, at the rate when the invoice was booked
     settled: Decimal        # … at the rate when it was paid
     difference: Decimal     # settled − booked: a loss when paying cost more than was booked
@@ -395,7 +418,7 @@ class Tolerance:
 
 
 @dataclass
-class Match:
+class Match(Record):
     status: str                                   # matched | price_variance | quantity_variance | no_po | no_receipt
     ok: bool
     discrepancies: list[str] = field(default_factory=list)
@@ -405,8 +428,6 @@ class Match:
     price_delta: Decimal = Decimal(0)             # value invoiced above the ordered price
     quantity_delta: Decimal = Decimal(0)          # value invoiced above what was received
 
-    def as_dict(self) -> dict[str, Any]:
-        return {k: (float(v) if isinstance(v, Decimal) else v) for k, v in self.__dict__.items()}
 
 
 def _pct_ok(excess: Decimal, base: Decimal, pct: Any) -> bool:
@@ -602,7 +623,7 @@ def duplicate_invoices(invoice: Any, others: Iterable[Any], days: int | None = N
 # --- PROC-04 savings, PROC-08 purchase price variance --------------------------------------
 
 @dataclass(frozen=True)
-class Saving:
+class Saving(Record):
     baseline: Decimal
     negotiated: Decimal
     amount: Decimal
@@ -644,7 +665,7 @@ RISK_BANDS = ((34, "low"), (67, "medium"), (101, "high"))
 
 
 @dataclass(frozen=True)
-class Risk:
+class Risk(Record):
     score: float                     # 0 (none) to 100
     rating: str                      # low | medium | high
     parts: dict[str, float]          # each factor's points
@@ -698,7 +719,7 @@ EXPIRING_DAYS = 90
 
 
 @dataclass(frozen=True)
-class Renewal:
+class Renewal(Record):
     status: str                  # active | notice_due | expiring | expired
     days_left: int
     decide_by: dt.date           # the last day to give notice
@@ -827,30 +848,119 @@ class Policy:
     split_days: int = SPLIT_DAYS                               # PROC-11: requests this close together
     orderable: tuple[str, ...] = ORDERABLE                     # PROC-09: supplier statuses that can be ordered from
     late_interest_pct: float = LATE_INTEREST_PCT               # FIN-05
+    approval_hours: float = 48                                 # how long an approval may wait before it is escalated
+    exception_hours: float = 72                                # how long an invoice may be held before it is escalated
+    escalate_to: str | None = None                             # the role told when either waits too long
     tax_rates: dict[str, float] = field(default_factory=lambda: dict(TAX_RATES))      # FIN-06
 
 
 POLICY = Policy()
 
 
+PROBLEMS: list[str] = []          # what configure() could not use, in words a person can act on
+
+
+def _complain(text: str) -> None:
+    from ..kernel import rules as registry
+    if text not in PROBLEMS:
+        PROBLEMS.append(text)
+    if hasattr(registry, "problem"):
+        registry.problem(text)
+
+
+DOA_EXAMPLE = ('doa=[(2_000, "budget_holder"), (20_000, "head_of_department"), (None, "cfo")]: (the most the role '
+               "approves, the role), smallest first, the last with None because someone approves any amount")
+QUOTES_EXAMPLE = ("quote_bands=[(10_000, 3, False), (50_000, 3, True)]: above 10,000 three quotes, above 50,000 a "
+                  "tender as well; one quote below the first")
+_NUMBERS = ("po_required_above", "budget_warning_pct", "material_pct", "material_amount", "expiring_days", "duplicate_days",
+            "split_days", "late_interest_pct", "approval_hours", "exception_hours")
+
+
 def configure(**values: Any) -> Policy:
     """Set the organisation's numbers, once, where the application's rules are written.
-    A name the library does not have is refused, so a misspelt one cannot be silently ignored."""
-    known = set(Policy.__dataclass_fields__)
-    unknown = sorted(set(values) - known)
-    if unknown:
-        raise TypeError(f"the finance library has no setting {', '.join(unknown)}; it has: {', '.join(sorted(known))}")
+
+    Nothing here raises. A setting the library does not have, or a value it cannot read, is left
+    as it was and said in PROBLEMS: the application still starts, the platform's check tells the
+    Developer what to correct, and the profile shows it. A misspelt setting is never silently lost."""
+    known = Policy.__dataclass_fields__
     for name, value in values.items():
-        if name == "doa":
-            value = tuple((limit, str(role)) for limit, role in value)
-            if not value or value[-1][0] is not None:
-                raise ValueError("the delegation of authority ends with a role that approves any amount: (None, \"cfo\")")
-        elif name in ("quote_bands", "po_exempt_categories", "orderable"):
-            value = tuple(tuple(v) if isinstance(v, (list, tuple)) else v for v in value)
-        elif name == "tolerance" and not isinstance(value, Tolerance):
-            value = Tolerance(**value) if isinstance(value, dict) else Tolerance(*value)
-        setattr(POLICY, name, value)
+        if name not in known:
+            _complain(f"fin.configure({name}=…): the finance library has no setting `{name}`. Its settings are: "
+                      + ", ".join(sorted(known)) + ". Keep a number of the brief that is none of these as a constant "
+                      "of rules.py, used by the rule that states it")
+            continue
+        try:
+            setattr(POLICY, name, _read(name, value))
+        except (TypeError, ValueError, ArithmeticError) as exc:
+            _complain(f"fin.configure({name}=…): {exc}")
     return POLICY
+
+
+def _read(name: str, value: Any) -> Any:
+    if name == "doa":
+        bands = _rows(value, 2, DOA_EXAMPLE)
+        if bands[-1][0] is not None:
+            raise ValueError("the last entry has a limit, so nobody approves an amount above "
+                             f"{bands[-1][0]}; write it as in {DOA_EXAMPLE}")
+        _ascending([b[0] for b in bands[:-1]], DOA_EXAMPLE)
+        return tuple((limit, str(role)) for limit, role in bands)
+    if name == "quote_bands":
+        bands = [(limit, int(quotes), bool(tender)) for limit, quotes, tender in
+                 (tuple(b) + (False,) if len(tuple(b)) == 2 else tuple(b) for b in _rows(value, (2, 3), QUOTES_EXAMPLE))]
+        if bands[-1][0] is not None:
+            # As a brief says it: "above 10,000, three quotes". Each entry starts where it says,
+            # and below the first one quote is enough.
+            _ascending([b[0] for b in bands], QUOTES_EXAMPLE)
+            return tuple([(bands[0][0], 1, False)]
+                         + [(bands[i + 1][0] if i + 1 < len(bands) else None, q, t) for i, (_, q, t) in enumerate(bands)])
+        _ascending([b[0] for b in bands[:-1]], QUOTES_EXAMPLE)
+        return tuple(bands)
+    if name in ("po_exempt_categories", "orderable"):
+        return tuple(str(v) for v in ([value] if isinstance(value, str) else value))
+    if name == "tolerance":
+        if isinstance(value, Tolerance):
+            return value
+        return Tolerance(**value) if isinstance(value, dict) else Tolerance(*value)
+    if name == "escalate_to":
+        if value is not None and not isinstance(value, str):
+            raise ValueError('it is one role, by its key in policy.py\'s ROLES: escalate_to="finance_controller"')
+        return value
+    if name == "tax_rates":
+        return {str(k): float(v) for k, v in dict(value).items()}
+    if name in _NUMBERS:
+        try:
+            float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"it is a number, as in {name}={getattr(Policy(), name)}") from None
+    return value
+
+
+def _rows(value: Any, width: Any, example: str) -> list[tuple[Any, ...]]:
+    widths = width if isinstance(width, tuple) else (width,)
+    try:
+        rows = [tuple(row) for row in value]
+    except TypeError:
+        rows = []
+    if not rows or any(len(row) not in widths for row in rows):
+        raise ValueError(f"it is a list of entries, as in {example}")
+    return rows
+
+
+def _ascending(limits: list[Any], example: str) -> None:
+    if any(limit is None for limit in limits) or [D(x) for x in limits] != sorted(D(x) for x in limits):
+        raise ValueError(f"its entries go from the smallest amount to the largest, as in {example}")
+
+
+def exempt_from_order(category: Any) -> bool:
+    """Whether a spend category is one that is billed without a purchase order (PROC-06): by its
+    code ("FA-RN") or by a word of its name ("rent", "utilities"), whichever the organisation set."""
+    code = str(get(category, "code", "") or "").strip().lower()
+    label = str(get(category, "name", "") or (category if isinstance(category, str) else "")).strip().lower()
+    for entry in POLICY.po_exempt_categories:
+        word = str(entry).strip().lower()
+        if word and (word == code or word == label or re.search(r"\b" + re.escape(word), label)):
+            return True
+    return False
 
 
 def reset() -> Policy:
@@ -858,6 +968,7 @@ def reset() -> Policy:
     fresh = Policy()
     for name in Policy.__dataclass_fields__:
         setattr(POLICY, name, getattr(fresh, name))
+    del PROBLEMS[:]
     return POLICY
 
 

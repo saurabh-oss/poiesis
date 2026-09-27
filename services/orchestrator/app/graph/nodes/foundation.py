@@ -259,7 +259,6 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
         if not rows and preloaded:
             rows = dict(preloaded)
         if rows:
-            from ...workspace.seeding import fill_required
             filled = fill_required(rows, tables)
             seed_sql, _ = rows_to_sql(rows, tables)
             if filled:

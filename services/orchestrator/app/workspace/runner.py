@@ -8,13 +8,27 @@ at a corporate laptop and one you cannot.
 from __future__ import annotations
 
 import asyncio
-
+import hashlib
+import logging
+import shlex
+import time
 from dataclasses import dataclass
 
-from ..config import pack, settings
+from ..config import pack, scaffold_root, settings
 from .repo import SENTINEL
 
 DEFAULT_IMAGE = "python:3.12-slim"
+log = logging.getLogger(__name__)
+
+# Every check used to install the scaffold's packages afresh, from the internet, before it
+# looked at anything: a minute each time, and a run's business logic was once judged "does
+# not import" because the package index could not be reached. The sandbox image is prepared
+# once, with what every generated application needs already in it; a check then installs
+# only what a story added.
+SANDBOX_EXTRAS = ("pytest", "httpx")
+_PREPARED: dict[str, tuple[str, float]] = {}      # base image -> (the image to use, when that was decided)
+_RETRY_AFTER = 600                                # seconds before a failed preparation is tried again
+_PREPARING = asyncio.Lock()
 
 
 @dataclass
@@ -31,6 +45,58 @@ class ExecResult:
 
 def sandbox_image() -> str:
     return pack().get("build", {}).get("sandbox_image") or DEFAULT_IMAGE
+
+
+def _baseline() -> list[str]:
+    path = scaffold_root() / "web-app" / "backend" / "requirements.txt"
+    try:
+        lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    except OSError:
+        lines = []
+    return [line for line in lines if line and not line.startswith("#")] + list(SANDBOX_EXTRAS)
+
+
+def prepared_tag(base: str) -> str:
+    digest = hashlib.sha1("\n".join(_baseline()).encode()).hexdigest()[:10]
+    return "poiesis-sandbox:" + base.replace(":", "-").replace("/", "-") + "-" + digest
+
+
+async def _docker(*args: str, stdin: bytes | None = None, timeout: int = 60) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec(
+        "docker", *args, stdin=asyncio.subprocess.PIPE if stdin is not None else None,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(stdin), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return -1, f"timed out after {timeout}s"
+    return proc.returncode if proc.returncode is not None else -1, out.decode(errors="replace")
+
+
+async def prepared_image(base: str) -> str:
+    """`base` with the scaffold's requirements, pytest and httpx installed, built once and kept
+    by the daemon. `base` itself when it is not a Python image or cannot be prepared now."""
+    if not base.startswith("python:"):
+        return base
+    known = _PREPARED.get(base)
+    if known and (known[0] != base or time.time() - known[1] < _RETRY_AFTER):
+        return known[0]
+    async with _PREPARING:
+        tag = prepared_tag(base)
+        code, _ = await _docker("image", "inspect", tag, timeout=30)
+        if code != 0:
+            packages = " ".join(shlex.quote(r) for r in _baseline())
+            dockerfile = (f"FROM {base}\n"
+                          "RUN pip install --no-cache-dir --disable-pip-version-check --root-user-action=ignore "
+                          f"--retries 10 --timeout 60 {packages}\n")
+            code, out = await _docker("build", "-t", tag, "-", stdin=dockerfile.encode(), timeout=1800)
+            if code != 0:
+                log.warning("the sandbox image could not be prepared; using %s as it is: %s", base,
+                            " | ".join(out.strip().splitlines()[-3:]))
+                _PREPARED[base] = (base, time.time())
+                return base
+        _PREPARED[base] = (tag, time.time())
+        return tag
 
 
 def sandbox_timeout() -> int:
@@ -103,7 +169,7 @@ async def run_in_sandbox(
     ]
     for k, v in (env or {}).items():
         docker_cmd += ["-e", f"{k}={v}"]
-    docker_cmd += [image or sandbox_image(), shell, "-lc", command]
+    docker_cmd += [image or await prepared_image(sandbox_image()), shell, "-lc", command]
     proc = await asyncio.create_subprocess_exec(
         *docker_cmd,
         stdout=asyncio.subprocess.PIPE,
