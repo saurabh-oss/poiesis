@@ -50,6 +50,9 @@ _LOCKS: dict[str, asyncio.Lock] = {}
 _BIND_PREFIXES = ("./", "../", "/", "~")
 _LEGACY_PORT = re.compile(r"^\$\{APP_PORT(?::-\d+)?\}:(\d+)$")
 _PORT_TAKEN = re.compile(r"port is already allocated|address already in use", re.I)
+# Docker gives each compose project a network from a fixed pool; the networks of runs that are
+# no longer deployed hold their share of it until someone removes them.
+_NO_NETWORK = re.compile(r"address pools have been fully subnetted", re.I)
 
 
 class DeployError(RuntimeError):
@@ -348,6 +351,40 @@ def write_app_env(run_id: str) -> list[str]:
     return passed
 
 
+async def _docker(*args: str, timeout: int = 60) -> tuple[int, str]:
+    proc = await asyncio.create_subprocess_exec("docker", *args, stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.STDOUT)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return -1, ""
+    return proc.returncode if proc.returncode is not None else -1, out.decode(errors="replace")
+
+
+async def free_networks(keep: str = "") -> list[str]:
+    """Remove the networks of runs that have no container on them, and say which.
+
+    "all predefined address pools have been fully subnetted" is how a laptop that has deployed
+    thirty runs refuses the thirty-first. Only this platform's own networks (poiesis-run-…,
+    and the smoke check's) are touched, and only empty ones: compose makes a run's network
+    again the next time that run is deployed.
+    """
+    code, out = await _docker("network", "ls", "--format", "{{.Name}}")
+    if code != 0:
+        return []
+    freed = []
+    for name in out.split():
+        if not name.startswith(("poiesis-run-", "poiesis-smoke")) or (keep and name.startswith(keep)):
+            continue
+        code, used = await _docker("network", "inspect", name, "--format", "{{len .Containers}}")
+        if code == 0 and used.strip() == "0":
+            code, _ = await _docker("network", "rm", name)
+            if code == 0:
+                freed.append(name)
+    return freed
+
+
 async def deploy(run_id: str, *, fresh: bool = False) -> Outcome:
     """`fresh=True` drops any existing database volume before starting.
 
@@ -395,6 +432,16 @@ async def _deploy(run_id: str, *, fresh: bool = False) -> Outcome:
             env={"APP_PORT": str(port), "APP_BIND": s.poiesis_deploy_bind},
             timeout=s.poiesis_deploy_timeout + 300,
         )
+        if code != 0 and _NO_NETWORK.search(out):
+            freed = await free_networks(keep=project)
+            if freed:
+                changes = [*changes, f"freed the networks of {len(freed)} run(s) that are no longer deployed"]
+                code, out = await _compose(
+                    run_id, "up", "-d", "--build", "--remove-orphans",
+                    "--wait", "--wait-timeout", str(s.poiesis_deploy_timeout),
+                    env={"APP_PORT": str(port), "APP_BIND": s.poiesis_deploy_bind},
+                    timeout=s.poiesis_deploy_timeout + 300,
+                )
         if code == 0:
             chosen = port
             break
