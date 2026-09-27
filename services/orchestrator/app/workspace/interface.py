@@ -27,6 +27,12 @@ SCREENS_DIR = ("frontend", "screens")
 EXAMPLE_ROUTER = "examples.py"
 GENERIC_ROUTER = "resources.py"          # the platform's data API over every table
 EXAMPLE_SCREEN = "example.js"
+
+
+def is_example_screen(name: str) -> bool:
+    """example.js and an overlay's example_<name>.js: references, never part of a delivered application."""
+    from .overlays import is_example_screen as check
+    return check(name)
 REGISTRY = "index.js"
 
 # main.py mounts every router here. A route declared "/items" is served at
@@ -67,6 +73,19 @@ def _exported(source: str) -> list[str]:
     return []
 
 
+_BUILT_IN_CONNECTORS = ("__init__", "base", "chat", "jira", "mail", "plane", "servicenow")
+
+
+def _extension_connectors(folder: Path) -> list[str]:
+    """Connectors an overlay added beside the built-in ones: each module's `name = "erp"`."""
+    out: list[str] = []
+    for path in sorted(folder.glob("*.py")):
+        if path.stem in _BUILT_IN_CONNECTORS or path.stem.startswith("_"):
+            continue
+        out += re.findall(r'^\s+name\s*(?::\s*str\s*)?=\s*"([a-z_][a-z0-9_]*)"', path.read_text(encoding="utf-8", errors="replace"), flags=re.M)
+    return out
+
+
 def router_files(run_id: str) -> list[Path]:
     """Every file that declares endpoints: the base routes.py plus one router per story.
 
@@ -83,7 +102,26 @@ def router_files(run_id: str) -> list[Path]:
         modules = sorted(p for p in routers.glob("*.py") if not p.name.startswith("_"))
         real = [p for p in modules if p.name != EXAMPLE_ROUTER]
         files += real or modules
+    files += library_apis(run_id)
     return files
+
+
+NOT_A_LIBRARY = ("kernel", "connectors", "domain", "routers")
+
+
+def libraries(run_id: str) -> list[Path]:
+    """The library packages an overlay brought (backend/app/finance, …): beside the kernel, not part of it."""
+    package = workspace_path(run_id).joinpath(*PACKAGE_DIR)
+    if not (package / "kernel").is_dir():
+        return []
+    return sorted(p for p in package.iterdir()
+                  if p.is_dir() and p.name not in NOT_A_LIBRARY and not p.name.startswith(("_", "."))
+                  and (p / "__init__.py").is_file())
+
+
+def library_apis(run_id: str) -> list[Path]:
+    """A library's own endpoints (backend/app/<library>/api.py), which the kernel mounts under /api."""
+    return [p / "api.py" for p in libraries(run_id) if (p / "api.py").is_file()]
 
 
 def import_contract(run_id: str) -> str:
@@ -114,8 +152,15 @@ def import_contract(run_id: str) -> str:
         init = package / sub / "__init__.py"
         if init.is_file():
             names = _exported(init.read_text(encoding="utf-8", errors="replace"))
+            if sub == "connectors":
+                names += [n for n in _extension_connectors(package / sub) if n not in names]
             if names:
                 modules.append((sub, names))
+    # A library an overlay brought: its modules, and what each of them is for.
+    for lib in libraries(run_id):
+        names = _exported((lib / "__init__.py").read_text(encoding="utf-8", errors="replace"))
+        if names:
+            modules.append((lib.name, names))
     if not modules:
         return ""
 
@@ -690,11 +735,12 @@ REFERENCE: list[tuple[str, int]] = [
 
 
 def reference(run_id: str) -> str:
-    blocks = _blocks(run_id, REFERENCE)
+    from .overlays import references
+    blocks = _blocks(run_id, REFERENCE + references())
     if not blocks:
         return ""
     return ("\nREFERENCE — the scaffold's worked examples. Copy their shape into NEW files "
-            "for your story; these two are read-only:\n" + "\n\n".join(blocks) + "\n")
+            "for your story; these are read-only:\n" + "\n\n".join(blocks) + "\n")
 
 
 # Shared files a story may add to, each with a character budget. Routes and
@@ -722,7 +768,7 @@ def story_files(run_id: str, story_id: str, budget: int = 2200, limit: int = 4) 
     screens = root.joinpath(*SCREENS_DIR)
     if screens.is_dir():
         candidates += [p for p in sorted(screens.glob("*.js"))
-                       if p.name not in (REGISTRY, EXAMPLE_SCREEN)]
+                       if p.name != REGISTRY and not is_example_screen(p.name)]
     mine_pattern = re.compile(rf"\b{re.escape(story_id)}\b")
     mine: list[tuple[str, int]] = []
     others: list[str] = []

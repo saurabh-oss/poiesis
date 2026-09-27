@@ -136,8 +136,11 @@ def _enterprise_note(state: RunState, run_id: str) -> str:
         return ""
     from ...agents.base import PROMPT_DIR
     from .domain import note_for_developer
+    from ...workspace import overlays
     reference = (PROMPT_DIR / "developer_enterprise.md").read_text(encoding="utf-8")
-    return "\n\n" + reference + note_for_developer(state)
+    # What a department's library adds (its dashboard kit, its insight API, its operations) follows
+    # the kernel's own reference, and the domain the Developer must use follows both.
+    return "\n\n" + reference + overlays.prompt("developer") + note_for_developer(state)
 
 
 def _skeleton(state: RunState) -> str:

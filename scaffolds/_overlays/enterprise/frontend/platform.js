@@ -94,7 +94,7 @@ export function mayOpen(screenId) {
 
 /* ---------------------------------------------------------------- the sign-in page */
 
-const CONNECTOR_NAMES = { jira: "Jira", servicenow: "ServiceNow", plane: "Plane", email: "E-mail", slack: "Slack", teams: "Teams" };
+const CONNECTOR_NAMES = { jira: "Jira", servicenow: "ServiceNow", plane: "Plane", email: "E-mail", slack: "Slack", teams: "Teams", erp: "ERP" };
 
 async function signInPage(message) {
   stylesheet();

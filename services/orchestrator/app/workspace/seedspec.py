@@ -191,12 +191,16 @@ def _condition_holds(row: dict[str, Any], cond: dict[str, Any] | None) -> bool:
 
 
 class _Expander:
-    def __init__(self, spec: dict[str, Any], tables: dict[str, dict[str, bool]], seed: int = 42):
+    def __init__(self, spec: dict[str, Any], tables: dict[str, dict[str, bool]], seed: int = 42,
+                 preloaded: dict[str, list[dict[str, Any]]] | None = None):
         self.spec = spec
         self.tables = tables
         self.rng = random.Random(seed)
         self.now = dt.datetime.now(dt.timezone.utc)
-        self.rows: dict[str, list[dict[str, Any]]] = {}
+        # Rows that exist before the spec is read (an overlay's demonstration data): the spec's
+        # tables refer to them like to any earlier table, and may not write them again.
+        self.preloaded = {str(t).lower(): list(r) for t, r in (preloaded or {}).items()}
+        self.rows: dict[str, list[dict[str, Any]]] = dict(self.preloaded)
         self._building: list[dict[str, Any]] = []
         self.issues: list[str] = []
         self.specs: dict[str, dict[str, dict[str, Any]]] = {}
@@ -206,7 +210,12 @@ class _Expander:
 
     def run(self) -> tuple[dict[str, list[dict[str, Any]]], list[str], set[tuple[str, str]]]:
         entries = self.spec.get("tables") or []
-        self._order = [str(e.get("table") or "").lower() for e in entries if isinstance(e, dict)]
+        taken = [e for e in entries if isinstance(e, dict) and str(e.get("table") or "").lower() in self.preloaded]
+        for e in taken:
+            self.issues.append(f"`{e.get('table')}` already has its rows ({len(self.preloaded[str(e.get('table')).lower()])}, "
+                               "from the library): leave it out of the spec")
+        entries = [e for e in entries if e not in taken]
+        self._order = list(self.preloaded) + [str(e.get("table") or "").lower() for e in entries if isinstance(e, dict)]
         self._deferred: list[tuple[str, int, str, str, Any]] = []
         for entry in entries:
             self._table(entry)
@@ -433,8 +442,10 @@ class _Expander:
 
 
 def expand_spec(spec: dict[str, Any], tables: dict[str, dict[str, bool]], seed: int = 42,
+                preloaded: dict[str, list[dict[str, Any]]] | None = None,
                 ) -> tuple[dict[str, list[dict[str, Any]]], list[str], set[tuple[str, str]]]:
-    """Rows per table from a spec, what is wrong with the spec, and the mechanical columns."""
+    """Rows per table from a spec, what is wrong with the spec, and the mechanical columns.
+    `preloaded` rows are there already: the result holds them first, then the spec's."""
     if not isinstance(spec, dict) or not isinstance(spec.get("tables"), list):
         return {}, ["the spec must be an object with a `tables` list"], set()
-    return _Expander(spec, tables, seed).run()
+    return _Expander(spec, tables, seed, preloaded).run()

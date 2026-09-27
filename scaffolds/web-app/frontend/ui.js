@@ -14,12 +14,20 @@
  *   Text        icon, avatar, avatarGroup, person, timeAgo, date, dateTime, number, money, percent, kbd
  */
 
+// Custom properties ("--len") are set by name: assigning them to el.style does nothing.
+function setStyle(el, styles) {
+  for (const [name, value] of Object.entries(styles)) {
+    if (name.startsWith("--")) el.style.setProperty(name, value === null || value === undefined ? "" : String(value));
+    else el.style[name] = value;
+  }
+}
+
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(props || {})) {
     if (value === undefined || value === null || value === false) continue;
     if (key === "class" || key === "className") el.className = value;
-    else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
+    else if (key === "style" && typeof value === "object") setStyle(el, value);
     else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
     else if (key === "value" || key === "checked" || key === "selected") el[key] = value;
     else if (value === true) el.setAttribute(key, "");
@@ -38,7 +46,7 @@ function s(tag, attrs, ...children) {
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v === undefined || v === null || v === false) continue;
     if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === "style" && typeof v === "object") Object.assign(el.style, v);
+    else if (k === "style" && typeof v === "object") setStyle(el, v);
     else el.setAttribute(k, String(v));
   }
   for (const c of children.flat(Infinity)) if (c !== undefined && c !== null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));

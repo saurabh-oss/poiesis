@@ -23,7 +23,7 @@ from ...kg.client import kg
 from ...workspace import browser_check, repo
 from ...workspace import checks as platform_checks_mod
 from ...workspace import deployment as runtime
-from ...workspace.interface import EXAMPLE_ROUTER, EXAMPLE_SCREEN
+from ...workspace.interface import EXAMPLE_ROUTER, is_example_screen
 from ..gates import raise_gate
 from ..memo import remember
 from ..state import RunState
@@ -278,7 +278,7 @@ def _sole_owned_files(state: RunState, story_id: str) -> list[str]:
     screens = root / "frontend" / "screens"
     if screens.is_dir():
         for p in screens.glob("*.js"):
-            if p.name.startswith("_") or p.name == EXAMPLE_SCREEN:
+            if p.name.startswith("_") or is_example_screen(p.name):
                 continue
             owners = set(platform_checks_mod.stories_in(p.read_text(encoding="utf-8", errors="replace")))
             if owners == {story_id}:

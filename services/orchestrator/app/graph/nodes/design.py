@@ -16,8 +16,10 @@ from ..store import save_artifact, set_stage
 def platform_components() -> str:
     """What the pack's overlays give every app, so the reuse plan reuses it."""
     from ...config import pack
+    from ...workspace import overlays
     if "enterprise" not in (pack().get("build", {}).get("overlays") or []):
         return ""
+    extra = overlays.components()
     return (
         "PLATFORM COMPONENTS EVERY APP OF THIS PACK ALREADY HAS (verdict `reuse`, never `build_new`):\n"
         "- kernel: sign-in with roles and personas, permissions on every call, server-enforced workflows "
@@ -26,7 +28,8 @@ def platform_components() -> str:
         "and Integrations screens\n"
         "- connectors: Jira, ServiceNow, Plane, e-mail (SMTP), Slack, Microsoft Teams — sandboxed until "
         "credentials are set\n"
-        "- domain layer: the business rules, workflows and roles are designed once, before any story\n\n"
+        "- domain layer: the business rules, workflows and roles are designed once, before any story\n"
+        + (extra + "\n" if extra else "") + "\n" + overlays.prompt("architect").lstrip("\n")
     )
 
 

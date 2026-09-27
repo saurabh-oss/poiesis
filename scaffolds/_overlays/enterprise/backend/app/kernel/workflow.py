@@ -64,7 +64,13 @@ class Transition:
     target: str
     label: str = ""
     roles: tuple[str, ...] = ()
-    approval: str | None = None           # the role that must approve before it takes effect
+    # The role that must approve before it takes effect: a role, or a callable
+    # (record, ctx) -> role with a `roles` attribute listing every role it can name
+    # (an approver chosen by amount, under a delegation of authority).
+    approval: Any = None
+    # The state the record waits in while the approval is pending ("submitted"); without
+    # one it stays where it was until the approval is decided.
+    pending: str | None = None
     requires_reason: bool = False
     guard: Guard | None = None            # a domain rule: raise RuleViolation (or return a message) to refuse
     rule: str | None = None               # the rule id this transition implements, for the catalogue
@@ -79,6 +85,27 @@ class Transition:
 
     def leaves(self, state: str) -> bool:
         return "*" in self.sources() or state in self.sources()
+
+    def approver(self, obj: Any = None, ctx: Any = None) -> str | None:
+        """The role whose approval this move waits for, for this record."""
+        if not self.approval:
+            return None
+        if callable(self.approval):
+            return str(self.approval(obj, ctx)) if obj is not None else None
+        return str(self.approval)
+
+    def approvers(self) -> tuple[str, ...]:
+        """Every role that may be asked to approve it."""
+        if not self.approval:
+            return ()
+        if callable(self.approval):
+            return tuple(getattr(self.approval, "roles", ()) or ())
+        return (str(self.approval),)
+
+    def approval_label(self) -> str | None:
+        if not self.approval:
+            return None
+        return str(self.approval) if callable(self.approval) else self.approval
 
 
 @dataclass
@@ -115,12 +142,14 @@ class Workflow:
 
     def describe(self) -> dict[str, Any]:
         return {"name": self.name, "title": self.title or self.name.replace("_", " ").title(), "entity": self.entity,
+                "model": getattr(self.model, "__name__", ""),
                 "field": self.field, "initial": self.initial, "final": list(self.final),
                 "states": [{"key": k, "label": v, "sla_hours": self.sla.get(k), "escalate_to": self.escalate.get(k)}
                            for k, v in self.states.items()],
                 "transitions": [{"name": t.name, "label": t.label or t.name.replace("_", " ").capitalize(),
                                  "from": list(t.sources()), "to": t.target, "roles": list(t.roles),
-                                 "approval": t.approval, "requires_reason": t.requires_reason, "rule": t.rule,
+                                 "approval": t.approval_label(), "approvers": list(t.approvers()),
+                                 "pending": t.pending, "requires_reason": t.requires_reason, "rule": t.rule,
                                  "fields": list(t.fields), "tone": t.tone} for t in self.transitions]}
 
 
@@ -212,7 +241,8 @@ def available(obj: Any, actor: Actor | None = None, db: Session | None = None) -
                 continue
             refusal = _refusal(workflow, t, obj, actor, db, reason="-", check_guard=True)
             out.append({"workflow": workflow.name, "name": t.name, "label": t.label or t.name.replace("_", " ").capitalize(),
-                        "to": t.target, "to_label": workflow.states.get(t.target, t.target), "approval": t.approval,
+                        "to": t.target, "to_label": workflow.states.get(t.target, t.target),
+                        "approval": t.approver(obj) if t.approval else None,
                         "requires_reason": t.requires_reason, "fields": list(t.fields), "tone": t.tone,
                         "allowed": refusal is None, "why_not": refusal[1] if refusal else "",
                         "rule": refusal[0] if refusal else t.rule})
@@ -283,26 +313,44 @@ def transition(db: Session, obj: Any, name: str, *, reason: str = "", fields: di
         open_ = db.query(Approval).filter_by(entity=wf.entity, entity_id=obj.id, transition=name, status="pending").first()
         if open_:
             raise violation("WF-00", f"'{t.label or name}' is already waiting for approval (#{open_.id})")
+        approver = t.approver(obj, ctx)
+        if t.pending and state != t.pending:
+            # The request is a move of its own: a requisition is "submitted" while it waits.
+            if getattr(obj, "id", None) is None:
+                db.flush()
+            audit.allow_transition(db, obj, wf.field)
+            setattr(obj, wf.field, t.pending)
+            for field_name in t.fields:
+                if field_name in fields:
+                    setattr(obj, field_name, fields[field_name])
+            _start_clock(db, wf, obj, t.pending)
+            audit.record(db, "transition",
+                         f"{t.label or name.replace('_', ' ').capitalize()}: {wf.entity} {obj.id} "
+                         f"{wf.states.get(state, state)} → {wf.states.get(t.pending, t.pending)}"
+                         + (f" — {reason}" if reason else ""),
+                         entity=wf.entity, entity_id=obj.id, rule_id=rule or t.rule,
+                         changes={wf.field: [state, t.pending]})
+            state = t.pending
         label = _label(obj)
         approval = Approval(workflow=wf.name, entity=wf.entity, entity_id=obj.id, transition=name, from_state=state,
-                            to_state=t.target, approver_role=t.approval,
+                            to_state=t.target, approver_role=approver,
                             title=f"{t.label or name.replace('_', ' ').capitalize()}: {wf.entity.replace('_', ' ')} {obj.id}"
                                   + (f" — {label}" if label else ""),
                             reason=reason, requested_by_id=actor.id, requested_by_name=actor.name,
                             due_at=utcnow() + dt.timedelta(hours=float(wf.sla.get("__approval__", 24))))
         db.add(approval)
         db.flush()
-        audit.record(db, "approval", f"Approval requested from {policy().roles.get(t.approval, t.approval)} to "
+        audit.record(db, "approval", f"Approval requested from {policy().roles.get(approver, approver)} to "
                                      f"{t.label or name}: {wf.entity} {obj.id}" + (f" — {reason}" if reason else ""),
                      entity=wf.entity, entity_id=obj.id, rule_id=t.rule)
         from .notify import notify
         notify(db, f"Approval needed: {approval.title}", f"{actor.name} asks: {reason or 'no reason given'}",
-               roles=(t.approval,), link="#/approvals", entity=wf.entity, entity_id=obj.id, kind="approval_requested",
+               roles=(approver,), link="#/approvals", entity=wf.entity, entity_id=obj.id, kind="approval_requested",
                exclude_user=actor.id)
         if commit:
             db.commit()
         return {"status": "pending_approval", "approval_id": approval.id, "state": state,
-                "message": f"Sent to {policy().roles.get(t.approval, t.approval)} for approval"}
+                "message": f"Sent to {policy().roles.get(approver, approver)} for approval"}
     _apply(db, wf, t, obj, ctx)
     if commit:
         db.commit()

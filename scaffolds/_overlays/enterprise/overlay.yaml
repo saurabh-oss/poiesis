@@ -1,0 +1,14 @@
+# The enterprise overlay: what it owns. Read by the platform (workspace/overlays.py);
+# not copied into applications.
+name: enterprise
+title: Enterprise kernel and connectors
+
+# Platform-owned: stories may not edit these, and a run in flight gets their fixes on
+# its next round.
+owned:
+  dirs:
+    - backend/app/kernel/
+    - backend/app/connectors/
+  files:
+    - frontend/platform.js
+    - frontend/platform.css

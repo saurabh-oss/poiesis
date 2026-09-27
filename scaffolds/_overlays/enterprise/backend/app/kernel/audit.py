@@ -170,12 +170,20 @@ def install() -> None:
     install._done = True  # type: ignore[attr-defined]
 
 
+def _safe(changes: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Changes as JSON can hold them: a date a transition set is written as text, as the
+    listener writes the ones it sees."""
+    if not changes:
+        return changes
+    return {k: [_plain(x) for x in v] if isinstance(v, (list, tuple)) else _plain(v) for k, v in changes.items()}
+
+
 def record(session: Session, action: str, summary: str, *, entity: str = "", entity_id: int | None = None,
            changes: dict[str, Any] | None = None, rule_id: str | None = None) -> AuditEvent:
     """An explicit entry: a transition, an approval, a rule's decision, a connector call."""
     actor = current()
     row = AuditEvent(actor_id=actor.id, actor_name=actor.name, actor_kind=actor.kind, action=action,
-                     entity=entity, entity_id=entity_id, summary=summary[:2000], changes=changes,
+                     entity=entity, entity_id=entity_id, summary=summary[:2000], changes=_safe(changes),
                      rule_id=rule_id, request_id=request_id())
     session.add(row)
     return row

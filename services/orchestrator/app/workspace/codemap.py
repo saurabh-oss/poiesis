@@ -507,7 +507,7 @@ def _all_files(root: Path) -> list[str]:
         if rel.parts[0] in {".git", ".poiesis", "tests"} or "__pycache__" in rel.parts \
                 or "node_modules" in rel.parts or rel.name == "conftest.py":
             continue
-        if rel.as_posix() in _EXAMPLE_FILES:
+        if rel.as_posix() in _EXAMPLE_FILES or (rel.parent.name == "screens" and rel.name.startswith("example_")):
             continue
         out.append(rel.as_posix())
     return sorted(out)

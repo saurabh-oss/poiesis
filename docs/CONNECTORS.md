@@ -113,6 +113,17 @@ records to an in-memory outbox (`MemoryStore`), and `set_store()` attaches any o
 `Store` methods in `base.py`. Every connector also takes `env={…}` to read settings from a dict
 instead of the environment.
 
+## Connectors a library adds
+
+A department library brings its own: the finance library's **ERP** connector
+(`scaffolds/_overlays/finance/backend/app/connectors/erp.py`: suppliers, purchase orders,
+invoices, payments, ledger balances, exchange rates; its sandbox keeps a ledger). Any module in
+`connectors/` beside the built-in ones that defines a `Connector` is discovered when the package
+is imported: it is listed on the Integrations screen, reached as `connectors.<name>()` and
+`connectors.get("<name>")`, and its failed calls are retried by the scheduler through its own
+`replay(operation, request, idempotency_key=, ref=)`. Its `test(actor_name, app_name)` is what
+the screen's Test button calls. Nothing in `__init__.py` is edited.
+
 ## Adding a connector
 
 1. A module in `connectors/` with a `Connector` subclass: `name`, `title`, `category`,

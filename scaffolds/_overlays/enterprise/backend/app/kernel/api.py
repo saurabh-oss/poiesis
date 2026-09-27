@@ -42,6 +42,11 @@ DOMAIN_ERROR: dict[str, str] = {}
 
 # --------------------------------------------------------------------------- profile
 
+def _libraries() -> list[str]:
+    from . import LIBRARIES
+    return sorted(name for name, problem in LIBRARIES.items() if not problem)
+
+
 @router.get("/profile")
 def profile() -> dict[str, Any]:
     from .. import connectors
@@ -52,6 +57,7 @@ def profile() -> dict[str, Any]:
         "check_persona": p.check_persona(), "roles": p.roles,
         "workflows": [w.name for w in wf.iter_workflows()], "rules": len(rule_registry.RULES),
         "connectors": {c["name"]: c["mode"] for c in connectors.catalogue()},
+        "libraries": _libraries(),
         "errors": {k: v for k, v in {"policy": p.error, **DOMAIN_ERROR}.items() if v},
     }
 
@@ -307,7 +313,10 @@ def test_connector(connector: str) -> dict[str, Any]:
     from .. import connectors
     actor = current()
     name = os.getenv("APP_NAME", "the application")
-    c = connectors.get(connector)
+    try:
+        c = connectors.get(connector)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"no connector {connector}") from None
     if connector == "email":
         r = c.send(actor.email or "test@example.com", f"Test from {name}", f"{actor.name} sent this test from {name}.")
     elif connector in ("slack", "teams"):
@@ -318,6 +327,9 @@ def test_connector(connector: str) -> dict[str, Any]:
         r = c.create_incident(f"Connection test from {name}", f"Raised by {actor.name}; safe to close.", urgency=3, impact=3)
     elif connector == "plane":
         r = c.create_work_item(f"Connection test from {name}", f"Created by {actor.name}; safe to delete.")
+    elif callable(getattr(c, "test", None)):
+        # A connector a library added says for itself what a harmless call is.
+        r = c.test(actor.name, name)
     else:
         raise HTTPException(status_code=404, detail=f"no connector {connector}")
     return r.as_dict()

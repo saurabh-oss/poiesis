@@ -16,7 +16,9 @@ this package imports at install time.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
+import pkgutil
 import traceback
 from typing import Any
 
@@ -32,7 +34,12 @@ from .rules import RuleViolation, check, declare, rule, violation
 from .workflow import Transition, Workflow, available, register, transition
 
 log = logging.getLogger(__name__)
-DOMAIN = __package__.rsplit(".", 1)[0] + ".domain"
+APP = __package__.rsplit(".", 1)[0]
+DOMAIN = APP + ".domain"
+# A library is a package beside this one that a pack's overlay brings (finance, …). One that
+# has an api.py with a `router` is served under /api; name -> "" once mounted, or why it was not.
+LIBRARIES: dict[str, str] = {}
+_NOT_A_LIBRARY = ("kernel", "connectors", "domain", "routers")
 
 
 def _load_domain() -> str:
@@ -48,10 +55,29 @@ def _load_domain() -> str:
     return ""
 
 
-def _where(exc: BaseException) -> str:
-    frames = [f for f in traceback.extract_tb(exc.__traceback__) if "/domain/" in f.filename.replace("\\", "/")]
+def _where(exc: BaseException, part: str = "/domain/") -> str:
+    frames = [f for f in traceback.extract_tb(exc.__traceback__) if part in f.filename.replace("\\", "/")]
     at = f"{frames[-1].filename.replace(chr(92), '/').split('/app/', 1)[-1]}:{frames[-1].lineno}: " if frames else ""
     return f"{at}{type(exc).__name__}: {exc}"
+
+
+def _mount_libraries(app: FastAPI) -> None:
+    """Serve every library's API. One that fails to import is left out and named on the
+    profile; the application and the other libraries still start."""
+    for found in pkgutil.iter_modules(importlib.import_module(APP).__path__):
+        if not found.ispkg or found.name in _NOT_A_LIBRARY or found.name.startswith("_"):
+            continue
+        try:
+            if importlib.util.find_spec(f"{APP}.{found.name}.api") is None:
+                continue
+            router = getattr(importlib.import_module(f"{APP}.{found.name}.api"), "router", None)
+        except Exception as exc:  # noqa: BLE001 — isolate it, as a broken story router is
+            LIBRARIES[found.name] = _where(exc, f"/{found.name}/")
+            log.error("library %s did not load and is left out: %s", found.name, LIBRARIES[found.name])
+            continue
+        if router is not None:
+            app.include_router(router, prefix="/api")
+            LIBRARIES[found.name] = ""
 
 
 async def _rule_violation(_request: Any, exc: RuleViolation) -> JSONResponse:
@@ -78,6 +104,11 @@ def install(app: FastAPI, service: str = "api") -> None:
     app.add_exception_handler(RuleViolation, _rule_violation)
     app.include_router(auth_router, prefix="/api")
     app.include_router(platform_router, prefix="/api")
+    if service == "api":
+        _mount_libraries(app)
+        for name, problem in LIBRARIES.items():
+            if problem:
+                DOMAIN_ERROR[f"library {name}"] = problem
     app.state.poiesis_service = service
 
 

@@ -28,6 +28,37 @@ from .plane import Plane
 from .servicenow import ServiceNow
 
 CONNECTORS: dict[str, type[Connector]] = {c.name: c for c in (Jira, ServiceNow, Plane, Email, Slack, Teams)}
+_BUILT_IN = {"base", "chat", "jira", "mail", "plane", "servicenow"}
+EXTENSIONS: dict[str, type[Connector]] = {}
+
+
+def _discover() -> None:
+    """Connectors a department library adds (an ERP, a bank, an HR system): any other module
+    in this package that defines a Connector. Each is reached as `connectors.<name>()`, listed on
+    the Integrations screen and replayed by the scheduler like the built-in ones. A module that
+    does not import is left out and logged, never fatal."""
+    import importlib
+    import logging
+    import pkgutil
+    for info in pkgutil.iter_modules(__path__):
+        if info.name in _BUILT_IN or info.name.startswith("_"):
+            continue
+        try:
+            module = importlib.import_module(f"{__name__}.{info.name}")
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).error("connector module %s did not load: %s", info.name, exc)
+            continue
+        for value in vars(module).values():
+            if (isinstance(value, type) and issubclass(value, Connector) and value is not Connector
+                    and value.__module__ == module.__name__ and value.name not in CONNECTORS):
+                CONNECTORS[value.name] = value
+                EXTENSIONS[value.name] = value
+                # `from ..connectors import erp; erp()`: the name is the connector, as `jira` is,
+                # not the module that defines it.
+                globals()[value.name] = value
+
+
+_discover()
 
 
 def jira() -> Jira:
@@ -120,10 +151,13 @@ def replay(event: dict[str, Any]) -> Result:
         if isinstance(connector, Slack):
             kwargs["channel"] = request.get("channel")
         return connector.post(request.get("title", ""), request.get("text", ""), **kwargs)
+    again = getattr(connector, "replay", None)
+    if callable(again):
+        return again(op, request, idempotency_key=key, ref=event.get("ref"))
     return Result(False, connector.name, op, connector.mode, error=f"{op} cannot be replayed")
 
 
 __all__ = [
     "CONNECTORS", "Connector", "ConnectorError", "MemoryStore", "Result", "Setting", "catalogue", "email", "get",
-    "jira", "plane", "redact", "replay", "servicenow", "set_store", "slack", "store", "teams",
+    "jira", "plane", "redact", "replay", "servicenow", "set_store", "slack", "store", "teams", *sorted(EXTENSIONS),
 ]

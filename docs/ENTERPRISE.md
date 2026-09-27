@@ -65,6 +65,12 @@ app.env              written at each deployment, never committed: APP_SECRET, th
 `main.py`, `data_main.py`, `routers/resources.py`, `routes.py` and `app.js` are the same files
 every app has; each looks for the kernel and uses it when it is there.
 
+A pack can lay a **department library** over this (the `finance` pack does:
+[FINANCE.md](FINANCE.md)). A library is a package beside the kernel, `backend/app/<name>/`; one
+with an `api.py` that defines a `router` is served under `/api` by the kernel, and named in
+`/api/platform/profile` as `libraries`. A library that fails to import is left out and named in
+the profile's `errors`; the application and the other libraries still start.
+
 ## The kernel
 
 ### Signing in, roles and permissions
@@ -127,7 +133,12 @@ required; the guard (a domain rule) allows it. A transition with `approval="<rol
 approval instead of moving; someone holding that role, and never the requester (four eyes, rule
 `WF-02`), approves or rejects it in the Approvals screen, and the move happens on approval.
 When the request is itself the record (a proposed threshold change), `on_reject="Rejected"`
-ends it on rejection, with an audit entry. When one transition serves several rules (an
+ends it on rejection, with an audit entry. A record can sit in a state of its own while it
+waits: with `pending="submitted"` a requisition is "submitted", not still "draft", until someone
+decides, and the move to it is in the audit trail. The approver can be decided by the record:
+`approval=` takes a role or a callable with a `roles` attribute (every role it can answer
+with), such as the finance library's `ByAmount(matrix)`, which names the approver a record's
+amount calls for under a delegation of authority. When one transition serves several rules (an
 automatic close by BR-01 or by BR-12), the caller names the one that took the move:
 `transition(db, t, "auto_close", rule=decision.rule)`, and the audit trail records it.
 Entering a state with an SLA starts a clock; the scheduler escalates a clock past due to the

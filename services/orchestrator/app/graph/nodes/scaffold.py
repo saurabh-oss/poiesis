@@ -22,6 +22,7 @@ from typing import Any
 from ...config import archetype, pack, scaffold_root
 from ...events import emit
 from ...integrations import gitremote
+from ...workspace import overlays as overlay_lib
 from ...workspace import repo
 from ...workspace.checks import regenerate_registry
 from ..state import RunState
@@ -81,21 +82,18 @@ PLATFORM_SHELL = ("frontend/app.js", "frontend/ui.js", "frontend/styles.css", "f
 # is copied over the rendered template when the pack's build.overlays names it. The
 # enterprise overlay brings the kernel (sign-in, roles, audit, workflows, rules), the
 # connectors, the platform screens, and a worked-example domain the domain stage
-# replaces. The kernel, the connectors and the platform screens are platform-owned:
+# replaces. A department's overlay (finance, …) brings its library. What an overlay
+# owns is in its overlay.yaml (workspace/overlays.py): those files are platform-owned,
 # stories may not edit them, and a run in flight gets their fixes on its next round.
-OVERLAY_ROOT = "_overlays"
-OVERLAY_OWNED_DIRS = ("backend/app/kernel/", "backend/app/connectors/")
-OVERLAY_OWNED_FILES = ("frontend/platform.js", "frontend/platform.css")
+OVERLAY_ROOT = overlay_lib.ROOT
 
 
 def overlays() -> list[str]:
-    names = pack().get("build", {}).get("overlays") or []
-    return [n for n in names if isinstance(n, str) and (scaffold_root() / OVERLAY_ROOT / n).is_dir()]
+    return overlay_lib.active()
 
 
 def overlay_owned(rel: str) -> bool:
-    rel = rel.replace("\\", "/").lstrip("./")
-    return rel.startswith(OVERLAY_OWNED_DIRS) or rel in OVERLAY_OWNED_FILES
+    return overlay_lib.owned(rel)
 
 
 def slugify(name: str) -> str:
@@ -115,12 +113,16 @@ def render(text: str, values: dict[str, str]) -> str:
     return text
 
 
-def materialise(template_dir: Path, target: Path, values: dict[str, str]) -> list[str]:
+def materialise(template_dir: Path, target: Path, values: dict[str, str], skip: Any = None) -> list[str]:
+    """Copy a template into a workspace. `skip(rel)` leaves out what is about the template
+    rather than part of the application (an overlay's manifest and prompts)."""
     written: list[str] = []
     for source in sorted(template_dir.rglob("*")):
         if not source.is_file():
             continue
         rel = source.relative_to(template_dir)
+        if skip is not None and skip(rel.as_posix()):
+            continue
         # A bytecode cache left in the template by a local import is not part of
         # the skeleton, and reading it as UTF-8 would fail the whole bootstrap.
         if "__pycache__" in rel.parts or source.suffix in (".pyc", ".pyo"):
@@ -166,7 +168,8 @@ def refresh_platform_files(run_id: str, state: RunState) -> list[str]:
             source_root = scaffold_root() / OVERLAY_ROOT / name
             for source in sorted(source_root.rglob("*")):
                 rel = source.relative_to(source_root).as_posix()
-                if not source.is_file() or "__pycache__" in rel or not overlay_owned(rel):
+                if not source.is_file() or "__pycache__" in rel or overlay_lib.is_meta(rel) \
+                        or not overlay_lib.owned_by(name, rel) or source.suffix.lower() in BINARY_SUFFIXES:
                     continue
                 dest = root / rel
                 body = render(source.read_text(encoding="utf-8"), values)
@@ -228,7 +231,8 @@ async def bootstrap(state: RunState) -> RunState:
     written = materialise(template_dir, repo.workspace_path(run_id), values)
     applied = overlays()
     for name in applied:
-        extra = materialise(scaffold_root() / OVERLAY_ROOT / name, repo.workspace_path(run_id), values)
+        extra = materialise(scaffold_root() / OVERLAY_ROOT / name, repo.workspace_path(run_id), values,
+                            skip=overlay_lib.is_meta)
         written = sorted(set(written) | set(extra))
     regenerate_registry(run_id)
     sha = repo.commit(run_id, f"chore(scaffold): {arch['name']} skeleton for {project}")
@@ -238,7 +242,9 @@ async def bootstrap(state: RunState) -> RunState:
         run_id,
         f"Scaffolded a {arch['name']} in {len(written)} files "
         f"({', '.join(services) or 'no services'})"
-        + (f" with the {', '.join(applied)} overlay (sign-in, roles, audit, workflows, rules, connectors)" if applied else "")
+        + (f" with the {', '.join(applied)} overlay{'s' if len(applied) > 1 else ''} (sign-in, roles, audit, workflows, "
+           "rules, connectors" + "".join(f"; {overlay_lib.manifest(n).get('title', n).lower()}" for n in applied
+                                         if n != "enterprise") + ")" if applied else "")
         + " — the app boots before any feature code",
         agent="scaffold", stage="scaffold",
         data={"archetype": arch["name"], "files": written, "commit": sha,

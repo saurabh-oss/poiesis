@@ -1,0 +1,124 @@
+# Domain pack: finance and procurement.
+#
+# An application a finance or procurement team runs its work on. It is the enterprise
+# pack (people sign in and act within their role; records move through lifecycles the
+# server enforces, with approvals and SLAs; every change is audited; rules have ids,
+# tests and a catalogue; connectors are sandboxed until credentials are set) with the
+# finance library laid over it:
+#
+#   - the standard entities of the function (supplier, requisition, purchase order,
+#     goods receipt, invoice, payment run, contract, budget line…), written by the
+#     platform itself, with more than two years of coherent demonstration data;
+#   - 22 tested rules (three-way match, delegation of authority, segregation of duties,
+#     budget availability, duplicate invoices, payment terms and discounts, tax…), the
+#     lifecycles of each record, and the operations people perform on them;
+#   - an insight API and a dashboard kit: a dashboard is a description, with its period
+#     picker, comparison, filters, drill-down, export and personal arrangement;
+#   - an ERP connector.
+#
+# So a run spends its effort on what this organisation does differently: its own rules
+# and thresholds, its own records, and the screens its people asked for.
+
+name: finance
+description: A finance and procurement application — the enterprise pack with the finance library (standard entities and data, tested rules and lifecycles, an insight API, a dashboard kit, an ERP connector).
+
+gates:
+  clarify:              { mode: auto }
+  approve_vision:       { mode: auto }
+  approve_backlog:      { mode: auto }
+  approve_architecture: { mode: auto }
+  approve_sprint:       { mode: auto }
+  failed_story:         { mode: auto }
+  approve_release:      { mode: require }
+
+build:
+  mode: mvp                     # screens over the generic data API and the insight API; the platform's checks and a browser verify them
+  foundation: true              # the data model (standard entities by the platform, the rest by the Developer) and the demonstration data
+  domain: true                  # the library's domain to start from, the brief's rules added, with rule tests
+  domain_repairs: 3
+  acceptance: true
+  acceptance_blocking: false
+  overlays: [enterprise, finance]   # kernel, connectors, platform screens; then the finance library
+  max_repair_attempts: 3
+  max_rework_rounds: 1
+  sandbox_image: python:3.12-slim
+  test_timeout_seconds: 600
+
+codemap:
+  ai: true
+
+review:
+  ship_threshold: 65
+  release_requires_working_app: true
+  release_requires_ship_verdict: false
+  max_human_rebuilds: 2
+  weights:
+    acceptance_criteria_met: 0.40
+    reuse_compliance: 0.15      # the library is the reuse that matters: a screen that redraws what the kit draws is a finding
+    test_adequacy: 0.10
+    maintainability: 0.10
+    operational_safety: 0.25
+
+product:
+  guidance: |
+    This backlog is for an application a finance or procurement team will run its work on.
+    The platform already provides — so write NO stories for them — sign-in with demonstration
+    personas, roles and permissions, an Approvals inbox, an Audit trail, a Business rules
+    catalogue, an Integrations screen with a connector outbox, and notifications. It also
+    provides, ready to compose, whole dashboards (executive summary, spend analysis, budget
+    control, accounts payable, purchase to pay, suppliers, controls, savings) with period
+    picker, comparison with last year or the period before, filters by cost centre, category
+    and supplier, the rows behind every number, CSV export and each person's own arrangement;
+    and the operations of the function (three-way match, goods receipt, payment run proposal,
+    budget check). A story for a dashboard therefore says WHAT IT SHOWS AND TO WHOM: which
+    figures, which breakdowns, for which role, fixed to which team, against which targets —
+    not how a chart is drawn.
+    Stories are the organisation's own screens and flows, each one a screen or a visible
+    action a named role performs on the demonstration data. The first story is the overview
+    dashboard of the person the brief is written for. Then the work screens: a queue with its
+    actions (requisitions to approve, invoices held, contracts to decide on), a record with
+    its lifecycle, a dashboard per role the brief names. Say in each story WHICH ROLE does it
+    ("As an accounts payable specialist…") and write criteria that name the rule, the
+    threshold or the approval the brief states ("Given a requisition of £6,200, when it is
+    submitted, then it waits for the head of department's approval"; "Given an invoice 3%
+    above its order, when it is matched, then it is held as a price variance"). Use the
+    brief's own numbers. Integrations the brief mentions (an ERP, Jira, ServiceNow, e-mail,
+    Slack, Teams) are in scope through the platform's connectors; others stay out of scope.
+    At most ten stories.
+
+archetypes:
+  default: web-app
+
+  web-app:
+    description: A browser application with an HTTP API and a database, with sign-in, roles, workflows, audit, connectors and the finance library.
+    scaffold: web-app
+    entrypoint: frontend
+    services:
+      - { name: frontend, role: ui,        port: 80,   healthcheck: /        }
+      - { name: backend,  role: api,       port: 8000, healthcheck: /health  }
+      - { name: data,     role: data-api,  port: 8000, healthcheck: /health  }
+      - { name: db,       role: datastore                                    }
+    definition_of_deployable:
+      - docker compose up -d brings every service to healthy
+      - The backend answers 200 on /health
+      - The sign-in page offers the personas, and signing in opens the application
+      - Every story has a screen that opens in a real browser without errors
+      - Every screen shows the demonstration data on first open
+      - The domain imports and its rule tests pass, the library's among them
+      - Every figure on a dashboard comes from the insight API or the domain, not from arithmetic in a screen
+
+definition_of_ready:
+  - Story has at least two acceptance criteria written as Given/When/Then
+  - Story cites at least one evidence id
+  - Story names the role that performs it
+  - Story is something a person sees or does in the browser
+  - A dashboard story names its figures, its breakdowns and who it is for
+
+definition_of_done:
+  - The deployed app opens in a real browser and every story's screen works against the live API
+  - Every business rule from the brief exists once in the domain layer, with passing tests
+  - Every status change goes through its workflow; nothing writes a governed status directly
+  - Every amount is written with the kit's formatting and computed exactly, never with float arithmetic
+  - Every screen shows the demonstration data on first open, with no placeholders
+  - No blocker findings from the Reviewer
+  - Release notes written in stakeholder language

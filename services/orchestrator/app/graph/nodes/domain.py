@@ -31,7 +31,7 @@ from ...agents.base import DOMAIN
 from ...config import pack
 from ...events import emit
 from ...llm import ReplyTruncated, UnparseableReply
-from ...workspace import repo
+from ...workspace import overlays, repo, standards
 from ...workspace.interface import import_contract
 from ...workspace.runner import run_in_sandbox
 from ..memo import remember
@@ -43,6 +43,9 @@ FILES = ("backend/app/domain/policy.py", "backend/app/domain/rules.py", "backend
 PROTECTED = ("backend/app/domain/__init__.py", "backend/app/domain/policy.py", "backend/app/domain/rules.py",
              "backend/app/domain/workflows.py", "tests/test_rules.py", "backend/app/domain/rule_results.json")
 RESULTS = "backend/app/domain/rule_results.json"
+# What the domain registers when it is imported, kept for the static checks: a lifecycle built
+# by a library's factory (`flows.invoice(Invoice)`) cannot be read off workflows.py.
+REPORT = ".poiesis/domain.json"
 
 CHECK_SCRIPT = r'''
 import json, re, sys, traceback
@@ -94,9 +97,12 @@ try:
                     out["problems"].append(f"workflow {w.name}, transition {t.name}: from '{s}' is not a state")
             if t.target not in states:
                 out["problems"].append(f"workflow {w.name}, transition {t.name}: to '{t.target}' is not a state")
-            for r in list(t.roles) + ([t.approval] if t.approval else []) + list(t.notify):
+            approvers = list(t.approvers()) if hasattr(t, "approvers") else ([t.approval] if t.approval else [])
+            for r in list(t.roles) + approvers + list(t.notify):
                 if r not in roles:
                     out["problems"].append(f"workflow {w.name}, transition {t.name}: role '{r}' is not in ROLES")
+            if getattr(t, "pending", None) and t.pending not in states:
+                out["problems"].append(f"workflow {w.name}, transition {t.name}: pending '{t.pending}' is not a state")
             for f in t.fields:
                 if w.model.__table__.columns.get(f) is None:
                     out["problems"].append(f"workflow {w.name}, transition {t.name}: {w.model.__tablename__} has no column '{f}'")
@@ -134,6 +140,32 @@ COMMAND = (
 )
 
 
+def command(run_id: str) -> str:
+    """The check and the rule tests, with the tests a library ships for its own rules: they
+    prove FIN-02 and PROC-01 the way tests/test_rules.py proves the brief's BR-04."""
+    root = repo.workspace_path(run_id)
+    tests = ["tests/test_rules.py"] + [t for t in overlays.library_tests() if (root / t).is_file()]
+    return COMMAND.replace("tests/test_rules.py", " ".join(dict.fromkeys(tests)))
+
+
+def starter(run_id: str) -> dict[str, str]:
+    """The domain an overlay starts this application with, for the tables it has: {} when none does."""
+    out: dict[str, str] = {}
+    from ...workspace.seeding import tables_in
+    tables = {t: list(cols) for t, cols in tables_in(run_id).items()}
+    classes = standards.class_names(repo.read(run_id, "backend/app/models.py", 400000))
+    for name in overlays.active():
+        mod = overlays.module(name, "starter")
+        if mod is None or not hasattr(mod, "domain"):
+            continue
+        try:
+            files = mod.domain(tables, classes)
+        except Exception:  # noqa: BLE001 — a starter that fails leaves the worked example in place
+            continue
+        out.update({k: v for k, v in (files or {}).items() if k in FILES and isinstance(v, str) and v.strip()})
+    return out
+
+
 def enabled(run_id: str) -> bool:
     return bool(pack().get("build", {}).get("domain", False)) \
         and (repo.workspace_path(run_id) / "backend" / "app" / "kernel").is_dir()
@@ -155,7 +187,7 @@ def _current(run_id: str) -> str:
     return "\n".join(blocks)
 
 
-def _prompt(state: RunState, run_id: str) -> str:
+def _prompt(state: RunState, run_id: str, started: bool = False) -> str:
     root = repo.workspace_path(run_id)
     vision = state.get("vision") or {}
     models = (root / "backend" / "app" / "models.py").read_text(encoding="utf-8", errors="replace")
@@ -169,8 +201,12 @@ def _prompt(state: RunState, run_id: str) -> str:
         + f"\nbackend/app/models.py (table names and columns, exactly):\n{models[:9000]}\n"
         + f"\ndb/init.sql tables (the comments list each status column's allowed values):\n{sql[:7000]}\n"
         + import_contract(run_id)
-        + "\nTHE WORKED EXAMPLE NOW IN THE WORKSPACE (its shape is what you follow; its content is what you replace):\n"
-        + _current(run_id)[:12000]
+        + overlays.prompt("domain")
+        + ("\nTHE DOMAIN NOW IN THE WORKSPACE, written by the platform from the library. It imports and passes its "
+           "checks. Keep what it has and add what the brief says; change only what the brief says differently:\n"
+           if started else
+           "\nTHE WORKED EXAMPLE NOW IN THE WORKSPACE (its shape is what you follow; its content is what you replace):\n")
+        + _current(run_id)[:14000 if started else 12000]
         + "\n\nWrite the five files."
     )
 
@@ -267,7 +303,7 @@ async def _check(run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], str
     tools.mkdir(exist_ok=True)
     (tools / "domain_check.py").write_text(CHECK_SCRIPT, encoding="utf-8", newline="\n")
     (tools / "rules.xml").unlink(missing_ok=True)
-    result = await run_in_sandbox(run_id, COMMAND, timeout=600, network=True)
+    result = await run_in_sandbox(run_id, command(run_id), timeout=600, network=True)
     marker = "POIESIS_DOMAIN_JSON\n"
     report: dict[str, Any] = {"error": "the domain check produced no report", "problems": [], "rules": []}
     if marker in result.stdout:
@@ -275,6 +311,8 @@ async def _check(run_id: str) -> tuple[dict[str, Any], list[dict[str, Any]], str
             report = json.loads(result.stdout.split(marker, 1)[1].splitlines()[0])
         except (ValueError, IndexError):
             pass
+    if not report.get("error"):
+        (tools / "domain.json").write_text(json.dumps({"workflows": report.get("workflows", [])}), encoding="utf-8")
     else:
         report["error"] += ":\n" + "\n".join((result.stderr or result.stdout).strip().splitlines()[-12:])
     tail = result.stdout.split(marker, 1)[1].split("\n", 2)[-1] if marker in result.stdout else ""
@@ -348,7 +386,6 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
     # a run in flight is checked against the platform as it is now.
     from .scaffold import refresh_platform_files
     refresh_platform_files(run_id, state)
-    base = _prompt(state, run_id)
     feedback = ""
     report: dict[str, Any] = {}
     results: dict[str, Any] = {}
@@ -356,7 +393,38 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
     reply: dict[str, Any] = {}
     best: dict[str, Any] | None = None
     previous_failures: dict[str, str] = {}
-    for attempt in range(repairs + 1):
+    # A library's overlay starts the application with a domain that already works for the
+    # tables it has: its roles, lifecycles, rules and operations. The Developer adds the
+    # brief's own to it, and no attempt of its that is worse takes its place.
+    begun = starter(run_id)
+    if begun:
+        repo.write_files(run_id, begun)
+        report, cases, tail = await _check(run_id)
+        results = results_by_rule(report.get("rules", []), cases)
+        problems = _feedback(report, cases, results, tail) + _brief_gaps(state, run_id, report)
+        if report.get("error"):
+            await emit(run_id, "The library's starting domain did not import; designing from the worked example instead",
+                       agent="developer", stage="foundation", level="warn", data={"error": report["error"][-1200:]})
+            begun = {}
+        else:
+            score = _score(report, cases, results)
+            best = {"score": (score[0], 0) + tuple(score[1:]), "files": {rel: repo.read(run_id, rel, 400000) for rel in FILES},
+                    "report": report, "results": results, "problems": problems, "attempt": 0,
+                    "reply": {"commit_message": "feat(domain): the library's roles, lifecycles, rules and operations"}}
+            reply = best["reply"]
+            await emit(run_id, f"Business logic from the library: {len(report.get('rules', []))} rule(s), "
+                               f"{len(report.get('workflows', []))} workflow(s), {len(report.get('roles', {}))} role(s); "
+                               f"{results['passed']}/{results['total']} rule tests pass"
+                               + (f"; the brief adds {len(problems)} thing(s) to it" if problems else ""),
+                       agent="developer", stage="foundation",
+                       data={"rules": [r["id"] for r in report.get("rules", [])], "tests": results["total"],
+                             "to_add": problems[:20]})
+            if problems:
+                feedback = ("\n\nTHE DOMAIN IN THE WORKSPACE WAS CHECKED AGAINST THE BRIEF. What it still lacks:\n"
+                            + "\n".join(f"- {p}" for p in problems[:16])
+                            + "\nReturn all five files, complete, with these added.")
+    base = _prompt(state, run_id, started=bool(begun))
+    for attempt in range(repairs + 1 if problems else 0):
         # Keyed by what the attempt was told as well: a resumed run whose checks changed
         # must not replay a reply written against the old feedback.
         key = f"domain:{attempt}:{hashlib.sha1(feedback.encode()).hexdigest()[:10]}"
@@ -409,19 +477,20 @@ async def design_domain(state: RunState, run_id: str) -> dict[str, Any]:
         feedback = ("\n\nYOUR PREVIOUS FILES ARE IN THE WORKSPACE ABOVE AND WERE CHECKED. Fix every problem:\n"
                     + "\n".join(f"- {p}" for p in problems[:16])
                     + "\nReturn all five files, complete.")
-        base = _prompt(state, run_id)
+        base = _prompt(state, run_id, started=bool(begun))
     if best is not None and problems and best["problems"] != problems:
         # A repair can make things worse; keep the attempt that was best.
         repo.write_files(run_id, {rel: body for rel, body in best["files"].items() if body})
         report, results, problems, reply = best["report"], best["results"], best["problems"], best["reply"]
-        await emit(run_id, f"Kept attempt {best['attempt']}, the best of them: "
+        await emit(run_id, (f"Kept attempt {best['attempt']}, the best of them: " if best["attempt"]
+                            else "Kept the library's domain, which no attempt improved on: ")
                            + ("; ".join(p.splitlines()[0][:120] for p in problems[:3]) or "no problems"),
                    agent="developer", stage="foundation", level="info")
     imports = not report.get("error")
     if not imports:
         # A domain that does not import takes sign-in with it; the general policy keeps
         # the application usable, and the failure stays on the record.
-        repo.write_files(run_id, {"backend/app/domain/policy.py": FALLBACK_POLICY, **FALLBACK_EMPTY})
+        repo.write_files(run_id, begun or {"backend/app/domain/policy.py": FALLBACK_POLICY, **FALLBACK_EMPTY})
         report, cases, _ = await _check(run_id)
         results = results_by_rule(report.get("rules", []), cases)
         await emit(run_id, "The business logic never imported; the application runs on the platform's general "

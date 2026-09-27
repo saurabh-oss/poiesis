@@ -21,10 +21,11 @@ from ...agents.base import DATA_DESIGNER, FOUNDATION
 from ...config import pack
 from ...events import emit
 from ...llm import ReplyTruncated, UnparseableReply
-from ...workspace import repo
+from ...workspace import overlays, repo, standards
 from ...workspace.checks import validate_init_sql
 from ...workspace.interface import excerpt, EDITABLE
 from ...workspace.seeding import (
+    fill_required,
     quality_issues,
     rows_to_sql,
     strip_seed_section,
@@ -64,7 +65,32 @@ def _brief_text(state: RunState, limit: int) -> str:
     return head + "BRIEF:\n" + str(state.get("brief") or "")[:limit]
 
 
-def _schema_prompt(state: RunState, run_id: str) -> str:
+def _standard_entities(state: RunState) -> dict[str, list[str]]:
+    """The standard entities of the pack's overlays that this product speaks of."""
+    arch = state.get("architecture") or {}
+    text = "\n".join([str(state.get("brief") or ""), str((state.get("vision") or {}).get("value_proposition") or ""),
+                      str(arch.get("data_model") or ""),
+                      "\n".join(f"{s.get('title')} {s.get('narrative', '')} " + " ".join(s.get("acceptance_criteria") or [])
+                                for s in _stories(state))])
+    return standards.wanted(text)
+
+
+def _with_standards(run_id: str, files: dict[str, Any], chosen: dict[str, list[str]]) -> tuple[dict[str, Any], list[str]]:
+    """The Developer's three files with the standard entities merged in. A file it left out
+    is taken as it stands in the workspace, so the standard entities are in all three."""
+    if not chosen:
+        return files, []
+    files = dict(files or {})
+    for rel in (standards.MODELS, standards.SQL, standards.SCHEMAS):
+        if not isinstance(files.get(rel), str) or not files[rel].strip():
+            body = repo.read(run_id, rel, 400000)
+            if rel == standards.SQL:
+                body = strip_seed_section(body)
+            files[rel] = body
+    return standards.apply(files, chosen)
+
+
+def _schema_prompt(state: RunState, run_id: str, chosen: dict[str, list[str]] | None = None) -> str:
     arch = state.get("architecture") or {}
     stories = "\n".join(
         f"- {s.get('id')}: {s.get('title')}\n" + "\n".join(f"    · {c}" for c in s.get("acceptance_criteria") or [])
@@ -73,6 +99,8 @@ def _schema_prompt(state: RunState, run_id: str) -> str:
         _brief_text(state, 40000)
         + f"\n\nARCHITECT'S DATA MODEL (a starting point; complete it from the stories):\n{arch.get('data_model', [])}\n"
         + f"\nEVERY STORY AND ITS ACCEPTANCE CRITERIA (each one needs its columns):\n{stories}\n"
+        + standards.describe(chosen or {})
+        + overlays.prompt("foundation")
         + excerpt(run_id, EDITABLE)
         + "\nWrite the three files."
     )
@@ -93,9 +121,41 @@ def _domain_note(state: RunState) -> str:
               "persona finds their own work on first sign-in:\n" + (people or "- none") + "\n")
 
 
-def _seed_prompt(state: RunState, run_id: str) -> str:
+async def _library_seed(run_id: str, rows: dict[str, list[dict[str, Any]]], tables: dict[str, dict[str, bool]],
+                        stage: str) -> dict[str, Any]:
+    """Every table has its rows from the library: no spec to write, only to load and check."""
+    seed_sql, problems = rows_to_sql(rows, tables)
+    problems = [p for p in problems if not _SOFT.search(p)]
+    write_seed_section(run_id, seed_sql)
+    check = await validate_init_sql(run_id)
+    if not check.ok:
+        problems.append("the library's rows were rejected by Postgres: " + check.stdout.strip()[-600:])
+        await emit(run_id, "Demonstration data rejected by Postgres: " + check.stdout.strip()[-300:],
+                   agent="data_designer", stage=stage, level="error")
+    sha = repo.commit(run_id, "feat(data): demonstration data from the library")
+    counts = {t: len(r) for t, r in rows.items()}
+    await emit(run_id, f"Demonstration data loaded into db/init.sql: {summary(rows)}", agent="data_designer", stage=stage,
+               data={"tables": counts, "commit": sha, "reasoning": "Every table is a standard entity; the library's data was used."})
+    return {"rows": counts, "problems": problems, "reasoning": "the library's demonstration data", "commit": sha}
+
+
+def _preloaded_note(preloaded: dict[str, list[dict[str, Any]]]) -> str:
+    if not preloaded:
+        return ""
+    return ("\n\nTABLES THAT ALREADY HAVE THEIR ROWS, from the library — leave them OUT of the spec. A column of "
+            "yours that refers to one is a `ref` to it (ids 1 to its count), and a `lookup` copies a field of the "
+            "row it points at:\n" + "\n".join(
+                f"- {t}: {len(r)} rows" + (f" (fields: {', '.join(list(r[0])[:12])})" if r else "")
+                for t, r in preloaded.items()) + "\n")
+
+
+def _seed_prompt(state: RunState, run_id: str, preloaded: dict[str, list[dict[str, Any]]] | None = None) -> str:
     root = repo.workspace_path(run_id)
     sql = strip_seed_section((root / "db" / "init.sql").read_text(encoding="utf-8", errors="replace"))
+    if preloaded:
+        # Only the tables the spec is for, in full; the others by name.
+        keep = [m.group(0) for m in standards._CREATE.finditer(sql) if m.group(1).lower() not in preloaded]
+        sql = "\n".join(keep)
     data_lines = [c for c in _criteria(state)
                   if any(w in c.lower() for w in ("at least", "demonstration", "sample", "demo", "seed", "realistic", "loaded"))]
     screens = "\n".join(f"- {s.get('id')}: {s.get('title')}" for s in _stories(state))
@@ -107,6 +167,8 @@ def _seed_prompt(state: RunState, run_id: str) -> str:
           "to do (a queue needs untriaged rows, an assign flow needs unassigned rows, a status board needs "
           "rows in every status):\n" + screens
         + _domain_note(state)
+        + _preloaded_note(preloaded or {})
+        + overlays.prompt("data")
         + f"\n\nTHE TABLES (db/init.sql, exactly as they are — every column name is what you use as a key):\n{sql[:14000]}\n\n"
         + SPEC_CONTRACT
         + "\nWrite the spec."
@@ -120,9 +182,21 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
     Returns {"rows": {table: count}, "problems": [...], "reasoning": str, "commit": str}.
     """
     tables = tables_in(run_id)
-    base_prompt = _seed_prompt(state, run_id) + extra_feedback
+    # An overlay's standard entities come with their own data: coherent across tables, which
+    # no spec written table by table can be. The Data Designer writes only the rest.
+    preloaded, notes = overlays.demo_rows(tables)
+    for note in notes:
+        await emit(run_id, "Demonstration data: " + note, agent="data_designer", stage=stage, level="warn")
+    if preloaded:
+        fill_required(preloaded, tables)
+        await emit(run_id, "Demonstration data from the library: " + summary(preloaded),
+                   agent="data_designer", stage=stage, data={"tables": {t: len(r) for t, r in preloaded.items()}})
+    mine = sorted(t for t in tables if t != "example" and t not in preloaded)
+    if preloaded and not mine:
+        return await _library_seed(run_id, preloaded, tables, stage)
+    base_prompt = _seed_prompt(state, run_id, preloaded) + extra_feedback
     criteria = _criteria(state) + [str(state.get("brief") or "")]
-    schema = spec_schema(sorted(t for t in tables if t != "example"))
+    schema = spec_schema(mine)
     feedback = ""
     rows: dict[str, list[dict[str, Any]]] | None = None
     seed_sql = ""
@@ -140,7 +214,7 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
                        agent="data_designer", stage=stage, level="warn")
             feedback = "\n\nYOUR PREVIOUS REPLY WAS CUT OFF: " + problems[0] + "\nReturn a shorter spec."
             continue
-        rows, problems, derived = expand_spec(reply, tables)
+        rows, problems, derived = expand_spec(reply, tables, preloaded=preloaded)
         # A column the table does not have is dropped when the rows are rendered; say
         # so, but it is no reason to throw away an otherwise good data set.
         dropped = [p for p in problems if _SOFT.search(p)]
@@ -148,7 +222,7 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
         # The enterprise DupeGuard run's first spec was 81 KB of one table (customers) and
         # nothing else: tickets, clusters and known issues all opened empty, and nothing
         # said so. Every table a screen can show needs rows.
-        empty = sorted(t for t in tables if t != "example" and not (rows or {}).get(t))
+        empty = sorted(t for t in mine if not (rows or {}).get(t))
         if rows is not None and empty:
             problems.append(
                 f"the spec gives no rows for {len(empty)} table(s): {', '.join(empty)}. Every table needs rows — "
@@ -161,7 +235,8 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
             repo.write_files(run_id, {SPEC_FILE: _json.dumps(reply, indent=1)})
             seed_sql, problems = rows_to_sql(rows, tables)
             problems = [p for p in problems if not _SOFT.search(p)]
-            problems += quality_issues(rows, criteria, tables, derived)
+            # The library's rows are a tested story; the checks of variety are for the spec's.
+            problems += quality_issues({t: r for t, r in rows.items() if t not in preloaded}, criteria, tables, derived)
             if not problems:
                 write_seed_section(run_id, seed_sql)
                 check = await validate_init_sql(run_id)
@@ -179,7 +254,10 @@ async def generate_seed(state: RunState, run_id: str, key_prefix: str, stage: st
                     + "\nReturn the whole corrected spec.")
     else:
         # The seed never met the bar; whatever the last attempt produced is still better
-        # than an empty app, once its required gaps are filled.
+        # than an empty app, once its required gaps are filled. With no usable spec at all,
+        # the library's rows alone still open every standard screen full.
+        if not rows and preloaded:
+            rows = dict(preloaded)
         if rows:
             from ...workspace.seeding import fill_required
             filled = fill_required(rows, tables)
@@ -221,7 +299,12 @@ async def lay_foundation(state: RunState) -> RunState:
 
     # 1. The schema, from the whole backlog at once.
     await emit(run_id, "Designing the data model for every story at once", agent="developer", stage="foundation")
-    prompt = _schema_prompt(state, run_id)
+    chosen = _standard_entities(state)
+    if chosen:
+        await emit(run_id, "Standard entities the platform writes itself: "
+                           + "; ".join(f"{name}: {', '.join(tables)}" for name, tables in chosen.items()),
+                   agent="developer", stage="foundation", data={"standard": chosen})
+    prompt = _schema_prompt(state, run_id, chosen)
     try:
         impl = await remember(run_id, "foundation:schema", lambda: FOUNDATION.json(prompt, max_tokens=14000))
     except (ReplyTruncated, UnparseableReply) as exc:
@@ -230,7 +313,8 @@ async def lay_foundation(state: RunState) -> RunState:
         impl = await remember(run_id, "foundation:schema:retry", lambda: FOUNDATION.json(
             prompt + "\n\nYour previous reply was too long or unreadable. Keep every file compact: no "
                      "docstrings beyond one line, no comments except the allowed-values ones.", max_tokens=14000))
-    written, sha, refused = await _apply(run_id, state, "S0", impl.get("files", {}),
+    files, merged = _with_standards(run_id, impl.get("files", {}), chosen)
+    written, sha, refused = await _apply(run_id, state, "S0", files,
                                          impl.get("commit_message") or "feat(foundation): data model")
     rejected = [r for r in refused if "REJECTED" in r]
     if rejected:
@@ -238,9 +322,13 @@ async def lay_foundation(state: RunState) -> RunState:
                    agent="developer", stage="foundation", level="warn", data={"refused": rejected})
         fix = await remember(run_id, "foundation:schema:fix", lambda: FOUNDATION.json(
             prompt + _refused_note(refused) + "\nReturn all three files corrected.", max_tokens=14000))
-        written, sha, refused = await _apply(run_id, state, "S0", fix.get("files", {}),
-                                             "fix(foundation): data model")
+        files, merged = _with_standards(run_id, fix.get("files", {}), chosen)
+        written, sha, refused = await _apply(run_id, state, "S0", files, "fix(foundation): data model")
+    for note in merged:
+        await emit(run_id, "Data model: " + note, agent="developer", stage="foundation")
     tables = tables_in(run_id)
+    for gap in standards.gaps(tables):
+        await emit(run_id, "Data model: " + gap, agent="developer", stage="foundation", level="warn")
     await emit(run_id, f"Data model in place: {len(tables)} table(s) — " + ", ".join(sorted(tables)),
                agent="developer", stage="foundation",
                data={"files": written, "commit": sha, "reasoning": impl.get("reasoning", "")})

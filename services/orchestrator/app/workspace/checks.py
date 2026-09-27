@@ -31,6 +31,7 @@ from .interface import (
     EXAMPLE_ROUTER,
     GENERIC_ROUTER,
     EXAMPLE_SCREEN,
+    is_example_screen,
     PACKAGE_DIR,
     REGISTRY,
     SCREENS_DIR,
@@ -62,7 +63,7 @@ def screen_modules(run_id: str) -> list[Path]:
 
 
 def story_screens(run_id: str) -> list[Path]:
-    return [p for p in screen_modules(run_id) if p.name != EXAMPLE_SCREEN]
+    return [p for p in screen_modules(run_id) if not is_example_screen(p.name)]
 
 
 _STORY_TAG = re.compile(r"\bstor(?:y|ies)\s*:\s*([^\n]*)")
@@ -86,7 +87,7 @@ def regenerate_registry(run_id: str) -> list[str]:
     if not d.is_dir():
         return []
     real = story_screens(run_id)
-    chosen = real or [p for p in screen_modules(run_id) if p.name == EXAMPLE_SCREEN]
+    chosen = real or [p for p in screen_modules(run_id) if is_example_screen(p.name)]
 
     def order(path: Path) -> tuple[int, str]:
         ids = stories_in(path.read_text(encoding="utf-8", errors="replace"))
@@ -100,7 +101,7 @@ def regenerate_registry(run_id: str) -> list[str]:
              "// Screens load one by one, so a broken file cannot take the others down.",
              "const entries = ["]
     lines += [
-        f'  {{ id: "{p.stem}", example: {"true" if p.name == EXAMPLE_SCREEN else "false"}, '
+        f'  {{ id: "{p.stem}", example: {"true" if is_example_screen(p.name) else "false"}, '
         f'load: () => import("./{p.name}") }},'
         for p in chosen
     ]
@@ -854,7 +855,21 @@ def governed_columns(run_id: str) -> dict[str, tuple[str, str]]:
                 field = str(kw.value.value)
         if model:
             out[model] = (field, str(name))
+    for w in _registered(run_id):
+        if w.get("model") and w["model"] not in out:
+            out[w["model"]] = (str(w.get("field") or "status"), str(w.get("name") or "?"))
     return out
+
+
+def _registered(run_id: str) -> list[dict[str, Any]]:
+    """The workflows the domain registered when it was last imported (the domain stage keeps
+    them): the ones a library's factory built are in no `Workflow(...)` call to read."""
+    path = workspace_path(run_id) / ".poiesis" / "domain.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [w for w in data.get("workflows", []) if isinstance(w, dict)]
 
 
 def _variable_models(tree: ast.AST) -> dict[str, str]:
@@ -918,6 +933,10 @@ def workflow_transitions(run_id: str) -> dict[str, list[tuple[str, list[str], st
                 if tname and dst:
                     moves.append((tname[0], src, dst[0]))
         out[str(name)] = moves
+    for w in _registered(run_id):
+        if w.get("name") and not out.get(str(w["name"])):
+            out[str(w["name"])] = [(str(t.get("name")), [str(s) for s in t.get("from") or []], str(t.get("to")))
+                                   for t in w.get("transitions") or [] if t.get("name") and t.get("to")]
     return out
 
 

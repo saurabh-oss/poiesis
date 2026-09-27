@@ -306,6 +306,12 @@ def service_token(run_id: str) -> str:
     return token
 
 
+def _overlay_settings() -> tuple[str, ...]:
+    """Settings an overlay's code reads (ERP_, FISCAL_…), named in its overlay.yaml."""
+    from .overlays import settings_prefixes
+    return settings_prefixes()
+
+
 def write_app_env(run_id: str) -> list[str]:
     """app.env for an enterprise application: its secret, the check token, connector settings.
 
@@ -329,7 +335,7 @@ def write_app_env(run_id: str) -> list[str]:
     }
     passed = []
     for key, value in sorted(os.environ.items()):
-        if key.startswith("APPS_") and key[5:].startswith(_APP_SETTINGS) and value.strip():
+        if key.startswith("APPS_") and key[5:].startswith(_APP_SETTINGS + _overlay_settings()) and value.strip():
             values[key[5:]] = value.strip()
             passed.append(key[5:])
     body = "# Written by Poiesis at each deployment. Not committed: it holds secrets.\n" + "".join(

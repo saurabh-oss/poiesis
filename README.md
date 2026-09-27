@@ -21,12 +21,14 @@ The thing that makes Poiesis different from every "prompt to app" tool is the **
 | [docs/API.md](docs/API.md) | Script the platform: runs, gates, deployments, maps, boards, knowledge, observability |
 | [docs/ENTERPRISE.md](docs/ENTERPRISE.md) | Build enterprise applications: sign-in and roles, workflows and approvals, audit, a tested rule catalogue |
 | [docs/CONNECTORS.md](docs/CONNECTORS.md) | Use, configure and add the reusable Jira, ServiceNow, Plane, e-mail, Slack and Teams connectors |
+| [docs/FINANCE.md](docs/FINANCE.md) | Build finance and procurement applications on the finance library: standard entities and data, tested rules, lifecycles, an insight API, a dashboard kit, an ERP connector; and add the next department |
 | [docs/CODEMAPS.md](docs/CODEMAPS.md) | Understand the ArchiLens codebase maps |
 | [docs/PLANE.md](docs/PLANE.md) | Set up and understand the Plane boards |
 | [docs/CASE-STUDY-DUPEGUARD.md](docs/CASE-STUDY-DUPEGUARD.md) | Read one full run: what the platform built, what it got wrong, what changed |
 
-Sample briefs: [docs/samples/](docs/samples/) — BRD-ITAM-2026-014 (AssetHub, IT asset management)
-and BRD-SUP-2026-021 (DupeGuard, duplicate-ticket auto-triage).
+Sample briefs: [docs/samples/](docs/samples/) — BRD-ITAM-2026-014 (AssetHub, IT asset management),
+BRD-SUP-2026-021 (DupeGuard, duplicate-ticket auto-triage) and BRD-FIN-2026-031 (ProcureDesk,
+procure-to-pay for a finance department).
 
 ---
 
@@ -48,6 +50,7 @@ and BRD-SUP-2026-021 (DupeGuard, duplicate-ticket auto-triage).
 | Every codebase readable as pictures | ArchiLens draws each generated app's runtime topology, modules grouped by story, data model and request flows, explained by the local model; a reviewer sees what was built without opening a file | `workspace/codemap.py`, `/codebases` |
 | Explainable, measurable | Every model call kept with its prompt and reply; every stage, sandbox run and deploy timed; traces to Jaeger, metrics to Prometheus and Grafana | `telemetry.py`, `/api/runs/{id}/traces`, `/metrics` |
 | Enterprise-grade by construction | Under the `enterprise` pack every app has sign-in with roles, permissions on every call, server-enforced workflows with four-eyes approvals and SLAs, an audit trail, a tested catalogue of the brief's rules, and Jira, ServiceNow, Plane, e-mail, Slack and Teams connectors that work in a sandbox until credentials are set | `packs/enterprise.yaml`, `scaffolds/_overlays/enterprise/`, `graph/nodes/domain.py`, [docs/ENTERPRISE.md](docs/ENTERPRISE.md) |
+| A department's work, ready to compose | Under the `finance` pack the platform itself writes the standard entities of finance and procurement with two years of coherent demonstration data, starts the business logic from 22 tested rules and the lifecycle of each record, serves an insight API, and gives every screen a dashboard kit in which a dashboard is a description; a run spends its effort on what this organisation does differently | `packs/finance.yaml`, `scaffolds/_overlays/finance/`, `workspace/overlays.py`, `workspace/standards.py`, [docs/FINANCE.md](docs/FINANCE.md) |
 | A demonstrable MVP in one sitting | Under the `mvp` pack the platform lays the whole data model and generated, believable demonstration data first, serves every table through a generic data API, and has the Developer build only polished screens on a UI kit; no test loop, verification is the real browser | `packs/mvp.yaml`, `foundation` stage, `routers/resources.py`, `frontend/ui.js` |
 
 ## Enterprise applications
@@ -64,6 +67,25 @@ no story re-implements a rule. The app gains Approvals, Audit trail, Business ru
 Integrations screens. See [docs/ENTERPRISE.md](docs/ENTERPRISE.md) and
 [docs/CONNECTORS.md](docs/CONNECTORS.md); the control room's **Enterprise** page shows the
 catalogue and every enterprise app.
+
+## Finance and procurement
+
+`POIESIS_PACK=packs/finance.yaml` is the enterprise pack with the **finance library** laid over
+it, the first of the department libraries. What every finance or procurement application shares
+is written once, tested, and handed to each run: the **standard entities** (supplier,
+requisition, purchase order, goods receipt, invoice, payment run, contract, budget line…),
+which the platform writes into the data model itself, with more than two years of coherent
+**demonstration data**; **22 rules** with ids and tests (three-way match, delegation of
+authority, segregation of duties, budget availability, duplicate invoices, payment terms and
+discounts, tax, variance, accruals, supplier risk…); the **lifecycle** of each record, with
+approval by amount; the **operations** people perform (match an invoice, receive goods, propose
+a payment run, check a budget); an **insight API** (headline figures against the comparison
+period, breakdowns, trends with budget and last year, budget against actual, ageing, the
+purchase-to-pay funnel, controls, supplier scorecards, the rows behind every number); a
+**dashboard kit** in which a dashboard is a description — with its fiscal period picker,
+comparison, filters, drill-down, CSV export and each person's own arrangement; and an **ERP
+connector**. The Developer describes what a dashboard shows and to whom; it does not draw a chart.
+See [docs/FINANCE.md](docs/FINANCE.md), which also says how the next department is added.
 
 ## MVP mode: screens first
 
@@ -412,7 +434,7 @@ services/orchestrator        FastAPI + LangGraph agent value stream
   app/agents/                Agent classes; prompts/ (one file per agent, plus ux_playbook.md); schemas.py
   app/ingest/                PDF, DOCX (tables in order), images, audio, URLs → cited fragments
   app/workspace/             Per-run repository, sandbox runner, checks, seeding, deployment,
-                             browser check, codemap (ArchiLens)
+                             browser check, codemap (ArchiLens), overlays and their standard entities
   app/integrations/          Plane (plane.py), Jira (jira.py, tracker.py), Git remote (gitremote.py)
   app/kg/                    Neo4j client and the Qdrant vector index
   app/llm.py                 Native Ollama client (schema-constrained, one call at a time), LiteLLM for hosted profiles
@@ -426,6 +448,9 @@ scripts/                     restart-ollama.ps1, bootstrap.ps1, plane-bootstrap.
 observability/               Prometheus config, Grafana datasource and dashboard
 scaffolds/web-app/           What every generated app starts from: gateway, api, data, db, UI kit
                              (ui.js), shell (app.js), design system (styles.css)
+scaffolds/_overlays/         What a pack lays over it: enterprise (kernel, connectors, platform screens)
+                             and finance (the finance library, its dashboard kit, the ERP connector)
+tools/finance/               Compose a finance application without a run; drive the kit in a browser
 packs/                       Domain packs: gates, build and review policy, definition of done
                              (both are mounted into the orchestrator by the compose file; the copies
                              under services/orchestrator/ are what its image carries without the mount —
