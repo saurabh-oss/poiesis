@@ -350,6 +350,11 @@
 .fin-work-body { padding: 14px 16px 16px; }
 .fin-work-note { margin: 0 0 10px; font-size: 12.5px; }
 .fin-row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
+/* What can be done to a row stays in reach however wide the table is. */
+.fin-work-body td:has(> .fin-row-actions) { position: sticky; right: 0; background: var(--surface); padding-left: 10px;
+  box-shadow: -10px 0 10px -10px color-mix(in srgb, var(--ink, #000) 22%, transparent); }
+.fin-work-body tr:hover td:has(> .fin-row-actions) { background: var(--surface-2); }
+.fin-work-body tr.selected td:has(> .fin-row-actions) { background: var(--accent-wash); }
 .fin-row-actions button { white-space: nowrap; }
 .fin-advice { display: grid; gap: 8px; }
 .fin-finding { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 9px 12px; border-radius: var(--r);

@@ -53,8 +53,13 @@ def tab(s: Session, view: str) -> None:
 
 
 def toast(s: Session) -> str:
-    s.page.wait_for_selector(".toast", timeout=15000)
-    return s.page.locator(".toast").last.inner_text()
+    """What the person is told next: the message that was not there when the last one was read."""
+    seen = getattr(s, "told", 0)
+    s.page.wait_for_function("(n) => (window.__told = window.__told || 0, true) && document.querySelectorAll('.toast').length > 0 "
+                             "&& [...document.querySelectorAll('.toast')].some((t) => !t.dataset.read)", arg=seen, timeout=15000)
+    text = s.page.evaluate("() => { const fresh = [...document.querySelectorAll('.toast')].filter((t) => !t.dataset.read); "
+                           "fresh.forEach((t) => { t.dataset.read = '1'; }); return fresh.map((t) => t.innerText).join(' | '); }")
+    return text
 
 
 def row_of(s: Session, text: str):

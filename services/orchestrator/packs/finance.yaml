@@ -40,6 +40,9 @@ build:
   acceptance_blocking: false
   overlays: [enterprise, finance]   # kernel, connectors, platform screens; then the finance library
   max_repair_attempts: 3
+  # A story the finance library has a screen for keeps that screen (a dashboard, a work screen), and
+  # the Developer changes its description: tabs, figures, actions, columns. "offer" only shows it.
+  library_screens: require
   max_rework_rounds: 1
   sandbox_image: python:3.12-slim
   test_timeout_seconds: 600

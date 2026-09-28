@@ -570,6 +570,8 @@ def screens_for_stories(rid: str, wroot: Path) -> None:
     before = overlays.active
     overlays.active = lambda: NAMES
     kept = (build_stage._verify, build_stage.emit, ws_repo.commit, build_stage._story)
+    policy = build_stage._library_required
+    build_stage._library_required = lambda: False          # whatever the pack of this process asks for
     try:
         fresh = build_stage._library_screen(rid, story("S9"))
         (screens / "goods_receipts.js").write_text(
@@ -652,12 +654,46 @@ def screens_for_stories(rid: str, wroot: Path) -> None:
         none = asyncio.run(build_stage._fall_back_to_library(
             rid, {"run_id": rid}, story("S11"), failed, "S11:r0", 60, True, set(), []))
         expect("a story the library has no screen for is left as it is", none is None and not asked)
+
+        # A pack that requires the library's screens: a story the library has a screen for keeps it.
+        own_screen = ('export default { title: "Purchase orders", story: "S3", async render(root, { api }) { '
+                      'root.append(String((await api("/requisitions?status=approved")).length)); } };\n')
+        (screens / "ordering.js").unlink(missing_ok=True)
+        (screens / "purchase_orders.js").write_text(own_screen, encoding="utf-8")
+        (routers / "purchase_orders.py").write_text(
+            'from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.post("/from-requisition/{requisition_id}")\n'
+            'def create(requisition_id: int):\n    return {"message": "Order created"}\n', encoding="utf-8")
+        try:
+            offered = asyncio.run(build_stage._hold_to_library(rid, story("S3"), ["frontend/screens/purchase_orders.js"], "in its implementation"))
+            untouched = (screens / "purchase_orders.js").read_text(encoding="utf-8") == own_screen
+            build_stage._library_required = lambda: True
+            said.clear()
+            held = asyncio.run(build_stage._hold_to_library(rid, story("S3"), ["frontend/screens/purchase_orders.js",
+                                                                              "backend/app/routers/orders.py"], "in its implementation"))
+            now = (screens / "purchase_orders.js").read_text(encoding="utf-8")
+            again = asyncio.run(build_stage._hold_to_library(rid, story("S3"), held, "in its repair"))
+            nothing = asyncio.run(build_stage._hold_to_library(rid, story("S11"), ["frontend/screens/x.js"], "in its implementation"))
+            told = build_stage._screen_note(rid, story("S3"))
+        finally:
+            build_stage._library_required = lambda: False
+        expect("where the pack only offers the library's screens, a story's own screen is left to its checks",
+               untouched and offered == ["frontend/screens/purchase_orders.js"])
+        expect("where the pack requires them, a story that returned a screen of its own gets the library's back, once",
+               "fin.workbench(root, ctx, fin.worklists.ordering(" in now and 'story: "S3"' in now and again == held
+               and "keeps the finance library's" in said[0] and nothing == ["frontend/screens/x.js"]
+               and "is set aside for it" in told and "is replaced by this one" not in told, f"{held} {again} {said} {now[:200]}")
+        expect("and loses the router it wrote that no screen calls, by its name, while one another story's screen calls stays",
+               not (routers / "purchase_orders.py").exists() and (routers / "orders.py").exists()
+               and held == ["backend/app/routers/orders.py", "frontend/screens/purchase_orders.js"]
+               and len(said) == 2 and "removed backend/app/routers/purchase_orders.py" in said[1], f"{held} {said}")
+        (screens / "purchase_orders.js").unlink(missing_ok=True)
     finally:
         build_stage._verify, build_stage.emit, ws_repo.commit, build_stage._story = kept
+        build_stage._library_required = policy
         overlays.active = before
         for leftover in ("goods_receipts.js", "receipt_detail.js", "goods_in.js", "approval_queue.js", "team.js", "ordering.js"):
             (screens / leftover).unlink(missing_ok=True)
-        for leftover in ("goods_receipts.py", "approval_queue.py", "orders.py"):
+        for leftover in ("goods_receipts.py", "approval_queue.py", "orders.py", "purchase_orders.py"):
             (routers / leftover).unlink(missing_ok=True)
 
 

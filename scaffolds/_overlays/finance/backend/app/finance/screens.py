@@ -178,5 +178,7 @@ def suggest(story: dict[str, Any], tables: Iterable[str] = ()) -> dict[str, Any]
     heading = best["title"] if len(heading) > 34 else heading
     why = (f"the library has a {'work screen' if best['kind'] == 'worklist' else 'dashboard'} for this, \"{best['title']}\" "
            f"(fin.{'worklists' if best['kind'] == 'worklist' else 'blueprints'}.{best['name']})")
-    return {**best, "heading": heading, "file": f"{_slug(heading)}.js", "why": why, "options": options,
+    # What a screen of the library's makes: the call the platform looks for in a story's screen.
+    marker = "fin.workbench(" if best["kind"] == "worklist" else "fin.dashboard("
+    return {**best, "heading": heading, "file": f"{_slug(heading)}.js", "why": why, "options": options, "marker": marker,
             "content": content(best["kind"], best["name"], story, title=heading, icon=best["icon"], options=options)}

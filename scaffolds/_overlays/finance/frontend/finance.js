@@ -2189,7 +2189,9 @@ export async function workbench(root, ctx, spec = {}) {
 
   const columnsOf = (view, rows) => {
     const own = view.columns || (spec.columns && !Array.isArray(spec.columns) ? spec.columns[view.entity] : spec.columns);
-    const base = own || VIEW_COLUMNS[view.kind] || columnsFor(view.entity, rows);
+    // A queue of one kind of record does not say on every row which kind it is, nor what waits for me who its approver is.
+    const base = own || (VIEW_COLUMNS[view.kind] || columnsFor(view.entity, rows)).filter((c) => !(view.kind === "approvals"
+      && ((c.key === "entity" && (view.of || spec.of)) || (c.key === "approver" && !(view.query && view.query.mine === false)))));
     if (!(view.actions || spec.actions || []).length) return base;
     return [...base, { label: "", align: "right", render: (row) => {
       const acts = offered(view, row).slice(0, 2);

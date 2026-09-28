@@ -180,9 +180,76 @@ def _screen_note(run_id: str, story: dict[str, Any]) -> str:
         f"### {found['path']}\n{found['content']}\n"
         f"Return it at {found['path']}, changed only where an acceptance criterion needs something it "
         "does not have (the options its comment names). Keep it one call: write no table, form, fetch "
-        "or router for what it already does, and no second screen for this story. A screen of your own "
-        "that fails its checks is replaced by this one.\n"
+        "or router for what it already does, and no second screen for this story. "
+        + ("In this application a story the library has a screen for keeps that screen: one of your own "
+           "that does not make this call is set aside for it.\n" if _library_required()
+           else "A screen of your own that fails its checks is replaced by this one.\n")
     )
+
+
+def _library_required() -> bool:
+    """`build.library_screens: require` in the pack: a story the library has a screen for keeps that
+    screen, and the Developer changes its description. Left out ("offer"), the library's screen is
+    shown to the Developer and stands in only for a screen that fails its checks.
+
+    The first finance run is why a pack would ask for it. Every screen the library supplied worked
+    when its buttons were pressed; the work screens written by hand passed every check and did not:
+    an approval queue that refused each approval, an order screen that created no order.
+    """
+    return str(pack().get("build", {}).get("library_screens") or "offer").lower() == "require"
+
+
+def _story_routers(run_id: str, sid: str, own: list[str]) -> list[str]:
+    """The routers a story wrote: those among its files, and those named as its screens are
+    (screens/approval_queue.js and routers/approval_queue.py are one story's, by the scaffold's
+    convention), which is how a router from an earlier round is still known to be its own."""
+    root = repo.workspace_path(run_id)
+    stems = {rel.rsplit("/", 1)[-1][:-3] for rel in _story_screens(run_id, sid)}
+    named = {f"backend/app/routers/{stem}.py" for stem in stems}
+    mine = {f for f in own if f.startswith("backend/app/routers/") and f.endswith(".py")} | named
+    return sorted(f for f in mine if (root / f).is_file())
+
+
+async def _tidy_routers(run_id: str, story: dict[str, Any], found: dict[str, Any], written: list[str]) -> list[str]:
+    """A story whose screen is the library's needs no router for what that screen does: the ones it
+    wrote that no screen calls are removed, rather than left answering to nobody with whatever
+    faults they had. ProcureDesk kept an order endpoint that moved a requisition and created no order."""
+    unused = _uncalled(run_id, _story_routers(run_id, story["id"], written))
+    if not unused:
+        return written
+    for rel in unused:
+        repo.remove(run_id, rel)
+    repo.commit(run_id, f"fix({story['id']}): remove routers no screen calls")
+    await emit(run_id, f"{story['id']}: removed {', '.join(unused)}: no screen calls it, and the story's screen is the "
+                       f"{found['overlay']} library's \"{found['title']}\", which calls the library's API",
+               agent="governance", stage="build", level="warn", data={"removed": unused})
+    return sorted(set(written) - set(unused))
+
+
+async def _hold_to_library(run_id: str, story: dict[str, Any], written: list[str], when: str) -> list[str]:
+    """Where the pack requires it, put the library's screen back in a story that returned one of its
+    own, and remove the routers of the story's that no screen then calls. Returns what the story
+    has written, the library's screen among it."""
+    if not _library_required():
+        return written
+    found = _library_screen(run_id, story)
+    marker = str((found or {}).get("marker") or "")
+    if not found or not marker:
+        return written
+    sid = story["id"]
+    root = repo.workspace_path(run_id)
+    mine = _story_screens(run_id, sid)
+    if any(marker in (root / rel).read_text(encoding="utf-8", errors="replace") for rel in mine):
+        return await _tidy_routers(run_id, story, found, written)
+    repo.write_files(run_id, {found["path"]: found["content"]})
+    regenerate_registry(run_id)
+    repo.commit(run_id, f"fix({sid}): keep the {found['overlay']} library's {found['title']} screen")
+    await emit(run_id, f"{sid}: {when} it returned a screen of its own; this pack keeps the {found['overlay']} "
+                       f"library's \"{found['title']}\" screen for a story it has one for, at {found['path']}",
+               agent="governance", stage="build", level="warn",
+               data={"screen": {k: found[k] for k in ("kind", "name", "title", "path", "overlay", "why")},
+                     "set_aside": mine})
+    return await _tidy_routers(run_id, story, found, sorted(set(written) | {found["path"]}))
 
 
 _ROUTER_FINDING = re.compile(r"^- (backend/app/routers/[\w./-]+\.py):", re.M)
@@ -809,6 +876,7 @@ async def _repair_once(
     impl_files = {k: v for k, v in (fix.get("files") or {}).items()
                   if not k.startswith("tests/")}
     written, _, refused = await _apply(run_id, state, sid, impl_files, f"fix({sid}): {label}")
+    written = await _hold_to_library(run_id, story, written, "in its repair")
     return True, refused, written
 
 
@@ -1210,6 +1278,7 @@ async def build(state: RunState) -> RunState:
             agent="developer", stage="build",
             data={"files": written, "commit": sha, "reasoning": impl.get("reasoning", "")},
         )
+        written = await _hold_to_library(run_id, story, written, "in its implementation")
 
         # The Tester gets the same verified imports. It was independently inventing
         # the same non-existent symbols as the Developer, so a green suite was
@@ -1233,7 +1302,12 @@ async def build(state: RunState) -> RunState:
                       "gaps": tests.get("criteria_not_covered", [])},
             )
 
-        own = set(written)
+        # What the story wrote in earlier rounds is still its own: a router it left behind when it
+        # took the library's screen is checked with the rest, and is the story's to fix or remove.
+        earlier = next((r.get("files") or [] for r in (state.get("test_report") or {}).get("stories", [])
+                        if r.get("story_id") == sid), [])
+        root = repo.workspace_path(run_id)
+        own = set(written) | {f for f in earlier if f.startswith(_DELETABLE) and (root / f).is_file()}
         exec_result, pytest_ok = await _verify(
             run_id, f"{sid}:r{rnd}:a0", timeout, sid, require_screen, own, own_tests, story)
         attempts = 0
@@ -1307,7 +1381,9 @@ async def build(state: RunState) -> RunState:
         )
         result = {
             "story_id": story["id"], "title": story.get("title", ""), "status": status,
-            "repair_attempts": attempts, "tests_revised": tests_revised, "files": written,
+            # Everything the story has written that is still there, this round's and earlier ones'.
+            "repair_attempts": attempts, "tests_revised": tests_revised,
+            "files": sorted(f for f in set(written) | own if (repo.workspace_path(run_id) / f).is_file()),
             "tests": own_tests, "library_screen": library,
             "criteria_covered": tests.get("criteria_covered", []),
             # A test the platform judged impossible is a coverage gap, not evidence:

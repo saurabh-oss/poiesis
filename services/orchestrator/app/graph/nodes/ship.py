@@ -586,14 +586,18 @@ async def release(state: RunState) -> RunState:
         await gitremote.on_release(run_id, state, notes)
         return {"release": notes, "deployment": dep, "test_report": state["test_report"]}
 
-    if decision == "rebuild" and can_rebuild:
+    # The limit is on sending the whole increment round again. A person who used the application
+    # and names the story that failed them is always heard: that rebuilds the stories named.
+    told = stakeholder_findings(notes_in, all_stories)
+    named = bool(told) and all(f.get("story_id") for f in told)
+    if decision == "rebuild" and (can_rebuild or named):
         await emit(run_id, "Sent back for another build round"
                            + (f": {notes_in}" if notes_in else ""),
                    agent="governance", stage="release", level="warn", data=response)
-        findings = stakeholder_findings(notes_in, all_stories) + list(rv.get("blocking_findings") or [])
+        findings = told + list(rv.get("blocking_findings") or [])
         await tracker.on_release(run_id, state, {"status": "rebuild", "notes": notes_in})
         return {"release": {"status": "rebuild", "notes": notes_in},
-                "human_rebuilds": rebuilds + 1,
+                "human_rebuilds": rebuilds + (0 if named else 1),
                 "review": {**rv, "blocking_findings": findings}}
 
     if decision != "approve" or not releasable:

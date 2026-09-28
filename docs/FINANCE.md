@@ -361,7 +361,26 @@ At the build stage the platform
    repair: the library's screen and API stand in for the screen and the router the story wrote.
 
 The story's result records it (`library_screen`), the build log says which screen stands where
-and what was removed, and the Reviewer reads both. A department's library offers this by naming
+and what was removed, and the Reviewer reads both.
+
+**The finance pack goes one step further** (`build.library_screens: require`): a story the
+library has a screen for keeps that screen, and the Developer changes its description. A screen
+of the story's own that does not make the library's call is set aside for it, and the routers
+the story wrote that no screen then calls are removed. The reason is what happened when the
+buttons of the first application were pressed by hand. Every screen the library supplied did
+what it said. The work screens written by hand had passed every check and the Reviewer, and did
+not: the approval queue answered 409 to every approval (its router moved a requisition with
+"approve", a move the lifecycle does not have), and "Create purchase order" marked the
+requisition ordered and created no order. No check presses a button; a library screen has had
+its buttons pressed, as each persona, before any run begins. `offer`, the default for a pack
+that does not say, keeps the first three steps only.
+
+Two things the platform learned from the same application, for every pack:
+- a router that moves a record with a move its lifecycle does not have is found before the code
+  runs, and told how an approval is decided (`workspace/checks.py`);
+- at the release gate, a send-back that names its stories ("S3: creating an order creates no
+  order") rebuilds those stories alone and is always accepted; the limit on send-backs is on
+  sending the whole increment round again. A department's library offers this by naming
 a module in its manifest (`screens: backend/app/<name>/screens.py`); nothing in the orchestrator
 knows which screens there are.
 
@@ -393,7 +412,7 @@ Set `APPS_<SETTING>` in the platform's `.env`; it reaches each deployed applicat
 ## Verification
 
 ```
-docker compose exec orchestrator python -m app.selftest_finance      68 checks, no model calls
+docker compose exec orchestrator python -m app.selftest_finance      73 checks, no model calls
 ```
 covers the overlay's manifest, the standard-entity merge, the demonstration data (loaded as
 SQL), the starting domain under the domain stage's own check, the contracts a Developer is
