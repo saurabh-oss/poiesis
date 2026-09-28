@@ -51,16 +51,18 @@ WORK = {
     "suppliers": ("Supplier list", "building", "S15"), "contracts": ("Contracts", "file", "S16"),
 }
 
-DESK = '''import fin from "../finance.js";
-
-export default {
-  title: "%(title)s", icon: "%(icon)s", story: "%(story)s",
-  async render(root, ctx) {
-    window.__fin = fin;
-    window.__desk = await fin.workbench(root, ctx, fin.worklists.%(name)s());
-  },
-};
-'''
+# The story each work screen is written for. The screen is the one the library gives the platform
+# for that story (finance/screens.py), so what is driven in a browser here is what a run is handed.
+STORIES = {
+    "requisitions": "Raise a purchase requisition and see the budget and who approves it",
+    "approvals": "Approve or reject what waits in my queue",
+    "ordering": "Create purchase orders from approved requisitions and send to supplier",
+    "receiving": "Confirm receipt of goods against a purchase order",
+    "invoices": "Three-way match of supplier invoices",
+    "paymentRuns": "Propose the weekly payment run",
+    "suppliers": "Supplier onboarding and the approved supplier list",
+    "contracts": "Contract renewals to decide on",
+}
 
 
 def load(path: Path, name: str):
@@ -135,9 +137,13 @@ def main() -> None:
             (screens / f"{name.lower()}.js").write_text(BOARD % {"name": name, "title": title, "icon": icon, "story": story},
                                                         encoding="utf-8", newline="\n")
             entries.append(name.lower())
+        library = load(OUT / "backend/app/finance/screens.py", "screens")
         for name, (title, icon, story) in WORK.items():
-            (screens / f"work_{name.lower()}.js").write_text(DESK % {"name": name, "title": title, "icon": icon, "story": story},
-                                                             encoding="utf-8", newline="\n")
+            found = library.suggest({"id": story, "title": STORIES[name]}, order)
+            if found is None or (found["kind"], found["name"]) != ("worklist", name):
+                raise SystemExit(f"the library gives {found and found['name']} for the story of {name}: {STORIES[name]}")
+            body = library.content("worklist", name, {"id": story}, title=title, icon=icon, options=found["options"])
+            (screens / f"work_{name.lower()}.js").write_text(body, encoding="utf-8", newline="\n")
             entries.append(f"work_{name.lower()}")
         for extra in HERE.glob("screen_*.js"):
             shutil.copy(extra, screens / extra.name[len("screen_"):])

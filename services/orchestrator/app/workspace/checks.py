@@ -940,6 +940,53 @@ def workflow_transitions(run_id: str) -> dict[str, list[tuple[str, list[str], st
     return out
 
 
+_DECISIONS = ("approve", "approved", "reject", "rejected", "decline", "authorise", "authorize", "sign_off")
+
+
+def _unknown_moves(rel: str, tree: ast.AST, kinds: dict[str, str], governed: dict[str, tuple[str, str]],
+                   transitions: dict[str, list[tuple[str, list[str], str]]], used: set[str]) -> list[str]:
+    """`transition(db, row, "approve")` where the record's workflow has no such move.
+
+    ProcureDesk's approval queue passed every check and refused every approval: its router
+    moved a requisition with "approve", a move the requisition's lifecycle does not have,
+    because an approval is a decision on a request and not a move of the record. The kernel
+    answers 409 when the button is pressed, which no check presses.
+    """
+    here = sorted({governed[m][1] for m in governed if m in used})
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        called = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        if called != "transition":
+            continue
+        name = node.args[2] if len(node.args) >= 3 else next(
+            (k.value for k in node.keywords if k.arg in ("name", "transition")), None)
+        if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
+            continue
+        target = node.args[1] if len(node.args) >= 2 else None
+        model = kinds.get(target.id) if isinstance(target, ast.Name) else None
+        flows = [governed[model][1]] if model in governed else here
+        moves = [m for w in flows for m in transitions.get(w, [])]
+        if not moves or name.value in {m[0] for m in moves}:
+            continue
+        listed = "; ".join(f"`{n}` ({', '.join(s) or '*'} → {d})" for n, s, d in moves[:10])
+        text = (f"{rel}: line {node.lineno} moves a record with `transition(…, \"{name.value}\")`, and the "
+                f"{' / '.join(flows)} workflow has no move of that name: the server answers 409 when it is "
+                f"called. Its moves: {listed}.")
+        if name.value.lower() in _DECISIONS:
+            text += (" An approval is not a move of the record: the move that needs one (it is marked above by "
+                     "the state it leaves the record waiting in) only asks, and a person decides the request. "
+                     "To decide it from code: `from ..kernel.workflow import decide`, then "
+                     "`decide(db, approval_id, True, note)` (False rejects); the requests waiting are served at "
+                     "`GET /api/platform/approvals`, each with its `id`. A screen decides with "
+                     "`api(`/platform/approvals/${id}/approve`, { method: \"POST\", body: { note } })`.")
+        out.append(text)
+        if len(out) >= 3:
+            break
+    return out
+
+
 def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[str]:
     """What breaks an enterprise application's guarantees, before the code runs.
 
@@ -979,6 +1026,7 @@ def enterprise_issues(run_id: str, own_files: set[str] | None = None) -> list[st
             continue
         found = 0
         kinds = _variable_models(tree)
+        issues += _unknown_moves(rel, tree, kinds, governed, transitions, used)
         for node in ast.walk(tree):
             written = None
             if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):

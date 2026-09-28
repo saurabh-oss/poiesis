@@ -25,6 +25,7 @@ from ...integrations import gitremote, tracker
 from ...llm import ReplyTruncated, UnparseableReply, scaled
 from ...reuse.retriever import render_for_prompt, render_lessons
 from ...workspace import failures, repo
+from ...workspace import overlays
 from ...workspace.checks import (
     api_smoke,
     smoke_failures_by_file,
@@ -38,12 +39,15 @@ from ...workspace.checks import (
     preserve_routes,
     preserve_shared,
     regenerate_registry,
+    stories_in,
+    story_screens,
     test_issues,
 )
 from ...workspace.interface import (
     EDITABLE,
     excerpt,
     import_contract,
+    model_tables,
     own_routes_note,
     reference,
     route_contract,
@@ -143,6 +147,141 @@ def _enterprise_note(state: RunState, run_id: str) -> str:
     return "\n\n" + reference + overlays.prompt("developer") + note_for_developer(state)
 
 
+def _story_screens(run_id: str, sid: str) -> list[str]:
+    """The screens that say they deliver this story, as workspace paths."""
+    root = repo.workspace_path(run_id)
+    return [p.relative_to(root).as_posix() for p in story_screens(run_id)
+            if sid in stories_in(p.read_text(encoding="utf-8", errors="replace"))]
+
+
+def _library_screen(run_id: str, story: dict[str, Any]) -> dict[str, Any] | None:
+    """The screen a department's library has for this story, and the path it belongs at: the
+    story's own screen when it has one, a new file otherwise."""
+    found = overlays.screen_for(story, list(model_tables(run_id)))
+    if not found:
+        return None
+    mine = _story_screens(run_id, story["id"])
+    path = mine[0] if mine else "frontend/screens/" + str(found.get("file") or "screen.js")
+    root = repo.workspace_path(run_id)
+    if not mine and (root / path).is_file():
+        # Another story's screen has the name: this one takes its story's id with it.
+        path = path[:-3] + "_" + str(story["id"]).lower() + ".js"
+    return {**found, "path": path}
+
+
+def _screen_note(run_id: str, story: dict[str, Any]) -> str:
+    """The library's screen for the story, as the file to start from."""
+    found = _library_screen(run_id, story)
+    if not found:
+        return ""
+    return (
+        f"\n\nTHE LIBRARY HAS THIS STORY'S SCREEN: {found['why']}. This is the whole file, and it "
+        "works as it stands, with its data, its forms, its actions and its permissions:\n\n"
+        f"### {found['path']}\n{found['content']}\n"
+        f"Return it at {found['path']}, changed only where an acceptance criterion needs something it "
+        "does not have (the options its comment names). Keep it one call: write no table, form, fetch "
+        "or router for what it already does, and no second screen for this story. A screen of your own "
+        "that fails its checks is replaced by this one.\n"
+    )
+
+
+_ROUTER_FINDING = re.compile(r"^- (backend/app/routers/[\w./-]+\.py):", re.M)
+
+
+def _uncalled(run_id: str, routers: list[str]) -> list[str]:
+    """Those of the routers no screen still calls: the ones that can go without a screen answering 404."""
+    kept, _ = preserve_routes(run_id, {rel: "" for rel in routers})
+    return [rel for rel in routers if not str(kept.get(rel, "")).strip()]
+
+
+async def _library_for_router(
+    run_id: str, state: RunState, result: dict[str, Any], routers: list[str], why: str, key: str, timeout: int,
+    require_screen: bool,
+) -> bool:
+    """A story's router still answers with an error after its repair. Where the library has the
+    story's screen, that screen and the library's API take the place of the screen and the router
+    the story wrote. Returns whether the story passes its checks that way."""
+    story = _story(state, result["story_id"])
+    found = _library_screen(run_id, story)
+    routers = [r for r in routers if r.startswith("backend/app/routers/")]
+    if not found or not routers:
+        return False
+    sid = story["id"]
+    extra = [rel for rel in _story_screens(run_id, sid) if rel != found["path"]]
+    repo.write_files(run_id, {found["path"]: found["content"]})
+    for rel in extra:
+        repo.remove(run_id, rel)
+    # Once the story's own screens are gone: a router another story's screen calls stays, and
+    # with it the error, so the story is not passed on the strength of its new screen.
+    failing, routers = routers, _uncalled(run_id, routers)
+    for rel in routers:
+        repo.remove(run_id, rel)
+    regenerate_registry(run_id)
+    repo.commit(run_id, f"fix({sid}): the {found['overlay']} library's {found['title']} screen in place of its own")
+    await emit(run_id, f"{sid}: {why}; the {found['overlay']} library's \"{found['title']}\" screen and API stand in "
+                       f"place of its own at {found['path']} (removed {', '.join((*extra, *routers))})",
+               agent="governance", stage="build", level="warn",
+               data={"screen": {k: found[k] for k in ("kind", "name", "title", "path", "overlay", "why")},
+                     "removed": [*extra, *routers]})
+    own = (set(result.get("files") or []) - set(extra) - set(routers)) | {found["path"]}
+    checked, _ = await _verify(run_id, f"{key}:library", timeout, sid, require_screen, own,
+                               list(result.get("tests") or []), story)
+    result["files"] = sorted(own)
+    result["library_screen"] = {"kind": found["kind"], "name": found["name"], "title": found["title"],
+                                "path": found["path"], "overlay": found["overlay"], "removed": [*extra, *routers]}
+    result["test_output"] = checked.stdout[-3000:]
+    return checked.ok and set(routers) == set(failing)
+
+
+async def _fall_back_to_library(
+    run_id: str, state: RunState, story: dict[str, Any], failed: ExecResult, key: str, timeout: int,
+    require_screen: bool, own: set[str], own_tests: list[str],
+) -> tuple[ExecResult, bool, dict[str, Any]] | None:
+    """The Developer's repairs are spent and the story's screen still fails: the library's screen
+    for the story takes its place, as the library's domain stands when no attempt betters it.
+
+    Returns (the result of checking it, whether pytest passed, what was done), or None when no
+    library has a screen for the story. A router of the story's that the checks still fault is
+    removed with it: the library's screen calls the library's API, not that router.
+    """
+    found = _library_screen(run_id, story)
+    if not found:
+        return None
+    sid = story["id"]
+    mine = _story_screens(run_id, sid)
+    extra = [rel for rel in mine if rel != found["path"]]
+    repo.write_files(run_id, {found["path"]: found["content"]})
+    for rel in extra:
+        repo.remove(run_id, rel)
+    regenerate_registry(run_id)
+    repo.commit(run_id, f"fix({sid}): the {found['overlay']} library's {found['title']} screen in place of its own")
+    await emit(run_id, f"{sid}: its own screen still fails after its repairs; the {found['overlay']} library's "
+                       f"\"{found['title']}\" screen stands in its place at {found['path']}"
+                       + (f" (removed {', '.join(extra)})" if extra else ""),
+               agent="governance", stage="build", level="warn",
+               data={"screen": {k: found[k] for k in ("kind", "name", "title", "path", "overlay", "why")},
+                     "replaced": mine, "was": failed.stdout[-2000:]})
+    done = {"kind": found["kind"], "name": found["name"], "title": found["title"], "path": found["path"],
+            "overlay": found["overlay"], "removed": list(extra)}
+    own = (own - set(extra)) | {found["path"]}
+    result, pytest_ok = await _verify(run_id, f"{key}:library", timeout, sid, require_screen, own, own_tests, story)
+    if not result.ok:
+        named = sorted(set(_ROUTER_FINDING.findall(result.stdout)) & own)
+        faulted = _uncalled(run_id, named)
+        findings = re.findall(r"(?:===\n|\n\n)- ", result.stdout)
+        if faulted and faulted == named and len(_ROUTER_FINDING.findall(result.stdout)) == len(findings):
+            for rel in faulted:
+                repo.remove(run_id, rel)
+            repo.commit(run_id, f"fix({sid}): remove its router, which the library's screen does not call")
+            await emit(run_id, f"{sid}: removed {', '.join(faulted)}: the checks still fault it, and the library's "
+                               "screen calls the library's API, not this router",
+                       agent="governance", stage="build", level="warn", data={"removed": faulted})
+            done["removed"] += faulted
+            result, pytest_ok = await _verify(
+                run_id, f"{key}:library:bare", timeout, sid, require_screen, own - set(faulted), own_tests, story)
+    return result, pytest_ok, done
+
+
 def _skeleton(state: RunState) -> str:
     """Tell the Developer what already exists, so it extends rather than replaces."""
     sc = state.get("scaffold") or {}
@@ -196,6 +335,8 @@ def _context(state: RunState, story: dict[str, Any], *, first: bool = True) -> s
         + own
         + render_lessons(state.get("lessons_by_story", {}).get(story["id"], []))
         + _findings_for(state, story["id"])
+        # Last, where it is read last: the screen the library already has for this story.
+        + _screen_note(run_id, story)
     )
 
 
@@ -925,9 +1066,16 @@ async def _smoke_round(
             for file, fails in by_file.items():
                 r = owners.get(file)
                 if r and r.get("status") == "green":
+                    paths = ", ".join(f["path"] for f in fails)
+                    # The library's screen for the story, where it has one, needs no router of the
+                    # story's: it stands in rather than the story going red for an endpoint it
+                    # would not call.
+                    if await _library_for_router(run_id, state, r, [file], f"its endpoint still answers 500 on {paths}",
+                                                 f"{r['story_id']}:r{rnd}:smoke", timeout, require_screen):
+                        continue
                     r["status"] = "red"
                     r["reason"] = "its endpoint answers 500: " + "; ".join(f["path"] for f in fails)
-                    await emit(run_id, f"{r['story_id']}: still answers 500 on {', '.join(f['path'] for f in fails)} — marked red",
+                    await emit(run_id, f"{r['story_id']}: still answers 500 on {paths} — marked red",
                                agent="tester", stage="build", level="error")
             return
         for file, fails in by_file.items():
@@ -1137,9 +1285,20 @@ async def build(state: RunState) -> RunState:
                         exec_result, pytest_ok = await _verify(
                             run_id, f"{sid}:r{rnd}:post", timeout, sid, require_screen, own, own_tests, story)
 
+        # Still failing, and not for its tests: the library's screen for the story, where it has
+        # one, stands in for the story's own rather than a broken screen reaching the browser.
+        library = None
+        if not exec_result.ok and (pytest_ok or _mvp()):
+            fallen = await _fall_back_to_library(
+                run_id, state, story, exec_result, f"{sid}:r{rnd}", timeout, require_screen, own, own_tests)
+            if fallen is not None:
+                exec_result, pytest_ok, library = fallen
+                written = sorted((set(written) - set(library["removed"])) | {library["path"]})
+
         status = "green" if exec_result.ok else "red"
         await emit(
             run_id, f"{story['id']} is {status} after {attempts} repair attempt(s)"
+                    + (f", with the library's \"{library['title']}\" screen" if library else "")
                     + ("" if exec_result.ok or not pytest_ok
                        else " — its tests pass, but its screen does not"),
             agent="tester", stage="build",
@@ -1149,7 +1308,7 @@ async def build(state: RunState) -> RunState:
         result = {
             "story_id": story["id"], "title": story.get("title", ""), "status": status,
             "repair_attempts": attempts, "tests_revised": tests_revised, "files": written,
-            "tests": own_tests,
+            "tests": own_tests, "library_screen": library,
             "criteria_covered": tests.get("criteria_covered", []),
             # A test the platform judged impossible is a coverage gap, not evidence:
             # the Reviewer should see it as untested rather than as a passing story.

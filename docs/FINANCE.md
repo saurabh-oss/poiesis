@@ -49,6 +49,7 @@ scaffolds/_overlays/finance/
     insight.py                     the insight API as functions, for a router or a job
     demo.py                        the demonstration data
     starter.py                     the business logic an application starts with
+    screens.py                     which of the library's screens a story is nearest to
   backend/app/connectors/erp.py    the ERP connector
   frontend/finance.js, finance.css the dashboard kit and the work screens
   frontend/screens/example_finance.js    the worked examples the Developer is shown: a screen people
@@ -336,6 +337,34 @@ the person is, with the rule that refused (`PROC-09: Halden Freight is suspended
 - **Tools** above the rows (`fin.TOOLS`): `propose_run`, or one of the application's own.
 - `fin.advice(findings)` shows what the rules say about a request anywhere.
 
+### The screen a story starts from, and falls back to
+
+Telling a model about the work screens was not enough. Sent back for rework, the same run
+repaired its own two-hundred-line goods receipt screen three more times and never closed its
+brackets, with the one-line screen described in its prompt. So the platform does for screens
+what it does for the domain: it starts from the library's, and never keeps something worse.
+
+`screens.py` answers one question, `suggest(story, tables)`: which of the library's sixteen
+screens (eight dashboards, eight worklists) is this story nearest to? It reads the story's
+title, narrative and criteria for the words of each screen, tells a screen people read from
+one people work on, leaves out screens whose records the application lacks, and answers
+nothing when the story is not clearly any of them ("Export audit log", "Notification
+preferences"). What it returns is a whole file: an import, the story's id and one call.
+
+At the build stage the platform
+1. **shows it to the Developer**, last in its prompt, as the file to return: changed where a
+   criterion needs something of the story's own, otherwise as it is;
+2. **puts it in place of the story's own screen** when that still fails its checks after its
+   repairs, and checks the story again; a router of the story's that the checks still fault goes
+   with it, unless another story's screen calls it;
+3. does the same when a story's **router still answers 500** in the API smoke check after its
+   repair: the library's screen and API stand in for the screen and the router the story wrote.
+
+The story's result records it (`library_screen`), the build log says which screen stands where
+and what was removed, and the Reviewer reads both. A department's library offers this by naming
+a module in its manifest (`screens: backend/app/<name>/screens.py`); nothing in the orchestrator
+knows which screens there are.
+
 ## The ERP connector
 
 `erp()` keeps the contract of every connector ([CONNECTORS.md](CONNECTORS.md)): sandboxed
@@ -364,11 +393,11 @@ Set `APPS_<SETTING>` in the platform's `.env`; it reaches each deployed applicat
 ## Verification
 
 ```
-docker compose exec orchestrator python -m app.selftest_finance      58 checks, no model calls
+docker compose exec orchestrator python -m app.selftest_finance      68 checks, no model calls
 ```
 covers the overlay's manifest, the standard-entity merge, the demonstration data (loaded as
 SQL), the starting domain under the domain stage's own check, the contracts a Developer is
-shown, the insight API and the operations as the people of the function (73 checks of their
+shown, the library's screen for a story and its standing in for one that fails, the insight API and the operations as the people of the function (73 checks of their
 own, among them a purchase from the request to the ERP), every `GET` answering without an error
 in applications with all, some and none of the entities, and the library's 85 rule tests.
 
@@ -391,13 +420,14 @@ widths and then takes one purchase through the application, each step as the per
 is: a requester raises and submits a request, the budget holder approves it (and rejects another,
 with a reason), the buyer is refused an order to a suspended supplier and raises it with an
 approved one, sends it to the ERP, goods in receives it, accounts payable matches an invoice and
-proposes a payment run (77 checks).
+proposes a payment run (81 checks).
 
 ## Adding a department
 
 1. `scaffolds/_overlays/<name>/` with the department's library under `backend/app/<name>/`,
    its kit under `frontend/`, its tests under `tests/test_<name>_library.py`.
-2. `overlay.yaml`: what it owns, its prompts by agent, and the modules the platform calls —
+2. `overlay.yaml`: what it owns, its prompts by agent, and the modules the platform calls
+   (`screens` with `suggest(story, tables)` among them) —
    `standard` (`ENTITIES`, `ORDER`, `needed(text)`, `summary()`, `gaps()`, `model_class()`,
    `create_table()`, `schema_classes()`, `column_names()`, `class_name()`), `demo`
    (`rows(tables, today=)`) and `starter` (`domain(tables, classes)`). Each is optional.

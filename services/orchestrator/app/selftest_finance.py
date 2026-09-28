@@ -28,6 +28,7 @@ from typing import Any
 import yaml
 
 from .config import scaffold_root
+from .graph.nodes import build as build_stage
 from .graph.nodes import domain as domain_stage
 from .graph.nodes import scaffold as scaffold_stage
 from .workspace import checks as ws_checks
@@ -35,6 +36,7 @@ from .workspace import interface as ws_interface
 from .workspace import overlays, standards
 from .workspace import repo as ws_repo
 from .workspace.checks import _table_columns
+from .workspace.runner import ExecResult
 from .workspace.seeding import fill_required, quality_issues, rows_to_sql, strip_seed_section
 from .workspace.seedspec import expand_spec
 
@@ -448,6 +450,36 @@ def approve(invoice_id: int, db=Depends(get_session)):
         expect("a router that writes an invoice's status directly is flagged, with the move to use",
                any("governs" in f and "invoices.py" in f and "approve" in f for f in found), str(found)[:500])
         (wroot / "backend" / "app" / "routers" / "invoices.py").unlink()
+        (wroot / "backend" / "app" / "routers" / "approval_queue.py").write_text('''from fastapi import APIRouter, Depends
+from ..db import get_session
+from ..kernel import SYSTEM, transition
+from ..models import Requisition
+router = APIRouter()
+
+@router.post("/approval-queue/{requisition_id}/approve")
+def approve(requisition_id: int, db=Depends(get_session)):
+    req = db.get(Requisition, requisition_id)
+    return transition(db, req, "approve", reason="Approved via approval queue", actor=SYSTEM)
+
+@router.post("/approval-queue/{requisition_id}/resubmit")
+def resubmit(requisition_id: int, db=Depends(get_session)):
+    req = db.get(Requisition, requisition_id)
+    return transition(db, req, "revise", reason="Back to draft")
+''', encoding="utf-8")
+        found = ws_checks.enterprise_issues(rid)
+        expect("a router that moves a record with a move its lifecycle does not have is flagged, and told how an approval is decided",
+               len(found) == 1 and "approval_queue.py: line 10" in found[0] and 'transition(…, "approve")' in found[0]
+               and "requisition workflow has no move of that name" in found[0] and "`submit`" in found[0]
+               and "decide(db, approval_id, True, note)" in found[0] and "revise" not in found[0].split("Its moves")[0],
+               str(found)[:700])
+        (wroot / "backend" / "app" / "routers" / "approval_queue.py").unlink()
+        from .graph.nodes.ship import stakeholder_findings
+        sprint = {"S1", "S2", "S3"}
+        one = stakeholder_findings("S2: Approve in the approval queue answers 409; S12 too", sprint)
+        expect("a send-back that names a story reaches that story alone, and one that names none reaches them all",
+               [f.get("story_id") for f in one] == ["S2"] and one[0]["severity"] == "blocker" and "answers 409" in one[0]["required_fix"]
+               and [f.get("story_id") for f in stakeholder_findings("The totals look wrong", sprint)] == [None]
+               and stakeholder_findings("  ", sprint) == [], str(one))
 
         contract = ws_interface.import_contract(rid)
         expect("the import contract lists the library and the ERP connector",
@@ -477,6 +509,7 @@ def approve(invoice_id: int, db=Depends(get_session)):
         expect("the domain stage starts from the library's domain for this application's tables",
                set(begun) == set(domain_stage.FILES) and "register(flows.invoice(Invoice))" in begun["backend/app/domain/workflows.py"]
                and "BudgetChange" not in begun["backend/app/domain/workflows.py"], str(sorted(begun)))
+        screens_for_stories(rid, wroot)
         (wroot / "frontend" / "screens" / "spend.js").write_text(
             'import fin from "../finance.js";\nexport default { title: "Spend", story: "S1", async render(root, ctx) { '
             'await fin.dashboard(root, ctx, fin.blueprints.spend()); } };\n', encoding="utf-8")
@@ -492,6 +525,140 @@ def approve(invoice_id: int, db=Depends(get_session)):
                and '"example_worklist"' in registry, registry[:400])
     finally:
         shutil.rmtree(wroot, ignore_errors=True)
+
+
+STORIES = {
+    "S1": ("Raise requisition with budget and approval preview", "As a requester I raise a purchase requisition and see the budget "
+           "position and who will approve it", ("worklist", "requisitions")),
+    "S2": ("Approve or reject requisitions in queue", "As a budget holder I want the requisitions waiting for me", ("worklist", "approvals")),
+    "S3": ("Create purchase orders from approved requisitions", "As a buyer", ("worklist", "ordering")),
+    "S4": ("Budget dashboard by cost centre", "As a controller I see budget against actual and the forecast", ("dashboard", "budget")),
+    "S6": ("Three-way match of supplier invoices", "As accounts payable I match invoices to orders and receipts", ("worklist", "invoices")),
+    "S9": ("Confirm receipt of goods against a purchase order", "As a requester I confirm the goods arrived", ("worklist", "receiving")),
+    "S10": ("Propose weekly payment run", "As accounts payable I propose a payment run of what is due", ("worklist", "paymentRuns")),
+    "S11": ("Configure notification preferences", "As a user I choose which emails I get", None),
+    "S12": ("Export audit log", "As an auditor I export the log", None),
+}
+
+
+def screens_for_stories(rid: str, wroot: Path) -> None:
+    """The library's screen for a story: which, what the Developer is shown, and what happens when
+    the Developer's own does not pass. Called with the finance overlay active."""
+    import asyncio
+
+    def story(sid: str) -> dict[str, Any]:
+        title, narrative, _ = STORIES[sid]
+        return {"id": sid, "title": title, "narrative": narrative, "acceptance_criteria": []}
+
+    tables = list(ws_interface.model_tables(rid))
+    got = {sid: overlays.screen_for(story(sid), tables, NAMES) for sid in STORIES}
+    wrong = {sid: (g or {}).get("name") for sid, g in got.items()
+             if ((g["kind"], g["name"]) if g else None) != STORIES[sid][2]}
+    expect("the library knows which of its screens a story is nearest to, and when it is none of them", not wrong, str(wrong))
+    queue = got["S2"]
+    expect("its screen is a whole file: an import, the story's id and one call",
+           queue["content"].startswith('import fin from "../finance.js";') and 'story: "S2"' in queue["content"]
+           and 'fin.workbench(root, ctx, fin.worklists.approvals({ id: "s2-approvals", of: "requisition" }))' in queue["content"]
+           and queue["overlay"] == "finance" and queue["content"].count("await ") == 1, queue["content"])
+    expect("an application without the records is not offered the screen",
+           overlays.screen_for(story("S10"), ["supplier", "invoice"], NAMES) is None
+           and overlays.screen_for(story("S6"), ["supplier", "invoice"], NAMES)["name"] == "invoices"
+           and overlays.screen_for(story("S2"), tables, ["enterprise"]) is None)
+
+    screens = wroot / "frontend" / "screens"
+    routers = wroot / "backend" / "app" / "routers"
+    before = overlays.active
+    overlays.active = lambda: NAMES
+    kept = (build_stage._verify, build_stage.emit, ws_repo.commit, build_stage._story)
+    try:
+        fresh = build_stage._library_screen(rid, story("S9"))
+        (screens / "goods_receipts.js").write_text(
+            'export default { title: "Goods receipts", story: "S9", async render(root, { api }) { root.append(h("div", {}, ; } };\n',
+            encoding="utf-8")
+        (screens / "receipt_detail.js").write_text(
+            'export default { title: "Receipt", story: "S9", async render(root) { root.append("x"); } };\n', encoding="utf-8")
+        (screens / "goods_in.js").write_text(
+            'export default { title: "Goods in", story: "S4", async render(root) { root.append("x"); } };\n', encoding="utf-8")
+        (routers / "goods_receipts.py").write_text("from fastapi import APIRouter\nrouter = APIRouter()\n", encoding="utf-8")
+        mine = build_stage._library_screen(rid, story("S9"))
+        expect("the screen belongs where the story's own is, or in a new file when it has none",
+               fresh["path"] == "frontend/screens/goods_in.js" and mine["path"] == "frontend/screens/goods_receipts.js"
+               and mine["name"] == "receiving", f"{fresh['path']} {mine['path']}")
+        note = build_stage._screen_note(rid, story("S9"))
+        expect("the Developer is shown it as the file to return, and told a screen that fails is replaced by it",
+               "THE LIBRARY HAS THIS STORY'S SCREEN" in note and "### frontend/screens/goods_receipts.js" in note
+               and "fin.workbench(root, ctx, fin.worklists.receiving(" in note and "is replaced by this one" in note
+               and build_stage._screen_note(rid, story("S11")) == "", note[:300])
+
+        asked: list[tuple[str, list[str]]] = []
+        said: list[str] = []
+
+        async def verify(run_id, key, timeout, sid, require_screen, own, tests, story=None):
+            asked.append((key, sorted(own)))
+            if key == "S9:r0:library":
+                return ExecResult(1, "COMPILED\n\n\n\n=== PLATFORM CHECKS: the frontend ===\n- backend/app/routers/goods_receipts.py: "
+                                     "line 78 writes `order.status`, a column the purchase_order workflow governs", "", False), True
+            return ExecResult(0, "COMPILED", "", False), True
+
+        async def emit(run_id, message, **more):
+            said.append(message)
+
+        build_stage._verify, build_stage.emit, ws_repo.commit = verify, emit, lambda *a, **k: "0000000"
+        failed = ExecResult(1, "- frontend/screens/goods_receipts.js: JavaScript syntax error", "", False)
+        own = {"frontend/screens/goods_receipts.js", "frontend/screens/receipt_detail.js", "backend/app/routers/goods_receipts.py"}
+        result, _, done = asyncio.run(build_stage._fall_back_to_library(
+            rid, {"run_id": rid}, story("S9"), failed, "S9:r0", 60, True, own, []))
+        now = (screens / "goods_receipts.js").read_text(encoding="utf-8")
+        expect("a screen still failing when its repairs are spent is replaced by the library's, and the story passes",
+               result.ok and "fin.worklists.receiving(" in now and 'story: "S9"' in now and done["name"] == "receiving"
+               and not (screens / "receipt_detail.js").exists() and (screens / "goods_in.js").exists()
+               and "stands in its place" in said[0], f"{result.stdout} {done} {said}")
+        expect("a router of the story's that the checks still fault goes with it: the library's screen does not call it",
+               not (routers / "goods_receipts.py").exists() and [k for k, _ in asked] == ["S9:r0:library", "S9:r0:library:bare"]
+               and asked[1][1] == ["frontend/screens/goods_receipts.js"]
+               and sorted(done["removed"]) == ["backend/app/routers/goods_receipts.py", "frontend/screens/receipt_detail.js"],
+               f"{asked} {done}")
+        # A story whose router still answers with an error after its repair (the API smoke check).
+        (screens / "approval_queue.js").write_text(
+            'export default { title: "Approval queue", story: "S2", async render(root, { api }) { '
+            'root.append(String((await api("/approval-queue")).length)); } };\n', encoding="utf-8")
+        (routers / "approval_queue.py").write_text(
+            'from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.get("/approval-queue")\ndef waiting():\n    return []\n',
+            encoding="utf-8")
+        green = {"story_id": "S2", "status": "green", "tests": [],
+                 "files": ["frontend/screens/approval_queue.js", "backend/app/routers/approval_queue.py"]}
+        state = {"run_id": rid, "sprint": {"stories": [{"id": "S2"}]}, "backlog": {"stories": [story("S2")]}}
+        build_stage._story = lambda st, sid: story(sid)
+        passed_ = asyncio.run(build_stage._library_for_router(
+            rid, state, green, ["backend/app/routers/approval_queue.py"], "its endpoint still answers 500", "S2:r0:smoke", 60, True))
+        now = (screens / "approval_queue.js").read_text(encoding="utf-8")
+        expect("a story whose router still answers 500 gets the library's screen and API in place of its own",
+               passed_ and 'fin.worklists.approvals({ id: "s2-approvals", of: "requisition" })' in now
+               and not (routers / "approval_queue.py").exists() and green["library_screen"]["name"] == "approvals"
+               and green["files"] == ["frontend/screens/approval_queue.js"] and asked[-1][0] == "S2:r0:smoke:library",
+               f"{passed_} {green} {asked[-1]}")
+        (routers / "orders.py").write_text(
+            'from fastapi import APIRouter\nrouter = APIRouter()\n\n\n@router.get("/order-queue")\ndef waiting():\n    return []\n',
+            encoding="utf-8")
+        (screens / "team.js").write_text(
+            'export default { title: "Team", story: "S7", async render(root, { api }) { '
+            'root.append(String((await api("/order-queue")).length)); } };\n', encoding="utf-8")
+        other = {"story_id": "S3", "status": "green", "tests": [], "files": ["backend/app/routers/orders.py"]}
+        kept_ = asyncio.run(build_stage._library_for_router(
+            rid, state, other, ["backend/app/routers/orders.py"], "its endpoint still answers 500", "S3:r0:smoke", 60, True))
+        expect("a router another story's screen calls stays, and the story is not passed for its new screen alone",
+               kept_ is False and (routers / "orders.py").exists() and (screens / "ordering.js").exists(), f"{kept_} {other}")
+        asked.clear()
+        none = asyncio.run(build_stage._fall_back_to_library(
+            rid, {"run_id": rid}, story("S11"), failed, "S11:r0", 60, True, set(), []))
+        expect("a story the library has no screen for is left as it is", none is None and not asked)
+    finally:
+        build_stage._verify, build_stage.emit, ws_repo.commit, build_stage._story = kept
+        overlays.active = before
+        for leftover in ("goods_receipts.js", "receipt_detail.js", "goods_in.js", "approval_queue.js", "team.js", "ordering.js"):
+            (screens / leftover).unlink(missing_ok=True)
+        for leftover in ("goods_receipts.py", "approval_queue.py", "orders.py"):
+            (routers / leftover).unlink(missing_ok=True)
 
 
 # ---- the library inside an application -----------------------------------------------------------

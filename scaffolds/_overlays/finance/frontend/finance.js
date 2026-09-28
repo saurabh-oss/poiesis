@@ -2049,7 +2049,7 @@ export const TOOLS = {
 const SOURCES = {
   documents: (view, env, state) => env.data.documents({ entity: view.entity, status: view.status, dated: false, sort: view.sort, limit: view.limit || 500,
     mine: state.mine && OWNED[view.entity] ? true : undefined, ...(view.query || {}) }),
-  approvals: (view, env) => env.data.approvals({ entity: view.of, ...(view.query || {}) }),
+  approvals: (view, env) => env.data.approvals({ entity: view.of || env.spec.of, ...(view.query || {}) }),
   payable: (view, env) => env.data.payable(view.query || {}).then((r) => ({ ...r, rows: (r.rows || []).map((x) => ({ ...x, id: x.invoice_id })) })),
   renewals: (view, env) => env.data.renewals({ within: 180, ...(view.query || {}) }).then((r) => ({ ...r, amount: r.annual_value })),
 };
@@ -2083,6 +2083,7 @@ const VIEW_COLUMNS = {
  *     create: "requisition",                            // a "New" button: the library's requisition form, or { label, permission, run: async (env) => … }
  *     tools: ["propose_run"],                           // buttons above the rows (TOOLS), or { label, icon, run: async (env) => "Done" }
  *     columns: { purchase_order: [...] },               // columns of one's own for an entity; left out, the standard ones
+ *     of: "requisition",                                // an approval queue of one kind of record; left out, of every kind
  *   });
  *
  * A view: { key, label, icon?, entity?, status?: "a,b", sort?, query?: { overdue: true }, filter?: (row, env) => bool,

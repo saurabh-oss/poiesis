@@ -21,6 +21,7 @@ department is adding a directory, not editing the orchestrator:
       developer: prompts/developer.md
     standard: backend/app/finance/standard.py    # ENTITIES, summary(), gaps(): the entities it expects
     demo: backend/app/finance/demo.py            # rows(tables, today=): data for those entities
+    screens: backend/app/finance/screens.py      # suggest(story, tables): its screen nearest a story
     library_tests: [tests/test_finance_library.py]
     reference: [[frontend/screens/example_finance.js, 3400]]     # worked examples shown to the Developer
     settings: [ERP_, FISCAL_, FINANCE_, BASE_CURRENCY]           # APPS_<these> reach the app's environment
@@ -198,6 +199,24 @@ def references(names: list[str] | None = None) -> list[tuple[str, int]]:
             elif isinstance(item, str):
                 out.append((item, 2000))
     return out
+
+
+def screen_for(story: dict[str, Any], tables: Any = (), names: list[str] | None = None) -> dict[str, Any] | None:
+    """The screen an overlay's library has for a story, the nearest of them all: a whole file
+    that works as it stands ({"kind", "name", "title", "file", "why", "score", "content", "overlay"}).
+    None when no library has one, or the story is not clearly any of theirs."""
+    best: dict[str, Any] | None = None
+    for n in (names if names is not None else active()):
+        mod = module(n, "screens")
+        if mod is None or not hasattr(mod, "suggest"):
+            continue
+        try:
+            found = mod.suggest(story, list(tables or ()))
+        except Exception:  # noqa: BLE001 — a suggestion is a help; without one the story is built as any other
+            found = None
+        if found and found.get("content") and (best is None or found.get("score", 0) > best.get("score", 0)):
+            best = {**found, "overlay": n}
+    return best
 
 
 def settings_prefixes(names: list[str] | None = None) -> tuple[str, ...]:

@@ -51,7 +51,7 @@ review:
   ship_threshold: 65
   release_requires_working_app: true
   release_requires_ship_verdict: false
-  max_human_rebuilds: 2
+  max_human_rebuilds: 3           # a person who tried it and found a defect can send it back once more
   weights:
     acceptance_criteria_met: 0.40
     reuse_compliance: 0.15      # the library is the reuse that matters: a screen that redraws what the kit draws is a finding

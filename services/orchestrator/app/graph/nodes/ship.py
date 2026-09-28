@@ -439,6 +439,25 @@ async def review(state: RunState) -> RunState:
     return {"review": verdict}
 
 
+def stakeholder_findings(notes: str, stories: set[str]) -> list[dict[str, Any]]:
+    """What a person who sent the increment back said, as findings the build reads.
+
+    A note that names its stories ("S2: Approve answers 409") goes to those stories, and only they
+    are rebuilt; one that names none goes to every story, as before. Someone who tried the
+    application and found one button that fails should not cost the five stories that work.
+    """
+    text = str(notes or "").strip()
+    if not text:
+        return []
+    named = [s for s in dict.fromkeys(_STORY_ID.findall(text)) if s in stories]
+    finding = {"severity": "blocker", "file": "(stakeholder)",
+               "finding": f"The stakeholder sent this back: {text}", "required_fix": text}
+    return [{**finding, "story_id": s} for s in named] or [finding]
+
+
+_STORY_ID = re.compile(r"\bS\d+\b")
+
+
 async def release(state: RunState) -> RunState:
     run_id = state["run_id"]
     await set_stage(run_id, "release")
@@ -571,11 +590,7 @@ async def release(state: RunState) -> RunState:
         await emit(run_id, "Sent back for another build round"
                            + (f": {notes_in}" if notes_in else ""),
                    agent="governance", stage="release", level="warn", data=response)
-        findings = list(rv.get("blocking_findings") or [])
-        if notes_in:
-            findings.insert(0, {"severity": "blocker", "file": "(stakeholder)",
-                                "finding": f"The stakeholder sent this back: {notes_in}",
-                                "required_fix": notes_in})
+        findings = stakeholder_findings(notes_in, all_stories) + list(rv.get("blocking_findings") or [])
         await tracker.on_release(run_id, state, {"status": "rebuild", "notes": notes_in})
         return {"release": {"status": "rebuild", "notes": notes_in},
                 "human_rebuilds": rebuilds + 1,

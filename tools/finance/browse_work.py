@@ -101,8 +101,8 @@ def main() -> int:
         nadia.text_ok(".modal")
         nadia.shot("new-requisition")
         nadia.page.locator(".modal [name=amount]").fill("0")
-        nadia.page.locator(".modal button[type=submit]").click()
         nadia.allowed = {"/finance/requisitions"}
+        nadia.page.locator(".modal button[type=submit]").click()
         nadia.page.wait_for_selector(".modal .error-text:not(:empty)", timeout=15000)
         refused = nadia.page.locator(".modal .error-text").inner_text()
         expect("a request for nothing is refused in the form, with its rule", refused.startswith("PROC-02"), refused)

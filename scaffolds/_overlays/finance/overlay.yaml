@@ -31,6 +31,9 @@ prompts:
 standard: backend/app/finance/standard.py
 demo: backend/app/finance/demo.py
 starter: backend/app/finance/starter.py
+# The screen of the library a story is nearest to (suggest(story, tables)): what the Developer
+# starts a story's screen from, and what stands in for a screen of its own that does not pass.
+screens: backend/app/finance/screens.py
 
 # Its own rules are proven by its own tests, which run with the application's.
 library_tests:
