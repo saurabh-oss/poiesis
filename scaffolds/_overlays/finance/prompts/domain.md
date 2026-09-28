@@ -45,7 +45,8 @@ WHAT YOU DO WITH THE FIVE FILES. Return each complete.
   Its settings: doa, tolerance, po_required_above, po_exempt_categories (category codes or words of their names:
   ["rent", "utilities", "telecoms"]), quote_bands as the brief states them, (above this amount, quotes needed, tender needed):
   [(10_000, 3, False)] is three quotes above 10,000 and one below,
-  budget_warning_pct, material_pct, material_amount, expiring_days, duplicate_days, split_days, orderable,
+  budget_warning_pct, budget_control ("warn", or "block" when the brief says a request above the budget cannot be
+  submitted), material_pct, material_amount, expiring_days, duplicate_days, split_days, orderable,
   late_interest_pct, tax_rates, approval_hours, exception_hours, escalate_to (a role in ROLES). ONLY these
   names. A number of the brief that is none of them (a discount threshold, a retention period) is a constant of
   rules.py, used by the rule that states it. The last entry of `doa` is `(None, role)`: someone approves any amount. The

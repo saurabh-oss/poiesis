@@ -841,6 +841,7 @@ class Policy:
     po_exempt_categories: tuple[str, ...] = ("FA-RN", "FA-UT", "IT-TC")   # … except rent, utilities, telecoms (category codes)
     quote_bands: tuple[tuple[Any, int, bool], ...] = QUOTE_BANDS          # PROC-10: (up to, quotes, tender)
     budget_warning_pct: float = BUDGET_WARNING_PCT             # FIN-02: utilisation that warns
+    budget_control: str = "warn"                               # FIN-02: "block" refuses a request above the year's budget
     material_pct: float = MATERIAL_PCT                         # FIN-07: a variance of this share of budget …
     material_amount: Any = MATERIAL_AMOUNT                     # … and at least this much is material
     expiring_days: int = EXPIRING_DAYS                         # PROC-07: a contract is expiring this long before it ends
@@ -921,6 +922,13 @@ def _read(name: str, value: Any) -> Any:
         if isinstance(value, Tolerance):
             return value
         return Tolerance(**value) if isinstance(value, dict) else Tolerance(*value)
+    if name == "budget_control":
+        word = str(value).strip().lower()
+        if word in ("block", "stop", "hard", "refuse", "true"):
+            return "block"
+        if word in ("warn", "warning", "soft", "advise", "false", "none"):
+            return "warn"
+        raise ValueError('it is "warn" (a request above the budget is flagged) or "block" (it cannot be submitted)')
     if name == "escalate_to":
         if value is not None and not isinstance(value, str):
             raise ValueError('it is one role, by its key in policy.py\'s ROLES: escalate_to="finance_controller"')

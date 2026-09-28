@@ -14,13 +14,16 @@
 #     lifecycles of each record, and the operations people perform on them;
 #   - an insight API and a dashboard kit: a dashboard is a description, with its period
 #     picker, comparison, filters, drill-down, export and personal arrangement;
+#   - work screens that are descriptions too (requests, the approval queue, ordering, goods
+#     in, the invoice desk, payment runs, suppliers, contracts), with their tabs and counts,
+#     forms, actions by role and refusals that name their rule;
 #   - an ERP connector.
 #
 # So a run spends its effort on what this organisation does differently: its own rules
 # and thresholds, its own records, and the screens its people asked for.
 
 name: finance
-description: A finance and procurement application — the enterprise pack with the finance library (standard entities and data, tested rules and lifecycles, an insight API, a dashboard kit, an ERP connector).
+description: A finance and procurement application — the enterprise pack with the finance library (standard entities and data, tested rules and lifecycles, an insight API, a dashboard kit, work screens, an ERP connector).
 
 gates:
   clarify:              { mode: auto }
@@ -72,10 +75,14 @@ product:
     control, accounts payable, purchase to pay, suppliers, controls, savings) with period
     picker, comparison with last year or the period before, filters by cost centre, category
     and supplier, the rows behind every number, CSV export and each person's own arrangement;
-    and the operations of the function (three-way match, goods receipt, payment run proposal,
-    budget check). A story for a dashboard therefore says WHAT IT SHOWS AND TO WHOM: which
-    figures, which breakdowns, for which role, fixed to which team, against which targets —
-    not how a chart is drawn.
+    whole work screens (my requisitions with the form that raises one, the approval queue,
+    ordering, goods in, the invoice desk, payment runs, the supplier list, contracts) with
+    their tabs, counts, forms and actions; and the operations of the function (raise a
+    requisition, raise and send its order, goods receipt, three-way match, payment run
+    proposal, budget check). A story for a dashboard therefore says WHAT IT SHOWS AND TO
+    WHOM: which figures, which breakdowns, for which role, fixed to which team, against which
+    targets — not how a chart is drawn. A story for a work screen says WHO WORKS ON IT AND
+    WHAT THEY DO THERE: which records, in which states, which actions, under which rule.
     Stories are the organisation's own screens and flows, each one a screen or a visible
     action a named role performs on the demonstration data. The first story is the overview
     dashboard of the person the brief is written for. Then the work screens: a queue with its
@@ -109,6 +116,7 @@ archetypes:
       - Every screen shows the demonstration data on first open
       - The domain imports and its rule tests pass, the library's among them
       - Every figure on a dashboard comes from the insight API or the domain, not from arithmetic in a screen
+      - A story the finance library has a screen for uses that screen
 
 definition_of_ready:
   - Story has at least two acceptance criteria written as Given/When/Then

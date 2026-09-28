@@ -436,11 +436,19 @@ async def main() -> int:
 
         repo.write_files(rid, {"backend/app/routers/unseeded.py": UNSEEDED_ROUTER,
                                "frontend/screens/unseeded.js": UNSEEDED_SCREEN})
+        # The scaffold seeds its example table now: take the rows out, so that the table
+        # the router reads is one nothing seeds, which is the case being checked.
+        import re
+        init_sql = repo.workspace_path(rid).joinpath("db/init.sql")
+        seeded_sql = init_sql.read_text(encoding="utf-8")
+        init_sql.write_text(re.sub(r"INSERT INTO example\b.*?;", "", seeded_sql, flags=re.S | re.I),
+                            encoding="utf-8", newline="\n")
         checks.regenerate_registry(rid)
         c = await checks.platform_checks(rid, "S5", True)
         show("checks for a GET on an unseeded table", c.stdout)
         expect("a GET endpoint over an unseeded table is caught",
                not c.ok and "nothing seeds the `example` table" in c.stdout)
+        init_sql.write_text(seeded_sql, encoding="utf-8", newline="\n")
         repo.workspace_path(rid).joinpath("backend/app/routers/unseeded.py").unlink()
         repo.workspace_path(rid).joinpath("frontend/screens/unseeded.js").unlink()
         checks.regenerate_registry(rid)

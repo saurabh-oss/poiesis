@@ -144,6 +144,19 @@ automatic close by BR-01 or by BR-12), the caller names the one that took the mo
 Entering a state with an SLA starts a clock; the scheduler escalates a clock past due to the
 `escalate` role.
 
+An approval is a decision on a request, not a move of the record: from code it is
+`decide(db, approval_id, True, note)` (`from ..kernel import decide`; `False` rejects), from a
+screen `POST /api/platform/approvals/<id>/approve`. A router that tries
+`transition(db, requisition, "approve")` is refused at runtime (409) and is found by the
+platform's static check before it runs.
+
+Records that **arrive already waiting** (loaded as demonstration data, imported, migrated into
+a state a transition leaves records waiting in) are given the approval request they wait on:
+`workflow.adopt()` runs a few seconds after the application starts and at every round of the
+scheduler. The approver is the one the record calls for, the requester the name the record
+holds, and the audit trail says the request was found waiting. Without it a freshly loaded
+application shows twenty requisitions "awaiting approval" and an empty approval queue.
+
 ### Audit trail
 
 A SQLAlchemy listener records every insert, update and delete of an application table made

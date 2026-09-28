@@ -265,7 +265,16 @@ def waiting(db: Session, entity: str = "") -> list[dict[str, Any]]:
                     "requested_by": a.requested_by_name, "requested_at": a.requested_at, "reason": a.reason,
                     "due_at": a.due_at, "overdue": bool(a.due_at and aware(a.due_at) < utcnow()),
                     "can_decide": bool(mine and a.requested_by_id != actor.id), "record": rec})
-    return out
+
+    def since(item: dict[str, Any]) -> str:
+        # A queue is worked oldest first, by when the record was raised: the request for its
+        # approval may be younger than it (a record that arrived already waiting).
+        for name in ("created_at", "submitted_at", "order_date", "invoice_date", "run_date"):
+            value = get(item["record"], name)
+            if value:
+                return str(value.isoformat() if hasattr(value, "isoformat") else value)
+        return str(item["requested_at"].isoformat() if item["requested_at"] else "")
+    return sorted(out, key=lambda item: (since(item), item["approval_id"]))
 
 
 # ------------------------------------------------------------------------------ matching
@@ -461,6 +470,19 @@ def propose_payment_run(db: Session, *, run_date: Any = None, due_by: Any = None
 
 # -------------------------------------------------------------------------------- budget
 
+def within_budget(db: Session, record: Any, amount: Any) -> None:
+    """Refuse (FIN-02) a request that takes its cost centre above the year's budget, where the
+    organisation set `budget_control="block"`. A budget change that was approved and applied is in
+    the budget already, so it is what lets the request through. Without a cost centre, a budget
+    table or a budget for the year there is nothing to hold the request to, and it passes."""
+    if fin.POLICY.budget_control != "block" or not get(record, "cost_center_id") or model("budget_line") is None:
+        return
+    position = budget_position(db, get(record, "cost_center_id"), requested=amount, on=get(record, "created_at") or today())
+    fin.check(not (position["budget"] > 0 and position["status"] == "exceeded"), "FIN-02",
+              position["message"] + ". It cannot be submitted until a budget change is approved",
+              cost_center_id=position["cost_center_id"], remaining=position["remaining"])
+
+
 def budget_position(db: Session, cost_center_id: Any, *, requested: Any = 0, on: Any = None,
                     spend_category_id: Any = None) -> dict[str, Any]:
     """What is left of a cost centre's budget for the fiscal year `on` falls in (FIN-02): the
@@ -529,7 +551,9 @@ def check_request(db: Session, requisition: Any) -> dict[str, Any]:
     if get(req, "cost_center_id") and model("budget_line") is not None:
         position = budget_position(db, req.cost_center_id, requested=amount, on=get(req, "created_at") or today())
         if position["budget"] > 0:
-            say("FIN-02", {"ok": "ok", "warning": "warn", "exceeded": "down"}[position["status"]], position["message"])
+            stops = position["status"] == "exceeded" and fin.POLICY.budget_control == "block"
+            say("FIN-02", {"ok": "ok", "warning": "warn", "exceeded": "down"}[position["status"]],
+                position["message"] + (". It cannot be submitted until a budget change is approved" if stops else ""))
     quotes = fin.quotes_needed(amount)
     if quotes["quotes"] > 1:
         say("PROC-10", "info", f"{quotes['quotes']} quotes are needed at this value"

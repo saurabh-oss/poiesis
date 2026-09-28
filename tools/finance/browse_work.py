@@ -151,6 +151,26 @@ def main() -> int:
         nadia.page.locator(".fin-work-bar .segmented button", has_text="My requests").click()
         nadia.settle()
 
+        # ---- a description written loosely is read for what was meant (screen_generous.js)
+        nadia.open("generous")
+        d = desk(nadia)
+        bar = [b.strip() for b in nadia.page.locator(".fin-work-bar button:not(.icon-btn)").all_inner_texts()]
+        acts = nadia.page.evaluate("() => [...new Set([...document.querySelectorAll('.fin-row-actions button')].map((b) => b.dataset.action + ':' + b.innerText.trim()))]")
+        expect("something to press written among the tabs is a button, and raising a record is offered once",
+               list(d["tabs"]) == ["draft", "waiting", "approved", "ordered", "cancelled"] and not d["failed"]
+               and sum(1 for b in bar if b.lower() == "new requisition") == 1 and "Buying policy" in bar, f"{list(d['tabs'])} {bar}")
+        expect("an action named by its key is the library's, under the story's label; one the library lacks is left out",
+               acts == ["submit:Send for approval"], str(acts))
+        nadia.page.locator(".fin-work-bar button", has_text="Buying policy").click()
+        expect("and the button does what it was given to do", "intranet" in toast(nadia))
+        nadia.page.locator(".fin-work-bar button", has_text="New requisition").click()
+        nadia.page.wait_for_selector(".modal form")
+        names = nadia.page.evaluate("() => [...document.querySelectorAll('.modal form [name]')].map((e) => e.name)")
+        expect("a form of its own for a record the library raises is the library's form, which knows the budget and the approver",
+               {"title", "amount", "cost_center_id", "needed_by", "justification"} <= set(names)
+               and nadia.page.locator(".modal .fin-live").count() == 1, str(names))
+        nadia.close_overlay()
+
         # ---- the budget holder decides
         tom = Session(browser, "tom")
         tom.open("work_approvals")

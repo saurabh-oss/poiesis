@@ -187,6 +187,7 @@ SETTINGS = (
      "an invoice still matches within 2% and 50"),
     ("po_required_above", ("invoice",), "1_000", "an invoice above this must name a purchase order"),
     ("budget_warning_pct", ("budget_line",), "90", "the share of the year's budget at which a request warns"),
+    ("budget_control", ("budget_line",), '"warn"', 'above the year\'s budget a request is flagged ("warn") or cannot be submitted ("block")'),
     ("material_pct", ("budget_line",), "5", "a variance of this share of budget, and at least 1,000, is material"),
     ("expiring_days", ("contract",), "90", "a contract is flagged this many days before it ends"),
     ("approval_hours", ("requisition", "purchase_order"), "48", "an approval may wait this long before it is escalated"),

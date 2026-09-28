@@ -87,7 +87,11 @@ comparison, filters, drill-down, CSV export and each person's own arrangement; *
 that are descriptions too (my requests, the approval queue, ordering, goods in, the invoice
 desk, payment runs, suppliers, contracts), with their tabs and counts, forms, actions by role
 and refusals that name their rule; and an **ERP connector**. The Developer describes what a
-screen shows and to whom; it does not draw a chart or write a queue.
+screen shows and to whom; it does not draw a chart or write a queue. For each story the library
+names the screen of its own that is nearest, the platform shows it to the Developer as the
+file to return, and under this pack a story the library has a screen for keeps that screen:
+in the first finance application every screen the library supplied did what it said when its
+buttons were pressed, and the work screens written by hand passed every check and did not.
 See [docs/FINANCE.md](docs/FINANCE.md), which also says how the next department is added.
 
 ## MVP mode: screens first

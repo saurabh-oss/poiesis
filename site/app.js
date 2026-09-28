@@ -92,27 +92,29 @@
   ];
 
   const GATES = [
-    ["clarify", "What the brief left ambiguous, where guessing wastes days", "auto", "require"],
-    ["approve_vision", "Whether the platform understood the problem at all", "auto", "require"],
-    ["approve_backlog", "Priority, and what is deliberately out of scope", "auto", "require"],
-    ["approve_architecture", "Whether a \"build new\" verdict is acceptable", "auto", "require"],
-    ["approve_sprint", "The scope of the first increment", "auto", "auto"],
-    ["failed_story", "Carry on, drop the story, or stop the sprint", "auto", "require"],
-    ["approve_release", "Release, release a base app, send it back, or hold", "require", "require"],
+    ["clarify", "What the brief left ambiguous, where guessing wastes days", "auto", "require", "auto"],
+    ["approve_vision", "Whether the platform understood the problem at all", "auto", "require", "auto"],
+    ["approve_backlog", "Priority, and what is deliberately out of scope", "auto", "require", "auto"],
+    ["approve_architecture", "Whether a \"build new\" verdict is acceptable", "auto", "require", "auto"],
+    ["approve_sprint", "The scope of the first increment", "auto", "auto", "auto"],
+    ["failed_story", "Carry on, drop the story, or stop the sprint", "auto", "require", "auto"],
+    ["approve_release", "Release, release a base app, send it back (naming the story), or hold", "require", "require", "require"],
   ];
+  const PACK_COLUMN = { mvp: 2, default: 3, finance: 4 };
   const PACKS = {
-    mvp: { repair: 3, rework: 1, tester: "off", ship: 60, weights: { "Acceptance criteria met": 45, "Operational safety": 30, "Maintainability": 15, "Reuse compliance": 5, "Test adequacy": 5 } },
-    default: { repair: 5, rework: 2, tester: "on", ship: 70, weights: { "Acceptance criteria met": 35, "Test adequacy": 20, "Reuse compliance": 15, "Maintainability": 15, "Operational safety": 15 } },
+    mvp: { repair: 3, rework: 1, tester: "off", ship: 60, library: "none", weights: { "Acceptance criteria met": 45, "Operational safety": 30, "Maintainability": 15, "Reuse compliance": 5, "Test adequacy": 5 } },
+    default: { repair: 5, rework: 2, tester: "on", ship: 70, library: "none", weights: { "Acceptance criteria met": 35, "Test adequacy": 20, "Reuse compliance": 15, "Maintainability": 15, "Operational safety": 15 } },
+    finance: { repair: 3, rework: 1, tester: "rule tests", ship: 65, library: "required", weights: { "Acceptance criteria met": 40, "Operational safety": 25, "Reuse compliance": 15, "Test adequacy": 10, "Maintainability": 10 } },
   };
 
   const LAYERS = [
     ["Compile", "every story", "< 1 s", ["Python that does not parse, with the file and line", "A syntax error means the Developer rewrites the whole file"]],
-    ["Backend checks", "every story", "< 1 s", ["A router that never creates `router`", "Routes at the root that swallow every other story's paths", "Model columns init.sql does not create", "A GET returning rows nothing seeds", "Imports that do not exist at runtime"]],
+    ["Backend checks", "every story", "< 1 s", ["A router that never creates `router`", "Routes at the root that swallow every other story's paths", "Model columns init.sql does not create", "A GET returning rows nothing seeds", "Imports that do not exist at runtime", "A status written past its workflow, or a record moved with a move its lifecycle does not have"]],
     ["Screen checks", "every story", "< 1 s", ["Calls to a path the API does not serve — the commonest cause of an empty screen", "The browser's alert/confirm instead of the UI kit", "A screen that gives up without an id", "render() using an argument it never receives", "JSX, placeholders, packages"]],
     ["Frontend check (Node)", "every story", "seconds", ["Every file parses", "Every screen imports without touching the DOM and exports title and render"]],
     ["init.sql on Postgres", "when it changes", "seconds", ["The schema really executes", "Model columns match the real tables"]],
     ["pytest in a sandbox", "full pack", "minutes", ["A throwaway container, no network, capped memory and time", "Tests that could never fail are findings for the Tester"]],
-    ["API smoke run", "after all stories", "~1 min", ["Every GET against a throwaway Postgres loaded from the app's own init.sql", "A 422 that only asks for query parameters is an endpoint needing input, not a failure", "A failing path gets one repair, then is smoked again"]],
+    ["API smoke run", "after all stories", "~1 min", ["Every GET against a throwaway Postgres loaded from the app's own init.sql", "A 422 that only asks for query parameters is an endpoint needing input, not a failure", "A failing path gets one repair, then is smoked again", "Still failing, where a department library has the story's screen: that screen and its API stand in"]],
     ["Browser check", "after every deploy", "~1 min", ["Every screen opened in headless Chromium and screenshotted", "Error panels, empty screens, 'undefined' / 'null' / 'NaN' on screen", "Data fetched but not shown", "Then it uses the screen: opens a row, switches tabs, presses \"New…\""]],
     ["Review", "after deploy", "minutes", ["Five weighted dimensions and blockers", "The Reviewer sees what each screen displayed, not only the code", "The release gate cannot offer 'release' for an app that does not work"]],
   ];
@@ -329,8 +331,8 @@
   function setPack(name, first) {
     const p = PACKS[name];
     $$(".pack-toggle button").forEach((b) => { const on = b.dataset.pack === name; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); });
-    GATES.forEach((g, i) => { const m = name === "mvp" ? g[2] : g[3]; gateRows[i].className = `mode ${m}`; gateRows[i].textContent = m === "require" ? "you decide" : "automatic"; });
-    for (const [id, v] of [["p-repair", p.repair], ["p-rework", p.rework], ["p-tester", p.tester], ["p-ship", p.ship]]) {
+    GATES.forEach((g, i) => { const m = g[PACK_COLUMN[name]]; gateRows[i].className = `mode ${m}`; gateRows[i].textContent = m === "require" ? "you decide" : "automatic"; });
+    for (const [id, v] of [["p-repair", p.repair], ["p-rework", p.rework], ["p-tester", p.tester], ["p-ship", p.ship], ["p-library", p.library]]) {
       const el = $(`#${id}`);
       const b = $("b", el);
       if (!first && b.textContent !== String(v)) { el.classList.add("changed"); setTimeout(() => el.classList.remove("changed"), 900); }
@@ -547,6 +549,8 @@
     ["codemap-flow", "Request flows", "Traced by the local model", "localhost:3000/runs/7fdad83a…/codebase", "A sequence diagram for every story endpoint, from the request to the database — written by the local model through ArchiLens."],
     ["observability", "Observability", "Where the time and the GPU go", "localhost:3000/observability", "Dependency health, model calls and tokens over time, response-time percentiles, GPU busy, model time by agent, and errors grouped by run."],
     ["portfolio", "Portfolio recall", "What already exists", "localhost:3000/knowledge", "The same recall the Architect and Developer use: components by word and by meaning, past stories with their outcome, lessons and decisions."],
+    ["procure-executive", "ProcureDesk · Executive summary", "Built from the finance library", "localhost:8118/#/executive_summary", "A finance application from a procurement brief: spend against budget and last year, open commitments, payables and overdue, purchase order coverage against its target. Every figure opens the rows behind it."],
+    ["procure-ordering", "ProcureDesk · Ordering", "A work screen is a description", "localhost:8118/#/purchase_orders", "Approved requisitions to turn into orders, orders to send to the supplier and the ERP, orders on their way. The whole screen file is an import, a title and one call."],
     ["dupeguard-scan", "DupeGuard · Scan now", "What it built", "localhost:8114/#/duplicate_scan", "The generated app: 22 new tickets scanned — same-customer chasers closed at 97.5 and 99, outage reports linked through known issues, uncertain pairs sent to review, each with its rule."],
     ["dupeguard-intake", "DupeGuard · Deflection", "Prevention at intake", "localhost:8114/#/ticket_intake", "As a customer types, an active known issue is recognised and its message shown before a duplicate ticket is ever raised."],
   ];
@@ -566,6 +570,71 @@
   TOUR.forEach(([, title, sub], i) => list.append(h("button", { class: "tour-item", onclick: () => pickTour(i, true) }, h("b", {}, title), h("span", {}, sub), h("div", { class: "prog" }, h("i")))));
   TOUR.forEach(([file]) => { const pre = new Image(); pre.src = `assets/${file}.webp`; });
   new IntersectionObserver((entries, obs) => entries.forEach((en) => { if (en.isIntersecting) { pickTour(0); obs.disconnect(); } }), { threshold: 0.3 }).observe(list);
+
+  /* ---------------------------------------------------------------- department libraries */
+  const LIBRARY = [
+    { tab: "A dashboard", file: "procure-executive", url: "localhost:8118/#/executive_summary",
+      code: [["c", "// frontend/screens/spend.js: the whole screen"], 'import fin from "../finance.js";', "",
+        "export default {", '  title: "Spend overview", story: "S3", icon: "pie",', "  async render(root, ctx) {",
+        "    await fin.dashboard(root, ctx, fin.blueprints.spend({", '      period: { value: "this_quarter", compare: "prior_year" },',
+        '      fixed: { department: "Operations" },', '      kpis: ["spend", "po_coverage", "maverick_spend"],',
+        "      targets: { po_coverage: 95 },", '      add: [{ type: "budget", by: "cost_center", span: 6 }],', "    }));", "  },", "};"],
+      note: "A dashboard is a description: which figures, for whom, against which targets. What comes with it:",
+      brings: ["A period picker with the fiscal year's presets, and a comparison", "Filters by cost centre, category and supplier",
+        "The rows behind every number, down to the record", "CSV export, and each person's own arrangement"],
+      caption: "ProcureDesk's executive summary, as the CFO. The Developer wrote what it shows; the kit drew it." },
+    { tab: "A work screen", file: "procure-approval", url: "localhost:8118/#/approval_queue",
+      code: [["c", "// frontend/screens/approval_queue.js: the whole screen"], 'import fin from "../finance.js";', "",
+        "export default {", '  title: "Approval queue", story: "S2", icon: "shield",', "  async render(root, ctx) {",
+        "    await fin.workbench(root, ctx,", '      fin.worklists.approvals({ of: "requisition" }));', "  },", "};", "",
+        ["c", "// also: requisitions, ordering, receiving, invoices,"], ["c", "// paymentRuns, suppliers, contracts"]],
+      note: "A queue or a desk is a description too: which records, in which states, which actions. What comes with it:",
+      brings: ["Tabs with their counts and values, oldest first", "The record with what the rules say, its budget and its approval chain",
+        "Actions offered to the roles that may take them", "A refusal shown where the person is, with the rule that refused"],
+      caption: "A requisition waiting for the budget holder: who asked, what it leaves of the budget, who else would have to approve." },
+    { tab: "The organisation's numbers", file: "procure-requisition", url: "localhost:8118/#/requisition_validation",
+      code: [["c", "# backend/app/domain/rules.py: set once, read everywhere"], "fin.configure(", '    doa=[(2_000, "budget_holder"),',
+        '         (20_000, "head_of_department"),', '         (None, "cfo")],                       # BR-01',
+        "    tolerance=fin.Tolerance(price_pct=1, amount_abs=25),  # BR-05", '    budget_control="block",                        # BR-03',
+        "    po_required_above=500,                         # BR-06", ")", "", '@rule("BR-05", "An invoice matches within 1% and 25",',
+        '      source="BRD 4", kind="validation")', "def match(order, receipts, invoice):", "    return fin.three_way_match(order, receipts, invoice)"],
+      note: "One home for an organisation's numbers. The rules, the lifecycles, the operations and the screens all read them:",
+      brings: ["The approver a requisition waits for follows the amount", "The form says so while it is filled in, with what is left of the budget",
+        "A budget warns, or refuses the submission until a change is approved", "A misspelt setting is reported, never silently lost"],
+      caption: "Raising a requisition: the approver and the budget position appear as the amount is typed." },
+  ];
+  const libTabs = $("#libTabs");
+  if (libTabs) {
+    const libImg = $("#libImg");
+    const pickLibrary = (i) => {
+      const item = LIBRARY[i];
+      $$("button", libTabs).forEach((b, k) => { b.classList.toggle("on", k === i); b.setAttribute("aria-selected", String(k === i)); });
+      const code = $("#libCode");
+      code.replaceChildren(...item.code.flatMap((line, k) => [k ? "\n" : "", Array.isArray(line) ? h("span", { class: line[0] }, line[1]) : line]));
+      $("#libNote").textContent = item.note;
+      $("#libWith").replaceChildren(...item.brings.map((t) => h("li", {}, h("span", {}, t))));
+      libImg.classList.add("out");
+      setTimeout(() => { libImg.onload = () => libImg.classList.remove("out"); libImg.src = `assets/${item.file}.webp`; libImg.alt = item.caption; }, 220);
+      $("#libUrl").textContent = item.url;
+      $("#libCaption").textContent = item.caption;
+    };
+    LIBRARY.forEach((item, i) => libTabs.append(h("button", { role: "tab", onclick: () => pickLibrary(i) }, item.tab)));
+    pickLibrary(0);
+
+    // The Reviewer's score of ProcureDesk, round by round, from the run's own record.
+    const ROUNDS = [
+      [49, "First build", "Dashboards green at once; two work screens broken", "bad"],
+      [51, "Rework", "The same screens, repaired three more times", "bad"],
+      [73, "Library screen shown", "Goods in returned as shown, no repair", "mid"],
+      [95, "Every screen opens", "A failing router replaced by the library's", "good"],
+      [68, "The tidy-up", "Pressed by hand, two screens did nothing right; asked to tidy, the model broke a third", "bad"],
+      [98, "Library screens required", "A purchase raised, approved, ordered, sent and received", "good"],
+    ];
+    const path = $("#scorePath");
+    ROUNDS.forEach(([score, title, what, tone], i) => path.append(h("div", { class: `round ${tone}` },
+      h("div", { class: "round-bar" }, h("i", { style: { height: `${score}%`, transitionDelay: `${i * 110}ms` } }), h("b", {}, String(score))),
+      h("strong", {}, title), h("span", {}, what))));
+  }
 
   /* ---------------------------------------------------------------- the run's timeline */
   const GANTT = [
@@ -592,6 +661,7 @@
   const DOCS = [
     ["SETUP-WINDOWS", "Setup", "Install on a GPU laptop"], ["FIRST-RUN", "First run", "Brief to running app"], ["OPERATIONS", "Operations", "Start, check, repair"],
     ["ARCHITECTURE", "Architecture", "Design positions"], ["AGENTS", "Agents", "Contracts and prompts"], ["CHECKS", "Verification", "Every check, and why"],
+    ["ENTERPRISE", "Enterprise", "Sign-in, workflows, audit, rules"], ["CONNECTORS", "Connectors", "Jira, ServiceNow, ERP, mail"], ["FINANCE", "Finance library", "A department, ready to compose"],
     ["API", "API", "Script the platform"], ["CODEMAPS", "Code maps", "The ArchiLens integration"], ["PLANE", "Boards", "Plane, self-hosted"], ["CASE-STUDY-DUPEGUARD", "Case study", "One run, honestly"],
   ];
   const docs = $("#docs");

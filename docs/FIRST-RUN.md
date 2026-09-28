@@ -68,7 +68,9 @@ decide. The gate offers:
 - **Release** — only if every story is green and the app works in the browser;
 - **Release a base app** — drop whatever is broken (only files a single broken story owns),
   redeploy what remains on a fresh database and release that;
-- **Send it back** — another build round with your notes (bounded by `max_human_rebuilds`);
+- **Send it back** — another build round with your notes (bounded by `max_human_rebuilds`). Name
+  the stories your notes are about ("S3: creating an order creates no order") and only those
+  are rebuilt; a send-back that names its stories is always accepted;
 - **Hold** — keep it running for inspection.
 
 ## Reading the result

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Poiesis — from a business brief to a working, verified application</title>
-  <meta name="description" content="Poiesis is an autonomous engineering platform: ten AI agents turn a stakeholder's brief into a deployed, browser-verified application, with typed human gates, enforced reuse and an audit trail — on local models, on your own GPU.">
+  <meta name="description" content="Poiesis is an autonomous engineering platform: ten AI agents turn a stakeholder's brief into a deployed, browser-verified application, with typed human gates, enforced reuse, department libraries (finance and procurement first) and an audit trail — on local models, on your own GPU.">
   <meta name="theme-color" content="#0a2d6b">
   <meta property="og:title" content="Poiesis — autonomous engineering platform">
   <meta property="og:description" content="One brief in. A working, verified increment out — with an audit trail back to the sentence that asked for it.">
@@ -28,6 +28,7 @@
       <a href="#verify">Verification</a>
       <a href="#architecture">Architecture</a>
       <a href="#tour">Product</a>
+      <a href="#libraries">Libraries</a>
       <a href="#case">Case study</a>
       <a href="#start">Get started</a>
     </nav>
@@ -167,6 +168,7 @@
     <div class="pack-toggle" role="tablist" aria-label="Domain pack">
       <button class="on" data-pack="mvp" role="tab" aria-selected="true">mvp pack</button>
       <button data-pack="default" role="tab" aria-selected="false">default pack</button>
+      <button data-pack="finance" role="tab" aria-selected="false">finance pack</button>
     </div>
     <div class="gov">
       <div class="gates" id="gateList"></div>
@@ -175,6 +177,7 @@
         <div class="pol" id="p-rework"><span>Automatic rework rounds</span><b>1</b></div>
         <div class="pol" id="p-tester"><span>Tester & pytest</span><b>off</b></div>
         <div class="pol" id="p-ship"><span>Ship threshold</span><b>60</b></div>
+        <div class="pol" id="p-library"><span>Department library</span><b>none</b></div>
         <div class="verdict">
           <h4>The verdict is arithmetic</h4>
           <p>The Reviewer scores five weighted dimensions; shipping is the score against the threshold plus a blocker check — not the model's opinion.</p>
@@ -233,8 +236,86 @@
   </div>
 </section>
 
+<!-- ================================================================== DEPARTMENT LIBRARIES -->
+<section class="block alt" id="libraries">
+  <div class="wrap">
+    <span class="kicker">Department libraries</span>
+    <h2 class="reveal">A department's work, ready to compose.</h2>
+    <p class="intro reveal">
+      What every finance or procurement application shares is written once, tested, and handed to each run:
+      the records, two years of coherent data, the rules, the lifecycles, the dashboards and the screens
+      people work on. A run spends its effort on what this organisation does differently. Finance and
+      procurement is the first library; the next department is a directory with a manifest, not a change
+      to the platform.
+    </p>
+
+    <div class="libnums reveal">
+      <div><b>16</b><span>standard entities, written by the platform itself</span></div>
+      <div><b>22</b><span>tested rules, each with an id</span></div>
+      <div><b>31</b><span>figures from one insight API</span></div>
+      <div><b>8</b><span>dashboards, each a description</span></div>
+      <div><b>8</b><span>work screens, each a description</span></div>
+      <div><b>27</b><span>months of demonstration data</span></div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="What a screen is" id="libTabs"></div>
+    <div class="lib">
+      <div class="lib-side">
+        <div class="code" id="libCode" aria-label="The whole screen"></div>
+        <p class="lib-note" id="libNote"></p>
+        <ul class="checklist" id="libWith"></ul>
+      </div>
+      <div class="browser reveal">
+        <div class="browser-bar"><span class="lights" aria-hidden="true"><i></i><i></i><i></i></span><div class="url" id="libUrl">localhost:8118</div></div>
+        <div class="shot"><img id="libImg" src="assets/procure-executive.webp" alt="" width="1480" height="960" loading="lazy"></div>
+        <div class="caption" id="libCaption"></div>
+      </div>
+    </div>
+
+    <div class="split" style="margin-top:34px">
+      <div class="card reveal">
+        <h3><span class="pill good">Brought</span> What the platform brings</h3>
+        <ul>
+          <li><b>The records</b>: supplier, requisition, purchase order, goods receipt, invoice, payment run, contract, budget line and eight more, in the data model, the schema and the API.</li>
+          <li><b>The rules</b>: three-way match, approval by amount, segregation of duties, budget availability, duplicate invoices, no order no pay, quotes by value, split orders.</li>
+          <li><b>The work</b>: raise a requisition, raise and send its order, receive goods, match an invoice, propose a payment run, each through the record's lifecycle and refused with its rule.</li>
+          <li><b>An ERP connector</b>, in its sandbox until credentials are set.</li>
+        </ul>
+      </div>
+      <div class="card reveal">
+        <h3><span class="pill bad">Asked</span> What a run adds</h3>
+        <ul>
+          <li><b>The organisation's numbers</b>, set once: who approves up to which amount, what still matches, whether a budget warns or blocks.</li>
+          <li><b>The brief's own rules</b>, under the brief's ids, calling the library's.</li>
+          <li><b>What each screen shows and to whom</b>: which figures, which tabs, which actions, fixed to which team.</li>
+          <li><b>Whatever the library does not have</b>: the organisation's own records and screens.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3 class="lib-h reveal">What the first application taught</h3>
+    <p class="intro reveal" style="margin-bottom:22px">
+      ProcureDesk was built from a procurement brief on local models and sent round until it was right.
+      Each round changed the platform, not the application. The Reviewer's score, round by round:
+    </p>
+    <div class="path reveal" id="scorePath"></div>
+    <div class="lessons">
+      <div class="card reveal"><h3>Prompts are not enough</h3><p>Sent back for rework, the model repaired its own two-hundred-line screen three more times, with the one-line screen described in its prompt.</p></div>
+      <div class="card reveal"><h3>Start from the library</h3><p>The platform shows the library's screen as the file to return, and never keeps a worse one: it stands in for a screen that fails.</p></div>
+      <div class="card reveal"><h3>No check presses a button</h3><p>At 95, with every screen open, Approve answered 409 and "Create purchase order" created no order. Both screens were written by hand.</p></div>
+      <div class="card reveal"><h3>Name the story</h3><p>A person who finds a button that fails says which story. That story alone is rebuilt, and the send-back is always accepted.</p></div>
+    </div>
+    <p class="lib-honest reveal">
+      <b>What it did not do.</b> The domain stage kept the library's starting rules, because each of the model's attempts at the
+      brief's own scored worse. ProcureDesk therefore works to the library's approval limits and tolerances, not the brief's.
+      Setting them is one call; getting a local model to write it reliably is the next thing to prove.
+    </p>
+    <p style="margin-top:22px"><a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/FINANCE.md">Read how the finance library works, and how the next department is added →</a></p>
+  </div>
+</section>
+
 <!-- ================================================================== CASE STUDY -->
-<section class="block alt" id="case">
+<section class="block" id="case">
   <div class="wrap">
     <span class="kicker">Case study</span>
     <h2 class="reveal">DupeGuard: a 4,000-word BRD to a working app.</h2>
@@ -284,7 +365,7 @@
 </section>
 
 <!-- ================================================================== SOVEREIGNTY -->
-<section class="block" id="local">
+<section class="block alt" id="local">
   <div class="wrap">
     <div class="sov">
       <div>
@@ -314,7 +395,7 @@
 </section>
 
 <!-- ================================================================== STACK -->
-<section class="block alt" id="stack">
+<section class="block" id="stack">
   <div class="wrap">
     <span class="kicker">Built with</span>
     <h2 class="reveal">Open, inspectable, replaceable.</h2>
@@ -323,7 +404,7 @@
 </section>
 
 <!-- ================================================================== GET STARTED -->
-<section class="block" id="start">
+<section class="block alt" id="start">
   <div class="wrap">
     <span class="kicker">Get started</span>
     <h2 class="reveal">From clone to your first run.</h2>
@@ -365,6 +446,8 @@ docker compose up -d orchestrator</div></div>
           <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/SETUP-WINDOWS.md">Setup on Windows</a>
           <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/ARCHITECTURE.md">Architecture</a>
           <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/CHECKS.md">How increments are verified</a>
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/ENTERPRISE.md">Enterprise applications</a>
+          <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/FINANCE.md">Finance and procurement</a>
           <a href="https://github.com/saurabh-oss/poiesis/blob/main/docs/API.md">API reference</a>
         </div>
       </div>

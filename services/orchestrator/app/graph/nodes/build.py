@@ -226,6 +226,24 @@ async def _tidy_routers(run_id: str, story: dict[str, Any], found: dict[str, Any
     return sorted(set(written) - set(unused))
 
 
+async def _sweep_routers(run_id: str, state: RunState, results: list[dict[str, Any]]) -> None:
+    """Once every story of the round is built: a router kept because another story's screen called
+    it goes when that screen has stopped calling it. Stories are built one after another, and the
+    one that stops calling may come after the one whose router it was."""
+    if not _library_required():
+        return
+    root = repo.workspace_path(run_id)
+    for r in results:
+        if r.get("status") != "green":
+            continue
+        story = _story(state, r["story_id"])
+        found = _library_screen(run_id, story)
+        marker = str((found or {}).get("marker") or "")
+        if marker and any(marker in (root / rel).read_text(encoding="utf-8", errors="replace")
+                          for rel in _story_screens(run_id, story["id"])):
+            r["files"] = await _tidy_routers(run_id, story, found, list(r.get("files") or []))
+
+
 async def _hold_to_library(run_id: str, story: dict[str, Any], written: list[str], when: str) -> list[str]:
     """Where the pack requires it, put the library's screen back in a story that returned one of its
     own, and remove the routers of the story's that no screen then calls. Returns what the story
@@ -1418,6 +1436,7 @@ async def build(state: RunState) -> RunState:
         if not exec_result.ok and decision.get("decision") == "abort":
             break
 
+    await _sweep_routers(run_id, state, results)
     if _mvp():
         await _smoke_round(run_id, state, rnd, timeout, results, require_screen)
     await _regressions(run_id, rnd, timeout, results)

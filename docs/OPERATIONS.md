@@ -135,9 +135,10 @@ Run these after changing orchestrator code, and whenever a run behaves as if an 
 back (see "stale image" below):
 
 ```powershell
-docker compose exec orchestrator python -m app.selftest_core           # engine, model client, traces, git, vectors, code maps, check rules, Plane helpers (182 checks)
+docker compose exec orchestrator python -m app.selftest_core           # engine, model client, traces, git, vectors, code maps, check rules, Plane helpers (211 checks)
 docker compose exec orchestrator python -m app.selftest                # every build-time check, no model calls
-docker compose exec orchestrator python -m app.selftest_enterprise     # connectors (live, against local stand-ins), the kernel through three personas, the domain stage's checks (78 checks)
+docker compose exec orchestrator python -m app.selftest_enterprise     # connectors (live, against local stand-ins), the kernel through three personas, the domain stage's checks (80 checks)
+docker compose exec orchestrator python -m app.selftest_finance        # the finance library: overlay, standard entities, data, starting domain, library screens, the API in an application (73 checks)
 docker compose exec orchestrator python -m app.integrations.selftest   # the Jira mirror against a fake Jira
 docker compose exec orchestrator python -m app.integrations.plane check  # Plane answers with the configured token
 ```
@@ -168,6 +169,15 @@ continues from its last checkpoint and memoised model calls are not repeated.
 
 **A run shows "Ollama is not reachable".** Ollama was started from the tray (bound to
 127.0.0.1) or not at all. Run the restart script, then retry the run.
+
+**Docker stops answering** (`docker ps` hangs, or answers "500 Internal Server Error" for
+`dockerDesktopLinuxEngine`) with many deployed applications running. `docker desktop restart`,
+then `docker compose up -d` and Plane; runs resume from their checkpoint.
+
+**A run is in flight and you want to run a self-test on new code.** Build the image and run the
+test in a container of its own, which leaves the running orchestrator alone:
+`docker compose build orchestrator`, then
+`docker compose run --rm --no-deps -T orchestrator python -m app.selftest_finance`.
 
 **A bug you fixed is back.** Docker can silently revert to an older orchestrator image
 after idle days. `docker inspect poiesis-orchestrator-1 --format '{{.Created}}'`; if it

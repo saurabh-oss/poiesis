@@ -391,13 +391,38 @@ def main() -> int:
                any(asked["reference"] in (e.get("summary") or "") + json.dumps(e.get("changes") or {}) for e in trail)
                and any(e["action"] == "connector" for e in trail), json.dumps(trail, default=str)[:500])
 
+        # ---- a queue is worked oldest first; a budget can warn or block
+        line = get("/approvals?mine=false&entity=requisition")["rows"]
+        raised = [str(r["created_at"]) for r in line]
+        expect("what waits is listed oldest first, by when it was raised", len(raised) > 5 and raised == sorted(raised), str(raised[:4]))
+        from app.finance import rules as fin_  # noqa: E402
+        over = next(r for r in get("/budget?by=cost_center&period=fiscal_year")["rows"] if r["available"] is not None and r["available"] < 0)
+        centre = next(n + 1 for n, c in enumerate(data["cost_center"]) if c["name"] == over["label"])
+        big = post("/requisitions", nadia, {"title": "Standing desks", "amount": 4200, "cost_center_id": centre}, status=201)
+        fin_.configure(budget_control="block")
+        try:
+            r = client.post(f"/api/platform/workflows/requisition/{big['id']}/submit", headers=nadia, json={})
+            told = get(f"/requisitions/{big['id']}/advice", nadia)
+            still = client.get(f"/api/requisitions/{big['id']}", headers=nadia).json()["status"]
+        finally:
+            fin_.configure(budget_control="warn")
+        expect("where the budget blocks, a request above what is left cannot be submitted, and says why (409, FIN-02)",
+               r.status_code == 409 and r.json().get("rule") == "FIN-02" and "budget change" in r.text and still == "draft"
+               and any(f["rule"] == "FIN-02" and f["level"] == "down" and "cannot be submitted" in f["message"] for f in told["findings"]),
+               r.text[:300])
+        r = client.post(f"/api/platform/workflows/requisition/{big['id']}/submit", headers=nadia, json={})
+        expect("where it warns, the same request goes to its approver", r.status_code == 200 and r.json()["status"] == "pending_approval", r.text[:300])
+        expect("a setting the library cannot read is said, and the budget keeps warning",
+               fin_.configure(budget_control="sometimes").budget_control == "warn" and any("budget_control" in p for p in fin_.PROBLEMS))
+        fin_.PROBLEMS[:] = [p for p in fin_.PROBLEMS if "budget_control" not in p]
+
         # ---- what a work screen asks: how many in each state, and which are mine
         wl = get("/worklist?entity=requisition", daniel)
         by_state = {x["key"]: x for x in wl["statuses"]}
         mine_ = get("/worklist?entity=requisition&mine=true", nadia)
         hers_ = get("/documents?entity=requisition&mine=true&dated=false", nadia)
         expect("how many requisitions are in each state, in the order of the lifecycle, whatever the period",
-               wl["count"] == len(data["requisition"]) + 1 and sum(x["count"] for x in wl["statuses"]) == wl["count"]
+               wl["count"] == len(data["requisition"]) + 2 and sum(x["count"] for x in wl["statuses"]) == wl["count"]
                and by_state["ordered"]["label"] == "Ordered" and by_state["ordered"]["amount"] > 0
                and [x["key"] for x in wl["statuses"]] == [k for k in ("draft", "submitted", "approved", "rejected", "ordered", "cancelled")
                                                          if k in by_state], json.dumps(wl)[:400])

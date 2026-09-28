@@ -2109,7 +2109,11 @@ export async function workbench(root, ctx, spec = {}) {
   }
   configure({ currency: cal.currency, fiscalStartMonth: cal.fiscal_year_start_month });
 
-  const views = (spec.views && spec.views.length ? spec.views : [{ key: "all", label: "All" }]).map((v, i) => {
+  // A tab is a list of records. Something to press that was written among the tabs ({ label, run }) is
+  // a button above the rows, and one that raises a record where the screen already does is left out.
+  const pressed = (spec.views || []).filter((v) => v && typeof v.run === "function");
+  const listed = (spec.views || []).filter((v) => v && typeof v.run !== "function");
+  const views = (listed.length ? listed : [{ key: "all", label: "All" }]).map((v, i) => {
     const kind = typeof v.load === "function" ? "custom" : v.source || "documents";
     return { ...v, key: v.key || `view-${i}`, kind, entity: v.entity || (kind === "payable" ? "invoice" : kind === "renewals" ? "contract" : spec.entity) };
   });
@@ -2139,6 +2143,8 @@ export async function workbench(root, ctx, spec = {}) {
 
   const named = (a) => {
     if (typeof a === "string") return ACTIONS[a] ? { key: a, ...ACTIONS[a] } : null;
+    // One of the library's by its key, with a label or a condition of the story's own: { key: "submit", label: "Send" }.
+    if (a && !a.transition && typeof a.run !== "function" && ACTIONS[a.key]) return { ...ACTIONS[a.key], ...a, run: ACTIONS[a.key].run };
     if (a && a.transition) {
       return { key: a.transition, label: a.label || words(a.transition), icon: a.icon || "arrow-right", tone: a.tone, when: a.when || (() => true),
         permission: a.permission, async run(row, env_) {
@@ -2152,7 +2158,16 @@ export async function workbench(root, ctx, spec = {}) {
     }
     return a && typeof a.run === "function" ? { key: a.key || slug(a.label), when: () => true, ...a } : null;
   };
-  const offered = (view, row) => (view.actions || spec.actions || []).map(named).filter(Boolean)
+  // What a tab offers: its own actions, each as the screen's description words it ({ key: "submit", label: "Send" }),
+  // and the actions the description adds of its own. A tab with none of its own offers the description's.
+  const actionsOf = (view) => {
+    const said = spec.actions || [];
+    if (!view.actions) return said;
+    const worded = (a) => (typeof a === "string" && said.find((x) => x && x.key === a && typeof x.run !== "function" && !x.transition)) || a;
+    const keys = new Set(view.actions.map((a) => (typeof a === "string" ? a : a && a.key)));
+    return [...view.actions.map(worded), ...said.filter((x) => x && (typeof x.run === "function" || x.transition) && !keys.has(x.key))];
+  };
+  const offered = (view, row) => actionsOf(view).map(named).filter(Boolean)
     .filter((a) => (!a.permission || env.can(a.permission)) && guardedTruth(() => a.when(row, env)));
 
   async function perform(action, row, after) {
@@ -2192,7 +2207,7 @@ export async function workbench(root, ctx, spec = {}) {
     // A queue of one kind of record does not say on every row which kind it is, nor what waits for me who its approver is.
     const base = own || (VIEW_COLUMNS[view.kind] || columnsFor(view.entity, rows)).filter((c) => !(view.kind === "approvals"
       && ((c.key === "entity" && (view.of || spec.of)) || (c.key === "approver" && !(view.query && view.query.mine === false)))));
-    if (!(view.actions || spec.actions || []).length) return base;
+    if (!actionsOf(view).length) return base;
     return [...base, { label: "", align: "right", render: (row) => {
       const acts = offered(view, row).slice(0, 2);
       return acts.length ? h("span", { class: "fin-row-actions" }, acts.map((a, i) => h("button", { type: "button", class: `sm${i || a.tone === "secondary" ? " secondary" : ""}`,
@@ -2266,21 +2281,30 @@ export async function workbench(root, ctx, spec = {}) {
     put(body,
       result.count > result.shown ? h("p", { class: "faint fin-work-note" }, `The first ${number(result.shown)} of ${number(result.count)} are listed; search narrows them.`) : null,
       documents(view.entity, result.rows, { columns: columnsOf(view, result.rows), drawer: (row) => opened(view, row), exportable: `${slug(spec.id || view.entity)}-${view.key}`,
-        pageSize: spec.pageSize || 12, empty, onRow: view.kind === "documents" && view.entity === "supplier" && !(view.actions || spec.actions || []).length ? (row) => env.openSupplier(row.id) : undefined }));
+        pageSize: spec.pageSize || 12, empty, onRow: view.kind === "documents" && view.entity === "supplier" && !actionsOf(view).length ? (row) => env.openSupplier(row.id) : undefined }));
   }
 
   const owners = views.some((v) => v.kind === "documents" && OWNED[v.entity]);
-  const create = spec.create === true ? spec.entity : spec.create;
-  const creator = create === "requisition" ? { label: "New requisition", icon: "plus", permission: "requisition:create",
+  // What raises a record: the library's own form for the entity (create: true, or its name), or what the
+  // description runs ({ label, run }). A form described in words of its own ({ title, fields }) where the
+  // library has the entity's form is that form, under the description's label and with its defaults:
+  // the library's is the one that says who approves and what is left of the budget, and saves through the rule.
+  const asked = spec.create && typeof spec.create === "object" ? spec.create : {};
+  const create = spec.create === true ? spec.entity
+    : typeof asked.run === "function" ? asked
+      : spec.create && typeof spec.create === "object" ? (asked.entity || spec.entity) : spec.create;
+  const creator = create === "requisition" ? { label: asked.label || asked.title || "New requisition", icon: "plus", permission: "requisition:create",
     run: async (env_) => {
-      const made = await newRequisition(env_, spec.defaults || {});
+      const made = await newRequisition(env_, { ...(spec.defaults || {}), ...(asked.defaults || {}) });
       if (!made) return null;
       const drafts = views.find((v) => v.entity === "requisition" && (!v.status || String(v.status).split(",").includes("draft")));
       if (drafts && state.view !== drafts.key) { state.view = drafts.key; store.write({ view: state.view, mine: state.mine }); }
       raf(() => ui.drawer(opened(drafts || views[0], { ...made, entity: "requisition" })));
       return `${made.reference || "The requisition"} saved as a draft`;
     } } : (create && typeof create.run === "function" ? { icon: "plus", label: "New", ...create } : null);
-  const tools = (spec.tools || []).map((t) => (typeof t === "string" ? (TOOLS[t] ? { key: t, ...TOOLS[t] } : null) : (t && typeof t.run === "function" ? t : null)))
+  const extra = pressed.filter((v) => !(creator && /^(new|add|raise|create)\b/i.test(String(v.label || v.key || ""))))
+    .map((v) => ({ key: v.key, label: v.label || words(v.key), icon: v.icon, permission: v.permission, run: (env_) => v.run(env_) }));
+  const tools = [...(spec.tools || []), ...extra].map((t) => (typeof t === "string" ? (TOOLS[t] ? { key: t, ...TOOLS[t] } : null) : (t && typeof t.run === "function" ? t : null)))
     .filter(Boolean).filter((t) => !t.permission || env.can(t.permission));
   const press = (tool) => async () => {
     try {

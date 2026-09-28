@@ -150,7 +150,7 @@ def match(order, receipts, invoice):
 ```
 
 Settings: `doa`, `tolerance`, `po_required_above`, `po_exempt_categories`, `quote_bands`,
-`budget_warning_pct`, `material_pct`, `material_amount`, `expiring_days`, `duplicate_days`,
+`budget_warning_pct`, `budget_control`, `material_pct`, `material_amount`, `expiring_days`, `duplicate_days`,
 `split_days`, `orderable`, `late_interest_pct`, `tax_rates`, `approval_hours`, `exception_hours`,
 `escalate_to`. `configure` never raises: a name the library does not have, or a value it cannot
 read, is reported in the domain check and in the application's profile, and the rest is applied,
@@ -219,7 +219,7 @@ entities it has. A figure that needs a table the application lacks is empty
 | `GET suppliers/{id}/scorecard` | One supplier: spend, delivery, risk by factor, contracts |
 | `GET documents` | The rows behind any number, with the names of what they refer to; `?mine=true` for the ones I raised, buy or own |
 | `GET worklist` | How many of an entity's records are in each state, and their value: what a work screen's tabs count |
-| `GET approvals` | What waits for my decision, each with its record and whether I may decide it (`?mine=false`: for anyone's) |
+| `GET approvals` | What waits for my decision, oldest first by when it was raised, each with its record and whether I may decide it (`?mine=false`: for anyone's) |
 | `POST requisitions` | A draft requisition with its reference and its requester |
 | `POST requisitions/{id}/order` | The order of an approved requisition, with an approved supplier (PROC-09), released |
 | `POST purchase-orders/{id}/send` | To the supplier, and into the ERP, once |
@@ -231,6 +231,11 @@ entities it has. A figure that needs a table the application lacks is empty
 Every `GET` takes the same scope: `period` (a preset) or `from` and `to`; `compare`
 (`prior_year`, `prior_period`, `none`); and the filters `cost_center_id`, `spend_category_id`,
 `supplier_id`, `family`, `department`, `region`, `country`, `currency`.
+
+**A budget warns or blocks.** `budget_control="warn"` (the default) flags a request that takes its
+cost centre above the year's budget, in the form as it is filled in and in the advice before it is
+submitted. `budget_control="block"` refuses the submission (409, FIN-02) until a budget change is
+approved and applied, which is what raises the budget the request is held to.
 
 **Budget has two questions**, and the API answers them separately. For the period: what was
 spent against its budget (`variance`, `status`: over, watch, on track; FIN-07). For the fiscal
@@ -337,6 +342,14 @@ the person is, with the rule that refused (`PROC-09: Halden Freight is suspended
 - **Tools** above the rows (`fin.TOOLS`): `propose_run`, or one of the application's own.
 - `fin.advice(findings)` shows what the rules say about a request anywhere.
 
+A description is read for what was meant. An action named by its key with a label of the
+story's own (`{ key: "submit", label: "Send for approval" }`) is the library's action under that
+label; one the library does not have and that says nothing to run is left out; something to
+press written among the tabs (`{ label, run }`) becomes a button above the rows, and is dropped
+when it raises a record the screen already raises. Each of these is a thing a model wrote in the
+first run, and `tools/finance/screen_generous.js` keeps them checked in a browser. What can be
+done to a row stays in reach however wide the table is.
+
 ### The screen a story starts from, and falls back to
 
 Telling a model about the work screens was not enough. Sent back for rework, the same run
@@ -412,11 +425,11 @@ Set `APPS_<SETTING>` in the platform's `.env`; it reaches each deployed applicat
 ## Verification
 
 ```
-docker compose exec orchestrator python -m app.selftest_finance      73 checks, no model calls
+docker compose exec orchestrator python -m app.selftest_finance      73 checks, no model calls (docker compose run --rm --no-deps -T orchestrator … leaves a run in flight alone)
 ```
 covers the overlay's manifest, the standard-entity merge, the demonstration data (loaded as
 SQL), the starting domain under the domain stage's own check, the contracts a Developer is
-shown, the library's screen for a story and its standing in for one that fails, the insight API and the operations as the people of the function (73 checks of their
+shown, the library's screen for a story and its standing in for one that fails, the insight API and the operations as the people of the function (77 checks of their
 own, among them a purchase from the request to the ERP), every `GET` answering without an error
 in applications with all, some and none of the entities, and the library's 85 rule tests.
 
@@ -439,7 +452,34 @@ widths and then takes one purchase through the application, each step as the per
 is: a requester raises and submits a request, the budget holder approves it (and rejects another,
 with a reason), the buyer is refused an order to a suspended supplier and raises it with an
 approved one, sends it to the ERP, goods in receives it, accounts payable matches an invoice and
-proposes a payment run (81 checks).
+proposes a payment run; it also opens a screen described loosely, the way a model described
+one, and checks it is read for what was meant (84 checks).
+
+## What the first application taught
+
+ProcureDesk, built from `docs/samples/BRD-FIN-2026-031_ProcureDesk_v1.0.md` on local models, was
+sent round until it was right, and each round changed the platform rather than the application.
+
+| Round | Reviewer | What was found | What changed |
+|---|---|---|---|
+| First build | 49 | Dashboards green at the first attempt; the approval queue showed only text, goods receipt did not parse | The work screens (`fin.workbench`), and the operations behind them |
+| Rework | 51 | The same screens repaired three more times, the one-line screen described in the prompt | The library's screen shown as the file to return, and standing in for one that fails |
+| Rebuild | 73, then 95 | The Developer returned the library's Goods in screen as shown; a router still answering 500 was replaced by the library's screen and API | Every screen opened cleanly for the first time |
+| Pressed by hand | 95 | Approve answered 409; "Create purchase order" created no order | `library_screens: require`; the check on moves a lifecycle does not have; send-backs that name their stories |
+| Tidy | 68 | Asked to remove unused routers, the model left stubs that answered "ok"; a dashboard depended on one of them | The platform removes them itself, after the last story of the round; the kernel exports `decide` |
+| Last | 93, then 98 | Queue newest first; a tab that was a button; a form of its own that left the screen with no way to raise a request | Oldest first; a description read for what was meant; `budget_control` |
+
+Released at 98.2 with no blockers. Before it was, the application was used as each of its twelve
+personas in a real browser: every screen opened, and one purchase was raised, submitted, approved,
+ordered with an approved supplier, sent to the ERP sandbox and received, through the delivered
+screens (251 checks, no problems). Six of the backlog's eleven stories are in the increment.
+
+What it did not do: the domain stage kept the library's starting domain, because each of the
+model's four attempts at the brief's own rules scored worse. The application therefore works to
+the library's numbers (approval limits of 5,000, 25,000 and 100,000; a match within 2% and 50),
+not the brief's (2,000 and 20,000; 1% and 25), and its rules carry the library's ids, not
+BR-01 to BR-09. Setting the brief's numbers is one `fin.configure(...)` call; getting a local
+model to write it reliably is the next thing to prove.
 
 ## Adding a department
 

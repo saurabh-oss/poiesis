@@ -123,11 +123,21 @@ def requisition(model: type, *, requester: Sequence[str] = ("requester",), buyer
     """Draft → awaiting approval → approved → ordered, with rejection and cancellation."""
     approval = _approval(doa, amount)
     escalate_to, approval_hours = _told(escalate_to), _hours(approval_hours, "approval_hours")
+
+    def can_submit(record: Any, ctx: Any) -> Any:
+        said = _has_amount(amount)(record, ctx)
+        if said:
+            return said
+        if getattr(ctx, "db", None) is not None:
+            from . import operations
+            operations.within_budget(ctx.db, record, rules.get(record, amount, 0))      # FIN-02, where it blocks
+        return None
+
     flow = Workflow(
         name, model, field=field, title="Purchase requisition", states=states("requisition"), initial="draft",
         transitions=[
             Transition("submit", "draft", "approved", label="Submit for approval", roles=tuple(requester),
-                       approval=approval, pending="submitted", on_reject="rejected", guard=_has_amount(amount),
+                       approval=approval, pending="submitted", on_reject="rejected", guard=can_submit,
                        rule="PROC-02", effects=_fx(effects, "submit"), tone="ok"),
             Transition("revise", "rejected", "draft", label="Revise", roles=tuple(requester),
                        effects=_fx(effects, "revise")),

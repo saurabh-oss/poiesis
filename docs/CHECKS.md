@@ -162,16 +162,40 @@ With the `enterprise` pack ([ENTERPRISE.md](ENTERPRISE.md)) the layers change in
   whatever the constant says), and no line that admits a shortcut ("simplified for MVP",
   "placeholder", "hard-coded"). DupeGuard's generated domain had all three problems and passed
   its thirty tests.
-- **Two static checks** (`enterprise_issues` in `checks.py`) on a story's routers and on
+- **Three static checks** (`enterprise_issues` in `checks.py`) on a story's routers and on
   `domain/services.py`: a call out with `requests`, `httpx`, `urllib`, `smtplib` or `aiohttp`
-  ("use a connector"), and a write to a column a workflow governs ("use `transition()`"). The
-  kernel refuses the second at runtime too (409, rule `WF-00`); found here it costs no repair round.
+  ("use a connector"); a write to a column a workflow governs ("use `transition()`"); and a
+  record moved with a move its lifecycle does not have (`transition(db, req, "approve")` on a
+  requisition, whose approval is a decision on a request), which names the moves there are and
+  says how an approval is decided. The kernel refuses all three at runtime (409); found here
+  they cost no repair round. The third was added after an approval queue passed every check and
+  the Reviewer, and refused every approval when its button was pressed.
+- **A story's files are remembered across rounds**, so a router it wrote two rounds ago is
+  still checked as its own when only its screen is rebuilt.
+- **A department library's screen** ([FINANCE.md](FINANCE.md#the-screen-a-story-starts-from-and-falls-back-to))
+  is shown to the Developer as the file to return, stands in for a screen that still fails when
+  its repairs are spent, and for a screen and router whose endpoint still answers 500 after the
+  smoke run's repair. A pack with `build.library_screens: require` keeps it for every story the
+  library has a screen for, and removes the routers of such a story that no screen calls, after
+  the last story of the round is built.
 - **The API smoke run** calls every GET with the platform's service token, since the app answers
   401 without a session.
 - **The browser check** screenshots the sign-in page, checks it offers personas, signs in as the
   profile's check persona and opens every screen with a real session, the platform's four screens
   included. A platform screen that fails is reported as a platform problem, never as a story's —
   no story could fix it.
+
+## What no check does
+
+No check presses a button that changes a record. The browser check opens every screen, opens a
+row, switches tabs and presses "New…"; it does not approve a requisition or raise an order,
+because it cannot know what each application's buttons are for. ProcureDesk's hand-written
+approval queue and order screen opened cleanly and did nothing right. Two things follow: a
+department library's screens have their buttons pressed, as each persona, before any run
+begins (`tools/finance/browse_work.py`), which is the reason a pack can require them; and a
+person who does press a button and finds it wrong says so at the release gate by naming the
+story ("S3: creating an order creates no order"), which rebuilds that story alone and is
+always accepted, whatever `max_human_rebuilds` has been used up.
 
 ## When a check was wrong
 

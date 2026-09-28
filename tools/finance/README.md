@@ -28,7 +28,7 @@ docker run --rm -v "$PWD:/work" -w /work -e PYTHONPATH=backend python:3.12-slim 
    && python -m pytest -q --noconftest tests/test_finance_library.py tests/test_rules.py"
 ```
 `finance_app_check.py` signs in as the people of the function and checks the figures against
-the rows, and take a purchase from the request to the ERP (73 checks); `finance_sparse_check.py`
+the rows, and take a purchase from the request to the ERP (77 checks); `finance_sparse_check.py`
 calls every `GET` bare, as the platform's
 smoke check does. The platform's self-test runs both: `python -m app.selftest_finance`.
 

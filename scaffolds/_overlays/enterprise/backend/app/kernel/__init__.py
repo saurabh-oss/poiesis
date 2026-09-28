@@ -31,7 +31,7 @@ from .context import SYSTEM, Actor, acting_as, current
 from .notify import notify
 from .policy import can, ensure, policy, require, require_role
 from .rules import RuleViolation, check, declare, rule, violation
-from .workflow import Transition, Workflow, available, register, transition
+from .workflow import Transition, Workflow, available, decide, register, transition
 
 log = logging.getLogger(__name__)
 APP = __package__.rsplit(".", 1)[0]
@@ -145,6 +145,6 @@ def is_platform_table(cls: type) -> bool:
 
 __all__ = [
     "SYSTEM", "Actor", "RuleViolation", "Transition", "Workflow", "acting_as", "allow", "available", "can", "check",
-    "current", "declare", "ensure", "install", "is_platform_table", "notify", "policy", "record", "register", "require",
+    "current", "decide", "declare", "ensure", "install", "is_platform_table", "notify", "policy", "record", "register", "require",
     "require_role", "rule", "startup", "transition", "violation",
 ]
