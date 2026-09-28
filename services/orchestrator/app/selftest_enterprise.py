@@ -336,6 +336,21 @@ def test_kernel(tmp: Path) -> None:
         expect("a signed-in member is known with roles and permissions",
                me["name"] == "Sam Okafor" and me["roles"] == ["member"] and "example:submit" in me["permissions"])
 
+        told = client.get("/api/platform/guide", headers=sam)
+        guide = told.json() if told.status_code == 200 else {}
+        member = next((r for r in guide.get("roles", []) if r["key"] == "member"), {})
+        flow = (guide.get("lifecycles") or [{}])[0]
+        expect("the application's guide says who is signed in, who holds each role and what the role does",
+               told.status_code == 200 and guide["me"]["name"] == "Sam Okafor" and member.get("people", [{}])[0].get("full_name") == "Sam Okafor"
+               and any(m["move"] for m in member.get("does", [])) and guide["processes"] == [] and guide["numbers"] == []
+               and flow.get("entity") == "example" and len(guide["rules"]) >= 1, told.text[:400])
+        paper = client.get("/api/platform/guide.md", headers=sam)
+        expect("and is a document with each lifecycle as a diagram, for an application with no department library",
+               paper.status_code == 200 and paper.text.startswith("# ") and "stateDiagram-v2" in paper.text
+               and "## Who does what" in paper.text and "## Signing in" in paper.text and "Sam Okafor" in paper.text
+               and "flowchart" not in paper.text, paper.text[:300])
+        expect("without signing in there is no guide", client.get("/api/platform/guide.md").status_code == 401)
+
         made = client.post("/api/examples", json={"label": "Laptop refresh", "amount": 24000}, headers=sam)
         item = made.json()
         expect("a new record starts in its workflow's initial state", made.status_code == 201 and item["status"] == "open",

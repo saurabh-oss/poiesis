@@ -12,7 +12,8 @@ It does this with two additions to the value stream:
 1. **The enterprise overlay** (`scaffolds/_overlays/enterprise/`), copied over the web-app
    scaffold at scaffold time: a platform-owned **kernel** (sign-in, roles, audit, workflows,
    approvals, SLAs, rules, notifications, scheduler), the **connectors**
-   ([CONNECTORS.md](CONNECTORS.md)), four platform screens, and a worked-example domain.
+   ([CONNECTORS.md](CONNECTORS.md)), four platform screens and the application's own guide, and a
+   worked-example domain.
 2. **The domain stage**, inside foundation: after the data model and before the
    demonstration data, the Developer writes the application's business logic once, from the
    whole backlog, and the platform tests it before any story is built.
@@ -205,6 +206,7 @@ comes (at most 8 attempts, within a day), and runs any `@every(minutes=…)` job
 | GET | `/api/platform/rules` | the rule catalogue, workflows, roles, permissions, test results |
 | GET · POST | `/api/platform/integrations` · `/events` · `/{connector}/objects` · `/events/{id}/retry` · `/{connector}/test` | connectors and the outbox |
 | GET | `/api/platform/users` | people and their roles |
+| GET | `/api/platform/guide` · `/guide.md` | the application's own guide, for the Guide screen; and as a document with its diagrams |
 
 The kernel's own tables (`sys_user`, `sys_audit`, `sys_approval`, `sys_sla_clock`,
 `sys_notification`, `sys_connector_event`, `sys_connector_object`) are created at start-up and are
@@ -224,6 +226,42 @@ screens follow the story screens under **Governance**, each shown only to people
 - **Integrations** — the connectors and their modes, settings and a test button, the outbox with
   request, response and Retry, and what each sandbox holds (e-mails rendered, Slack and Teams
   messages previewed, sandbox issues and incidents with their comments and state).
+
+and under **Help**, for everyone who signs in:
+
+- **Guide** — what the application is for, the process as a diagram, who does what, how a record
+  moves. See below.
+
+### The guide
+
+An application explains itself to the people who use it. Nobody writes the guide: it is
+assembled, each time it is opened, from what the application is, so it cannot describe
+something the application does not do, and it follows every change to a role or a lifecycle.
+
+| It says | From |
+|---|---|
+| What the application is for, and what is still to come | what the platform recorded of the brief when it built it (`backend/app/guide.json`) |
+| Who is signed in, their part in the process and their screens | the session, the process, the screens |
+| The process, a lane for each role and a box for each step, with how each step is done | the department library (`<library>/guide.py`); who performs a step is read from the registered lifecycle |
+| Who does what: the people who hold each role, their screens, the moves they make, what they approve, what they read | `domain/policy.py`, `domain/workflows.py` |
+| The screens, each with what it is for | the screens themselves, the library, the stories |
+| How a record moves: its states in order and every move, with who makes it and who approves it | `domain/workflows.py` |
+| The numbers the organisation works to | the department library (`fin.configure`) |
+| The rules | the rule catalogue |
+
+A step of the process the application has no screen for is drawn, and marked as not part of the
+application yet: an increment of six stories says so rather than pretending to be the whole. The
+lane of the person signed in is marked, and a step of the diagram leads to how it is done and to
+the screen it is done on. **Print** prints it; **Download** gives it as a document.
+
+The same guide is kept in the application's repository as `docs/USER-GUIDE.md`, with the process
+as a Mermaid flowchart and each lifecycle as a state diagram, which GitHub and most Markdown
+viewers draw. The platform fetches it from the running application at every deployment. An
+application without the kernel gets a plainer document from the platform's record: what it is
+for, its screens, its stories and their acceptance criteria.
+
+An application built before the guide existed gets it, with every other fix to the platform's
+own files, from `POST /api/runs/{id}/deploy?refresh=true`.
 
 Story screens receive `enterprise` in `render()`: `me`, `can(permission)`,
 `workflow.panel(table, id, {onChange})` (state, SLA clock, the transitions this person may take,

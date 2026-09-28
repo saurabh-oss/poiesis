@@ -149,6 +149,21 @@ def main() -> None:
             shutil.copy(extra, screens / extra.name[len("screen_"):])
             entries.append(extra.stem[len("screen_"):])
         entries.extend(["example_finance", "example_worklist"])
+        # What the platform records for the application's own guide when it deploys a run.
+        told = []
+        for stem, (title, icon, story) in [*((n.lower(), v) for n, v in BOARDS.items()),
+                                           *((f"work_{n.lower()}", v) for n, v in WORK.items())]:
+            told.append({"id": stem, "title": title, "story": story, "stories": [story], "subtitle": "",
+                         "uses": library.used((screens / f"{stem}.js").read_text(encoding="utf-8"))})
+        (OUT / "backend/app/guide.json").write_text(json.dumps({
+            "app": "Finance Test",
+            "purpose": "The finance library's sample application: every dashboard and every work screen of the library, "
+                       "over its demonstration data, to try a change without a run.",
+            "for": ["Requester", "Budget holder", "Buyer", "Accounts payable", "Chief financial officer"],
+            "increment": "",
+            "stories": [{"id": story, "title": STORIES.get(name, title), "narrative": STORIES.get(name, ""), "criteria": [],
+                         "delivered": True} for name, (title, icon, story) in WORK.items()],
+            "screens": told}, indent=2), encoding="utf-8", newline="\n")
         (screens / "index.js").write_text(
             "const entries = [\n" + "".join(f'  {{ id: "{e}", example: false, load: () => import("./{e}.js") }},\n' for e in entries)
             + "];\n\nexport default await Promise.all(entries.map(async (e) => {\n  try {\n"

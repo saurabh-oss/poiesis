@@ -60,6 +60,13 @@ While it runs:
   is running), and cards move as stories pass;
 - the **Codebases** page draws the app after the first deploy.
 
+## The application explains itself
+
+Open **Guide**, under Help, in the running application: what it is for, your part in its
+process, who does what, how a record moves. It is written from the application's own roles,
+lifecycles, rules and screens, and the same guide is in its repository as `docs/USER-GUIDE.md`.
+Sign in as different people to see each one's part marked.
+
 ## The release gate
 
 It arrives with the app already running and a link to it. Open it and try it before you

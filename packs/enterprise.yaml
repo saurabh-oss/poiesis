@@ -57,7 +57,9 @@ product:
     This backlog is for an enterprise application people will run their work on. The
     platform already provides — so write NO stories for them — sign-in with demonstration
     personas, roles and permissions, an Approvals inbox, an Audit trail screen, a Business
-    rules catalogue, an Integrations screen with a connector outbox, and notifications.
+    rules catalogue, an Integrations screen with a connector outbox, notifications, and a
+    Guide that explains the application to the people who use it (its process, who does
+    what, how a record moves), so write no help page, user manual or onboarding story.
     Stories are the business's own screens and flows, each one a screen or a visible action
     a named role performs on the demonstration data: the first story is an overview
     dashboard with headline numbers and charts; then the list, detail and action screens

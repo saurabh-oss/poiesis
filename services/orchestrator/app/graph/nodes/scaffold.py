@@ -41,6 +41,8 @@ BINARY_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", "
 # helper it then called. Stories now add their own files (a router, a screen)
 # and the shared plumbing that loads them cannot be edited at all.
 PROTECTED = (
+    "backend/app/guide.json",       # what the platform recorded for the application's guide
+    "docs/USER-GUIDE.md",           # the guide as a document, written from the running application
     "docker-compose.yml",
     "conftest.py",
     "backend/Dockerfile",
@@ -165,6 +167,11 @@ def refresh_platform_files(run_id: str, state: RunState) -> list[str]:
     # connectors are fixed in one place and every enterprise app picks the fix up.
     if (root / "backend" / "app" / "kernel").is_dir():
         for name in overlays():
+            # The overlays of the pack in force, among those this application was built with: an
+            # application of the enterprise pack is not given the finance library because the
+            # platform has since been switched to the finance pack.
+            if not overlay_lib.present(name, root):
+                continue
             source_root = scaffold_root() / OVERLAY_ROOT / name
             for source in sorted(source_root.rglob("*")):
                 rel = source.relative_to(source_root).as_posix()

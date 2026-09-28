@@ -182,7 +182,7 @@ With the `enterprise` pack ([ENTERPRISE.md](ENTERPRISE.md)) the layers change in
   401 without a session.
 - **The browser check** screenshots the sign-in page, checks it offers personas, signs in as the
   profile's check persona and opens every screen with a real session, the platform's four screens
-  included. A platform screen that fails is reported as a platform problem, never as a story's —
+  and the application's guide included. A platform screen that fails is reported as a platform problem, never as a story's —
   no story could fix it.
 
 ## What no check does

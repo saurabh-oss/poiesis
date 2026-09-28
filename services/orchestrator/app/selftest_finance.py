@@ -510,6 +510,7 @@ def resubmit(requisition_id: int, db=Depends(get_session)):
                set(begun) == set(domain_stage.FILES) and "register(flows.invoice(Invoice))" in begun["backend/app/domain/workflows.py"]
                and "BudgetChange" not in begun["backend/app/domain/workflows.py"], str(sorted(begun)))
         screens_for_stories(rid, wroot)
+        guide_record(rid, wroot)
         (wroot / "frontend" / "screens" / "spend.js").write_text(
             'import fin from "../finance.js";\nexport default { title: "Spend", story: "S1", async render(root, ctx) { '
             'await fin.dashboard(root, ctx, fin.blueprints.spend()); } };\n', encoding="utf-8")
@@ -539,6 +540,65 @@ STORIES = {
     "S11": ("Configure notification preferences", "As a user I choose which emails I get", None),
     "S12": ("Export audit log", "As an auditor I export the log", None),
 }
+
+
+def guide_record(rid: str, wroot: Path) -> None:
+    """What the platform writes down for an application's own guide. Called with the finance overlay active."""
+    from .workspace import guide as ws_guide
+    screens = wroot / "frontend" / "screens"
+    (screens / "goods_in.js").write_text(
+        'import fin from "../finance.js";\nexport default { title: "Goods in", subtitle: "What arrived", icon: "truck", story: "S9", '
+        'async render(root, ctx) { await fin.workbench(root, ctx, fin.worklists.receiving({ id: "s9" })); } };\n', encoding="utf-8")
+    (screens / "my_budget.js").write_text(
+        'import fin from "../finance.js";\nexport default { title: "My budget", story: "S5, S6", '
+        'async render(root, ctx) { await fin.dashboard(root, ctx, fin.blueprints.budget({})); } };\n', encoding="utf-8")
+    (screens / "notes.js").write_text('export default { title: \'Notes\', story: "S7", render(root) { root.append("x"); } };\n',
+                                      encoding="utf-8")
+    before, latest = overlays.active, ws_guide._latest
+    overlays.active = lambda: NAMES
+    bodies = {
+        "vision": {"product_name": "ProcureDesk", "problem_statement": "Requests arrive by email and approvals are chased by hand.",
+                   "target_users": [{"persona": "Requester"}, {"persona": "Budget holder"}, "not a person"]},
+        "backlog": {"stories": [{"id": f"S{n}", "title": f"Story {n}", "narrative": f"As a requester, I want thing {n}.",
+                                 "acceptance_criteria": [f"Given {n}"]} for n in (5, 7, 9, 10, 11)]},
+        "sprint": {"sprint_goal": "The core of purchase to pay.", "stories": [{"id": "S9"}, {"id": "S5"}, {"id": "S7"}]},
+        "test_report": {"stories": [{"story_id": "S7", "status": "dropped"}]},
+    }
+    ws_guide._latest = lambda run_id, kind: bodies.get(kind, {})
+    try:
+        found = {s["id"]: s for s in ws_guide.screens(rid)}
+        expect("the platform knows each screen by its title, its stories and which of the library's screens it is",
+               found["goods_in"] == {"id": "goods_in", "title": "Goods in", "subtitle": "What arrived", "story": "S9",
+                                     "stories": ["S9"], "uses": "worklist:receiving"}
+               and found["my_budget"]["uses"] == "dashboard:budget" and found["my_budget"]["stories"] == ["S5", "S6"]
+               and found["notes"]["uses"] == "" and found["notes"]["title"] == "Notes"
+               and not any(k.startswith("example") for k in found), str(found)[:500])
+        note = ws_guide.record(rid)
+        expect("it records what the brief was for, the stories of the increment and what is still to come",
+               note["app"] == "ProcureDesk" and note["purpose"].startswith("Requests arrive") and note["for"] == ["Requester", "Budget holder"]
+               and [s["id"] for s in note["stories"]] == ["S9", "S5"] and note["stories"][0]["delivered"]
+               and note["increment"].startswith("This is an increment: 2 of the 5 stories") and "Story 10" in note["increment"]
+               and note["goal"] == "The core of purchase to pay.", json.dumps(note)[:500])
+        first, again = ws_guide.write(rid), ws_guide.write(rid)
+        kept = json.loads((wroot / ws_guide.RECORD).read_text(encoding="utf-8"))
+        expect("the record is kept in the application, and written again only when it changes",
+               first is True and again is False and kept["screens"][0]["id"] == "goods_in" and kept["app"] == "ProcureDesk")
+        text = ws_guide.plain(note)
+        expect("an application without the kernel gets a plainer guide from the same record",
+               text.startswith("# ProcureDesk: user guide") and "## The screens" in text and "| Goods in | As a requester, I want thing 9. |" in text
+               and "### Story 5" in text and "- Given 5" in text, text[:400])
+        expect("the document is kept in the repository when it is a document, and only when it changes",
+               ws_guide.keep(rid, "# ProcureDesk\r\n\r\nA guide.\r\n") is True and ws_guide.keep(rid, "# ProcureDesk\n\nA guide.\n") is False
+               and ws_guide.keep(rid, "<html>404</html>") is False
+               and (wroot / ws_guide.DOCUMENT).read_text(encoding="utf-8") == "# ProcureDesk\n\nA guide.\n")
+        expect("an application is brought up to date with the overlays it was built with, not with the pack's",
+               overlays.present("finance", wroot) and overlays.present("enterprise", wroot)
+               and not overlays.present("finance", wroot / "frontend"))
+    finally:
+        overlays.active, ws_guide._latest = before, latest
+        for leftover in ("goods_in.js", "my_budget.js", "notes.js"):
+            (screens / leftover).unlink(missing_ok=True)
+        (wroot / ws_guide.RECORD).unlink(missing_ok=True)
 
 
 def screens_for_stories(rid: str, wroot: Path) -> None:

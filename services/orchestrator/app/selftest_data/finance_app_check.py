@@ -416,6 +416,39 @@ def main() -> int:
                fin_.configure(budget_control="sometimes").budget_control == "warn" and any("budget_control" in p for p in fin_.PROBLEMS))
         fin_.PROBLEMS[:] = [p for p in fin_.PROBLEMS if "budget_control" not in p]
 
+        # ---- the application's own guide
+        g = client.get("/api/platform/guide", headers=nadia).json()
+        steps = g["processes"][0]["steps"]
+        by_step = {s["key"]: s for s in steps}
+        expect("the guide gives purchase to pay step by step, each with who does it, read from the lifecycles",
+               [s["key"] for s in steps] == ["request", "approve", "order", "receive", "match", "approve_invoice", "pay"]
+               and by_step["request"]["role_labels"] == ["Requester"] and "Budget holder" in by_step["request"]["approver_labels"]
+               and by_step["approve"]["decides"] and "Budget holder" in by_step["approve"]["role_labels"]
+               and by_step["order"]["role_labels"] == ["Buyer"] and not by_step["order"]["approver_labels"]
+               and by_step["match"]["role_labels"] == ["Accounts payable"] and by_step["receive"]["uses"] == ["worklist:receiving"]
+               and all(s["how"] and s["what"] and s["rules"] for s in steps), json.dumps([(s["key"], s["role_labels"]) for s in steps]))
+        me_ = g["me"]
+        mine_role = next(r for r in g["roles"] if r["key"] == "requester")
+        expect("it says who is signed in, who holds each role, what the role does and what it reads",
+               me_["name"] == "Nadia Rahman" and me_["roles"] == [{"key": "requester", "label": "Requester"}]
+               and mine_role["people"][0]["full_name"] == "Nadia Rahman" and mine_role["may"]["reads"] == "everything"
+               and {"Submit for approval", "Receive in full"} <= {m["move"] for m in mine_role["does"]}
+               and any(m["move"] == "Submit for approval" and m["workflow"] == "Purchase requisition"
+                       for r in g["roles"] if r["key"] == "budget_holder" for m in r["approves"]), json.dumps(mine_role)[:500])
+        said_ = {n["key"]: n["value"] for n in g["numbers"]}
+        expect("and the numbers this organisation works to, in words",
+               "Budget holder: up to £5,000" in said_["doa"] and "Chief financial officer: above £100,000" in said_["doa"]
+               and "within 2%" in said_["tolerance"] and "£50" in said_["tolerance"] and "is flagged" in said_["budget"]
+               and len(g["lifecycles"]) == 7 and len(g["rules"]) >= 22 and g["uses"][0]["kind"] == "worklist", json.dumps(said_))
+        doc = client.get("/api/platform/guide.md", headers=nadia)
+        text = doc.text
+        expect("the guide is a document too, with the process and each lifecycle as a diagram",
+               doc.status_code == 200 and doc.headers["content-type"].startswith("text/markdown") and text.startswith("# ")
+               and "flowchart LR" in text and 'subgraph Requester["Requester"]' in text and "request --> approve" in text
+               and text.count("stateDiagram-v2") == 7 and "## Who does what" in text and "### 3. Raise and send the order" in text
+               and "| Who approves |" in text and "None" not in text and "null" not in text, text[:600])
+        expect("without signing in, the guide answers 401", client.get("/api/platform/guide").status_code == 401)
+
         # ---- what a work screen asks: how many in each state, and which are mine
         wl = get("/worklist?entity=requisition", daniel)
         by_state = {x["key"]: x for x in wl["statuses"]}

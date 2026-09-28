@@ -103,6 +103,12 @@ def owned(rel: str, names: list[str] | None = None) -> bool:
     return any(owned_by(n, rel) for n in (names if names is not None else active()))
 
 
+def present(name: str, workspace: Path) -> bool:
+    """Whether an application has this overlay: one of the directories it owns is there."""
+    dirs = [str(d) for d in (manifest(name).get("owned") or DEFAULT_OWNED).get("dirs") or []]
+    return any((workspace / d).is_dir() for d in dirs) if dirs else True
+
+
 def text(name: str, rel: str) -> str:
     path = root(name) / rel
     return path.read_text(encoding="utf-8") if path.is_file() else ""

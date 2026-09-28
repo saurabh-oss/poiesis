@@ -457,7 +457,7 @@ async function start() {
     // platform's own screens (approvals, audit, rules, integrations) follow them.
     screens = screens.filter((s) => enterprise.mayOpen(s.id));
     for (const p of enterprise.screens()) {
-      screens.push({ id: p.id, example: false, platform: true, title: p.module.title, story: "", icon: p.module.icon, module: p.module });
+      screens.push({ id: p.id, example: false, platform: true, group: p.group || "Governance", title: p.module.title, story: "", icon: p.module.icon, module: p.module });
     }
   }
   for (const s of screens) if (s.broken) state.errors.push(`screen ${s.id} failed to load: ${s.broken}`);
@@ -467,10 +467,12 @@ async function start() {
     h("span", { class: "nav-text" }, s.title));
   const own = screens.filter((s) => !s.platform);
   const platform = screens.filter((s) => s.platform);
+  // The platform's screens under their own headings: what governs the work, and the guide to it.
+  const groups = [...new Set(platform.map((s) => s.group || "Governance"))].sort((a, b) => (a === "Help") - (b === "Help"));
   nav.replaceChildren(
     h("div", { class: "nav-label" }, "Workspace"),
     ...own.map(link),
-    ...(platform.length ? [h("div", { class: "nav-label" }, "Governance"), ...platform.map(link)] : []),
+    ...groups.flatMap((g) => [h("div", { class: "nav-label" }, g), ...platform.filter((s) => (s.group || "Governance") === g).map(link)]),
   );
   window.addEventListener("hashchange", show);
   await show();

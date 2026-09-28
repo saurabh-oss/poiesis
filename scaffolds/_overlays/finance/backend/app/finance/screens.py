@@ -21,6 +21,20 @@ import json
 import re
 from typing import Any, Iterable
 
+# A screen file makes one of these calls; the first group is the library's name for the screen.
+USES = [{"kind": "worklist", "pattern": r"fin\.worklists\.(\w+)\s*\("},
+        {"kind": "dashboard", "pattern": r"fin\.blueprints\.(\w+)\s*\("}]
+
+
+def used(source: str) -> str:
+    """Which of the library's screens a screen file is: "worklist:receiving", "dashboard:budget", or ""."""
+    for use in USES:
+        found = re.search(use["pattern"], source or "")
+        if found:
+            return f"{use['kind']}:{found.group(1)}"
+    return ""
+
+
 # A story says what it is in its title first: a word there counts three times.
 TITLE, ELSEWHERE = 3, 1
 # Below this, the story is not clearly any of the library's screens, and none is suggested:

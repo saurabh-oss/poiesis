@@ -57,8 +57,8 @@ class Session:
 
     def open(self, screen: str) -> None:
         self.where = screen
+        self.page.goto("about:blank")          # one whole load of the screen: nothing in flight is cut short
         self.page.goto(f"{BASE}/#/{screen}")
-        self.page.reload()
         self.page.wait_for_selector(".sidebar", timeout=20000)
         self.settle()
 
@@ -246,6 +246,60 @@ def main() -> int:
         cfo.text_ok(".drawer")
         cfo.shot("control")
         cfo.close_overlay()
+
+        # ---- the application's own guide
+        nadia = Session(browser, "nadia")
+        nadia.open("guide")
+        nadia.page.wait_for_selector(".guide-flow .guide-step", timeout=20000)
+        seen = nadia.page.evaluate("""() => ({
+            steps: [...document.querySelectorAll('.guide-flow .guide-step')].map((g) => g.getAttribute('aria-label')),
+            lanes: [...document.querySelectorAll('.guide-flow .guide-lane-label')].map((t) => t.textContent).join(' '),
+            yours: document.querySelectorAll('.guide-flow .guide-lane.yours').length,
+            absent: document.querySelectorAll('.guide-flow .guide-step.absent').length,
+            cards: document.querySelectorAll('.guide-card').length, roles: document.querySelectorAll('.guide-role').length,
+            mine: [...document.querySelectorAll('.guide-me-steps li')].map((l) => l.innerText.split(String.fromCharCode(10)).join(' ').trim()),
+            myScreens: [...document.querySelectorAll('.guide-me .guide-chips button')].map((b) => b.innerText.trim()),
+            screens: document.querySelectorAll('.guide-screen').length, tabs: document.querySelectorAll('.guide .tabs button').length,
+            numbers: document.querySelectorAll('.guide-numbers dt').length, help: [...document.querySelectorAll('.sidebar .nav-label')].map((l) => l.innerText.trim()),
+            spill: document.documentElement.scrollWidth > window.innerWidth + 2 })""")
+        expect("the guide draws the process: a lane for each role, a box for each step, the person's own lane marked",
+               len(seen["steps"]) == 7 and seen["steps"][0] == "Step 1: Raise a requisition" and "Requester" in seen["lanes"]
+               and "Accounts payable" in seen["lanes"] and seen["yours"] == 1 and seen["absent"] == 0 and seen["cards"] == 7, json.dumps(seen))
+        expect("it says what is this person's part, and where",
+               any("Raise a requisition" in m for m in seen["mine"]) and any("Receive the goods" in m for m in seen["mine"])
+               and "My requests" in seen["myScreens"] and "Goods in" in seen["myScreens"], json.dumps(seen))
+        expect("it has every role, every screen, every lifecycle and the organisation's numbers, under Help",
+               seen["roles"] >= 11 and seen["screens"] >= 16 and seen["tabs"] == 7 and seen["numbers"] >= 5
+               and seen["help"][-1].upper() == "HELP" and not seen["spill"], json.dumps(seen))
+        nadia.text_ok()
+        nadia.shot("guide")
+        nadia.page.locator(".guide-flow .guide-step").nth(3).click()
+        nadia.page.wait_for_selector("#guide-step-receive.flash", timeout=5000)
+        expect("a step of the diagram leads to how it is done", "Choose Receive" in nadia.page.locator("#guide-step-receive").inner_text())
+        nadia.page.locator("#guide-step-receive footer button", has_text="Goods in").first.click()
+        nadia.page.wait_for_function("() => location.hash === '#/work_receiving'", timeout=10000)
+        nadia.settle()
+        expect("and from there to the screen it is done on", nadia.page.locator(".fin-view").count() == 4)
+        nadia.open("guide")
+        nadia.page.wait_for_selector(".guide-flow .guide-step", timeout=20000)
+        with nadia.page.expect_download() as got:
+            nadia.page.locator("#page-actions button", has_text="Download").click()
+        body = open(got.value.path(), encoding="utf-8").read()
+        expect("the guide downloads as a document with its diagrams", got.value.suggested_filename == "USER-GUIDE.md"
+               and body.startswith("# ") and "flowchart LR" in body and "stateDiagram-v2" in body and "the **Goods in** screen" in body, body[:300])
+        cfo.open("guide")
+        cfo.page.wait_for_selector(".guide-flow .guide-step", timeout=20000)
+        expect("someone with no part in the process is told what their role reads",
+               cfo.page.locator(".guide-flow .guide-lane.yours").count() == 0 and cfo.page.locator(".guide-role.yours").count() == 1)
+        cfo.text_ok()
+        small = Session(browser, "tom", 430, 900)
+        small.open("guide")
+        small.page.wait_for_selector(".guide-flow .guide-step", timeout=20000)
+        small.where = "guide at 430px"
+        expect("guide at 430px: the page does not scroll sideways; the diagram scrolls inside its frame",
+               not small.page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth + 2")
+               and small.page.evaluate("() => { const w = document.querySelector('.guide-flow-wrap'); return w.scrollWidth > w.clientWidth; }"))
+        small.shot("guide-narrow")
 
         # ---- a narrow screen
         for width, name in ((430, "narrow"), (1024, "medium")):

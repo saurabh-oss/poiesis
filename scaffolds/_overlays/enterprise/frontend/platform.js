@@ -6,6 +6,8 @@
  *   - signing in (demonstration personas, or a password), the user card and the
  *     notification bell in the sidebar;
  *   - four platform screens: Approvals, Audit trail, Business rules, Integrations;
+ *   - the Guide: what the application is for, its process as a diagram, who does what, how a
+ *     record moves, written from the application's own roles, lifecycles, rules and screens;
  *   - `enterprise`, the helpers every story screen receives in render():
  *
  *       async render(root, { api, ui, h, enterprise }) {
@@ -663,9 +665,285 @@ const integrationsScreen = {
   },
 };
 
+/* ---------------------------------------------------------------- the guide */
+
+const SVGNS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, ...children) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k.startsWith("on") && typeof v === "function") el.addEventListener(k.slice(2).toLowerCase(), v);
+    else el.setAttribute(k, String(v));
+  }
+  for (const c of children.flat(Infinity)) if (c !== undefined && c !== null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return el;
+}
+
+/** Words on at most `lines` lines of about `width` characters. */
+function wrapped(text, width, lines = 2) {
+  const out = [];
+  let line = "";
+  for (const word of String(text || "").split(/\s+/).filter(Boolean)) {
+    if (line && (line + " " + word).length > width) { out.push(line); line = word; } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) out.push(line);
+  if (out.length > lines) { out.length = lines; out[lines - 1] = `${out[lines - 1].replace(/[\s,;:.]+\S*$/, "")}…`; }
+  return out;
+}
+
+/** The screens this person can open, each with which of a library's screens it is and what it is for. */
+async function knownScreens(guide) {
+  let registry = [];
+  try { registry = (await import("./screens/index.js")).default || []; } catch { registry = []; }
+  const recorded = Object.fromEntries((guide.screens || []).map((s) => [s.id, s]));
+  const stories = Object.fromEntries((guide.stories || []).map((s) => [s.id, s]));
+  const real = registry.filter((r) => r && r.module && typeof r.module.render === "function");
+  const shown = real.some((r) => !r.example) ? real.filter((r) => !r.example) : real;
+  return shown.filter((r) => mayOpen(r.id)).map((r) => {
+    const source = String(r.module.render);
+    let uses = (recorded[r.id] || {}).uses || "";
+    for (const u of guide.uses || []) {
+      let found = null;
+      try { found = new RegExp(u.pattern).exec(source); } catch { found = null; }
+      if (found) { uses = `${u.kind}:${found[1]}`; break; }
+    }
+    const story = stories[r.module.story] || {};
+    return { id: r.id, title: r.module.title || ui.label(r.id), icon: r.module.icon || ui.guessIcon(r.module.title || r.id), story: r.module.story || "",
+      uses, narrative: story.narrative || "",
+      what: (guide.library_screens || {})[uses] || story.narrative || r.module.subtitle || (recorded[r.id] || {}).subtitle || "" };
+  });
+}
+
+const screensOf = (step, screens) => screens.filter((s) => s.uses && (step.uses || []).includes(s.uses));
+
+/** The process as lanes: a lane for each role, a box for each step, in the order the work is done. */
+function processDiagram(proc, screens, mine, onPick) {
+  const steps = proc.steps || [];
+  const lanes = [...new Set(steps.map((s) => (s.role_labels || [])[0] || "Anyone"))];
+  const LABEL = 132, COL = 148, LANE = 92, BOX_W = 128, BOX_H = 58, TOP = 10;
+  const width = LABEL + steps.length * COL + 12, height = TOP + lanes.length * LANE + 8;
+  const svg = sv("svg", { class: "guide-flow", viewBox: `0 0 ${width} ${height}`, role: "img",
+    "aria-label": `${proc.title}: ${steps.map((s, i) => `${i + 1}. ${s.title}, by ${(s.role_labels || ["anyone"]).join(" or ")}`).join("; ")}` });
+  svg.style.minWidth = `${Math.round(width * 0.78)}px`;
+  svg.append(sv("defs", {}, sv("marker", { id: "guide-arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" },
+    sv("path", { d: "M0 0 L10 5 L0 10 z", class: "guide-arrowhead" }))));
+  lanes.forEach((lane, i) => {
+    const y = TOP + i * LANE;
+    const yours = mine.has(lane);
+    svg.append(sv("rect", { x: 0, y, width, height: LANE - 6, rx: 10, class: `guide-lane${yours ? " yours" : ""}` }));
+    wrapped(lane, 17, 2).forEach((line, k, all) => svg.append(sv("text", { x: 14, y: y + (LANE - 6) / 2 + (k - (all.length - 1) / 2) * 15 + 4, class: "guide-lane-label" }, line)));
+    if (yours) svg.append(sv("text", { x: 14, y: y + LANE - 16, class: "guide-you" }, "you"));
+  });
+  const at = steps.map((s, i) => {
+    const lane = lanes.indexOf((s.role_labels || [])[0] || "Anyone");
+    return { x: LABEL + i * COL + (COL - BOX_W) / 2, y: TOP + lane * LANE + (LANE - 6 - BOX_H) / 2 };
+  });
+  for (let i = 0; i + 1 < steps.length; i += 1) {
+    const a = at[i], b = at[i + 1];
+    const x1 = a.x + BOX_W, y1 = a.y + BOX_H / 2, x2 = b.x, y2 = b.y + BOX_H / 2, mid = (x1 + x2) / 2;
+    svg.append(sv("path", { d: y1 === y2 ? `M${x1} ${y1} H${x2 - 2}` : `M${x1} ${y1} H${mid} V${y2} H${x2 - 2}`, class: "guide-link", "marker-end": "url(#guide-arrow)" }));
+  }
+  steps.forEach((s, i) => {
+    const { x, y } = at[i];
+    const has = screensOf(s, screens).length > 0;
+    const g = sv("g", { class: `guide-step${s.decides ? " decides" : ""}${has ? "" : " absent"}`, tabindex: 0, role: "link",
+      "aria-label": `Step ${i + 1}: ${s.title}`, onclick: () => onPick(s),
+      onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(s); } } });
+    g.append(sv("rect", { x, y, width: BOX_W, height: BOX_H, rx: 10 }));
+    g.append(sv("circle", { cx: x + 2, cy: y + 2, r: 11, class: "guide-no" }), sv("text", { x: x + 2, y: y + 6, class: "guide-no-text", "text-anchor": "middle" }, String(i + 1)));
+    wrapped(s.title, 19, 2).forEach((line, k, all) => g.append(sv("text", { x: x + BOX_W / 2, y: y + BOX_H / 2 + (k - (all.length - 1) / 2) * 15 + 4.5,
+      "text-anchor": "middle", class: "guide-step-text" }, line)));
+    svg.append(g);
+  });
+  return h("div", { class: "guide-flow-wrap" }, svg);
+}
+
+function chips(items, cls = "role-chip") {
+  return h("span", { class: "row guide-chips" }, items.map((t) => h("span", { class: cls }, t)));
+}
+
+/** A record's states in order, and every move between them. */
+function lifecycleView(flow, labels) {
+  const states = flow.states || [];
+  const name = Object.fromEntries(states.map((s) => [s.key, s.label]));
+  const chain = h("ol", { class: "wf-steps guide-states" }, states.map((s) => h("li", {
+    class: `${flow.initial === s.key ? "now" : ""}${(flow.final || []).includes(s.key) ? " final" : ""}`,
+    "data-tip": s.sla_hours ? `May wait ${s.sla_hours} hours` : null }, h("span", { class: "wf-dot" }), h("span", {}, s.label))));
+  const who = (keys) => (keys || []).map((k) => labels[k] || ui.label(k)).join(", ");
+  const rows = (flow.transitions || []).map((t) => h("tr", {},
+    h("td", {}, h("strong", {}, t.label)),
+    h("td", {}, (t.from || []).map((s) => name[s] || ui.label(s)).join(", ")),
+    h("td", {}, t.pending && !(t.from || []).includes(t.pending) ? `${name[t.pending] || ui.label(t.pending)}, then ${name[t.to] || ui.label(t.to)}` : (name[t.to] || ui.label(t.to))),
+    h("td", {}, who(t.roles) || h("span", { class: "faint" }, "—")),
+    h("td", {}, (t.approvers || []).length ? who(t.approvers) : h("span", { class: "faint" }, "—")),
+    h("td", {}, t.rule ? h("code", { class: "rule-id" }, t.rule) : h("span", { class: "faint" }, "—"))));
+  return h("div", { class: "stack" }, chain,
+    h("div", { class: "table-wrap" }, h("table", { class: "guide-moves" },
+      h("thead", {}, h("tr", {}, ["Move", "From", "To", "Who", "Approved by", "Rule"].map((t) => h("th", {}, t)))),
+      h("tbody", {}, rows))));
+}
+
+const guideScreen = {
+  title: "Guide", subtitle: "What this application is for, who does what, and how a record moves", icon: "info", group: "Help",
+  async render(root, { actions, navigate }) {
+    const guide = await api("/platform/guide");
+    const screens = await knownScreens(guide);
+    const labels = Object.fromEntries((guide.roles || []).map((r) => [r.key, r.label]));
+    const myRoles = (me.roles || []).filter((r) => r !== "admin");
+    const myLabels = new Set(myRoles.map((r) => labels[r] || ui.label(r)));
+    const isAdmin = (me.roles || []).includes("admin");
+    const go = (id) => { if (typeof navigate === "function") navigate(`#/${id}`); else location.hash = `#/${id}`; };
+    const open = (s) => ui.button(s.title, { tone: "secondary", size: "sm", icon: s.icon || "arrow-right", onclick: () => go(s.id) });
+
+    // Which screens are whose: the ones a step of the process names for a role, the ones the policy
+    // keeps to a role, and the ones a story was written for ("As a budget holder, I want…").
+    const screensByRole = Object.fromEntries((guide.roles || []).map((r) => [r.key, new Set(r.screens || [])]));
+    for (const proc of guide.processes || []) {
+      for (const step of [...(proc.steps || []), ...(proc.alongside || [])]) {
+        for (const s of screensOf(step, screens)) for (const key of [...(step.roles || []), ...(step.decides ? [] : [])]) if (screensByRole[key]) screensByRole[key].add(s.id);
+      }
+    }
+    for (const s of screens) {
+      const first = String(s.narrative || "").split(",")[0].toLowerCase();
+      for (const r of guide.roles || []) if (first && first.includes(String(r.label).toLowerCase())) screensByRole[r.key].add(s.id);
+    }
+    const byId = Object.fromEntries(screens.map((s) => [s.id, s]));
+    const mineScreens = [...new Set(myRoles.flatMap((r) => [...(screensByRole[r] || [])]))].map((id) => byId[id]).filter(Boolean);
+
+    const doc = h("div", { class: "guide stack" });
+
+    // ---- what it is for, and your part in it
+    const purpose = (guide.about || {}).purpose;
+    const mySteps = (guide.processes || []).flatMap((p) => (p.steps || []).map((s, i) => ({ ...s, no: i + 1 })))
+      .filter((s) => (s.roles || []).some((r) => myRoles.includes(r)));
+    const myMoves = (guide.roles || []).filter((r) => myRoles.includes(r.key));
+    doc.append(h("section", { class: "panel guide-hero" },
+      h("div", { class: "guide-hero-text" },
+        h("span", { class: "nav-label", style: { padding: 0 } }, "What it is for"),
+        h("h2", {}, guide.app || profile.app || "This application"),
+        purpose ? h("p", {}, purpose) : h("p", { class: "muted" }, "An application built by Poiesis. This guide is written from its own roles, lifecycles, rules and screens."),
+        (guide.about || {}).increment ? h("p", { class: "faint" }, guide.about.increment) : null),
+      h("div", { class: "guide-me" },
+        h("div", { class: "row" }, ui.avatar(me.name, { size: "lg" }), h("div", {}, h("strong", {}, me.name),
+          h("div", { class: "muted" }, isAdmin ? "Administrator: may open and do everything" : [...myLabels].join(", ") || me.title || ""))),
+        mySteps.length ? h("div", {}, h("div", { class: "guide-me-h" }, "Your part in the process"),
+          h("ul", { class: "guide-me-steps" }, mySteps.map((s) => h("li", {}, h("span", { class: "guide-no-chip" }, String(s.no)),
+            h("a", { href: `#guide-step-${s.key}`, onclick: (e) => { e.preventDefault(); pick(s); } }, s.title))))) : null,
+        mineScreens.length ? h("div", {}, h("div", { class: "guide-me-h" }, "Your screens"), h("div", { class: "row guide-chips" }, mineScreens.map(open))) : null,
+        !mySteps.length && !mineScreens.length && !isAdmin && myMoves.every((r) => !(r.does || []).length && !(r.approves || []).length)
+          ? h("p", { class: "muted", style: { margin: 0 } }, "Your role reads what the application holds; it changes nothing.") : null)));
+
+    // ---- the process
+    const cards = {};
+    function pick(step) {
+      const el = cards[step.key];
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.remove("flash");
+      void el.offsetWidth;
+      el.classList.add("flash");
+    }
+    for (const proc of guide.processes || []) {
+      const steps = proc.steps || [];
+      doc.append(ui.section(`The process: ${proc.title}`, { icon: "activity" },
+        proc.about ? h("p", { class: "muted guide-lede" }, proc.about) : null,
+        processDiagram(proc, screens, myLabels, pick),
+        h("p", { class: "faint guide-key" }, h("span", { class: "guide-key-box" }), "a step ", h("span", { class: "guide-key-box decides" }), "a decision ",
+          h("span", { class: "guide-key-box absent" }), "not in this application yet. Choose a step for how it is done."),
+        h("div", { class: "guide-steps" }, steps.map((s, i) => {
+          const where = screensOf(s, screens);
+          const yours = (s.roles || []).some((r) => myRoles.includes(r));
+          cards[s.key] = h("article", { class: `guide-card${yours ? " yours" : ""}${where.length || !(s.uses || []).length ? "" : " absent"}`, id: `guide-step-${s.key}` },
+            h("header", {}, h("span", { class: "guide-no-chip" }, String(i + 1)), h("h3", {}, s.title), yours ? ui.badge("You", "info") : null),
+            h("p", {}, s.what),
+            h("div", { class: "guide-who" }, h("span", { class: "faint" }, s.decides ? "Decided by" : "Done by"), chips(s.role_labels && s.role_labels.length ? s.role_labels : ["Anyone"]),
+              (s.approver_labels || []).length ? [h("span", { class: "faint" }, "approved by"), chips(s.approver_labels), s.approver_labels.length > 1 ? h("span", { class: "faint" }, "by the amount") : null] : null),
+            (s.how || []).length ? h("ol", { class: "guide-how" }, s.how.map((line) => h("li", {}, line))) : null,
+            s.leaves ? h("p", { class: "guide-leaves" }, ui.icon("arrow-right"), h("span", {}, s.leaves)) : null,
+            h("footer", {},
+              where.length ? h("span", { class: "row guide-chips" }, where.map(open))
+                : h("span", { class: "faint" }, "This application has no screen for this step yet."),
+              (s.rules || []).length ? h("span", { class: "row guide-rules" }, s.rules.map((r) => h("code", { class: "rule-id" }, r))) : null));
+          return cards[s.key];
+        })),
+        (proc.alongside || []).length ? h("div", { class: "guide-beside" }, h("div", { class: "nav-label", style: { padding: 0 } }, "Alongside"),
+          proc.alongside.map((a) => h("div", { class: "guide-beside-row" }, h("strong", {}, a.title), h("span", {}, a.what),
+            h("span", { class: "row guide-chips" }, screensOf(a, screens).map(open))))) : null));
+    }
+
+    // ---- who does what
+    const people = (guide.roles || []).filter((r) => (r.people || []).length || (r.does || []).length || (r.approves || []).length);
+    doc.append(ui.section("Who does what", { icon: "users" },
+      h("p", { class: "muted guide-lede" }, "Each person holds a role. A role sees the screens below and may make the moves listed; every move is recorded in the audit trail."),
+      h("div", { class: "guide-roles" }, people.map((r) => {
+        const theirs = [...(screensByRole[r.key] || [])].map((id) => byId[id]).filter(Boolean);
+        const moves = {};
+        for (const m of r.does || []) (moves[m.workflow] ||= []).push(m.move);
+        const approves = [...new Set((r.approves || []).map((m) => `${m.move} (${m.workflow.toLowerCase()})`))];
+        const may = r.may || {};
+        return h("article", { class: `guide-role${myRoles.includes(r.key) ? " yours" : ""}` },
+          h("header", {}, (r.people || []).length ? ui.avatarGroup(r.people.map((p) => p.full_name), 3) : ui.avatar(r.label),
+            h("div", {}, h("h3", {}, r.label), h("span", { class: "faint" }, (r.people || []).map((p) => [p.full_name, p.title].filter(Boolean).join(", ")).join(" · ") || "Nobody holds it yet")),
+            myRoles.includes(r.key) ? ui.badge("You", "info") : null),
+          theirs.length ? h("div", { class: "guide-line" }, h("span", { class: "faint" }, "Works on"), h("span", { class: "row guide-chips" }, theirs.map(open))) : null,
+          Object.keys(moves).length ? h("div", { class: "guide-line" }, h("span", { class: "faint" }, "Does"),
+            h("ul", {}, Object.entries(moves).map(([flow, list]) => h("li", {}, h("b", {}, flow), ": ", [...new Set(list)].join(", "))))) : null,
+          approves.length ? h("div", { class: "guide-line" }, h("span", { class: "faint" }, "Approves"), h("span", {}, approves.join("; "))) : null,
+          h("div", { class: "guide-line" }, h("span", { class: "faint" }, "Reads"),
+            h("span", {}, typeof may.reads === "string" ? ui.label(may.reads) : ((may.reads || []).join(", ") || "Nothing"),
+              (may.oversight || []).length ? `; and ${may.oversight.join(", ")}` : "")));
+      }))));
+
+    // ---- the screens
+    if (screens.length) {
+      doc.append(ui.section("The screens", { icon: "grid" },
+        h("div", { class: "guide-screens" }, [...screens, ...(guide.platform || []).filter((p) => state_has(p.id)).map((p) => ({ ...p, platform: true }))].map((s) =>
+          h("button", { type: "button", class: "guide-screen", onclick: () => go(s.id) },
+            h("span", { class: "stat-icon" }, ui.icon(s.icon || ui.guessIcon(s.title))),
+            h("span", {}, h("strong", {}, s.title), h("span", { class: "muted" }, s.what || (s.platform ? "" : "A screen of this application."))))))));
+    }
+
+    // ---- how a record moves
+    if ((guide.lifecycles || []).length) {
+      doc.append(ui.section("How a record moves", { icon: "layers" },
+        h("p", { class: "muted guide-lede" }, "A record's status changes only through the moves below, by the people whose role allows them. Where a move needs an approval, the record waits until someone holding the approving role, never the person who asked, decides."),
+        ui.tabs(guide.lifecycles.map((f) => ({ label: f.title, content: () => lifecycleView(f, labels) })))));
+    }
+
+    // ---- the numbers, and the rules
+    if ((guide.numbers || []).length) {
+      doc.append(ui.section("The numbers this organisation works to", { icon: "flag" },
+        h("dl", { class: "guide-numbers" }, guide.numbers.map((n) => [h("dt", {}, n.label, n.rule ? h("code", { class: "rule-id" }, n.rule) : null), h("dd", {}, n.value)]))));
+    }
+    const rules = guide.rules || [];
+    if (rules.length) {
+      doc.append(ui.section(`The rules (${rules.length})`, { icon: "shield", right: can("rules:read") ? ui.button("All rules, with their tests", { tone: "secondary", size: "sm", icon: "arrow-right", onclick: () => go("business_rules") }) : null },
+        h("div", { class: "guide-rulelist" }, rules.slice(0, 60).map((r) => h("div", { title: r.statement || null }, h("code", { class: "rule-id" }, r.id), h("span", {}, r.title))))));
+    }
+
+    root.replaceChildren(doc);
+    if (actions) {
+      actions.append(
+        ui.button("Print", { tone: "secondary", icon: "file", onclick: () => window.print() }),
+        ui.button("Download", { icon: "download", onclick: async () => {
+          try {
+            const text = await api("/platform/guide.md");
+            const a = h("a", { href: URL.createObjectURL(new Blob([typeof text === "string" ? text : JSON.stringify(text, null, 2)], { type: "text/markdown" })), download: "USER-GUIDE.md" });
+            document.body.append(a); a.click(); a.remove();
+            ui.toast("The guide, as a document", "ok");
+          } catch (err) { ui.toast(errorText(err), "down"); }
+        } }));
+    }
+  },
+};
+
+function state_has(id) {
+  return screens().some((s) => s.id === id);
+}
+
 /** The platform's own screens, for this person. */
 export function screens() {
-  const out = [{ id: "approvals", module: approvalsScreen }];
+  const out = [{ id: "guide", module: guideScreen, group: "Help" }, { id: "approvals", module: approvalsScreen }];
   if (can("audit:read")) out.push({ id: "audit_trail", module: auditScreen });
   if (can("rules:read")) out.push({ id: "business_rules", module: rulesScreen });
   if (can("integrations:read")) out.push({ id: "integrations", module: integrationsScreen });

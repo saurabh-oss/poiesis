@@ -61,7 +61,7 @@ starting a second driver on the same run.
 |---|---|---|
 | GET | `/api/deployments` | Every app with its URL and status (`running`, `starting`, `failed`, `stopped`) |
 | GET | `/api/runs/{id}/deployment` | One run's app |
-| POST | `/api/runs/{id}/deploy?fresh=false` | Start or restart the app in the background, then open every screen in a browser. `fresh=true` drops its database volume first so `db/init.sql` runs again. 409 while the run is being built |
+| POST | `/api/runs/{id}/deploy?fresh=false&refresh=false` | Start or restart the app in the background, then open every screen in a browser. `fresh=true` drops its database volume first so `db/init.sql` runs again. `refresh=true` first brings the platform's own files in the app up to date (the shell, the kernel, a department library, the guide). Every deployment writes the app's guide to `docs/USER-GUIDE.md`. 409 while the run is being built |
 | POST | `/api/runs/{id}/deployment/stop` | Stop it; its data is kept |
 | GET | `/api/runs/{id}/shots/{name}.png` | A screenshot the browser check took |
 

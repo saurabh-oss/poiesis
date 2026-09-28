@@ -201,3 +201,97 @@
 
 /* ---------------------------------------------------------------- tables */
 td code, .rule-id { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- the guide */
+.guide { gap: 18px; }
+.guide-lede { margin: 0; max-width: 62em; }
+.guide-hero { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, 1fr); gap: 26px; align-items: start; background: var(--grad-soft), var(--surface); }
+.guide-hero h2 { margin: 4px 0 8px; font-size: 26px; letter-spacing: -.02em; }
+.guide-hero p { margin: 0 0 8px; color: var(--ink-2); line-height: 1.55; max-width: 60em; }
+.guide-me { display: grid; gap: 14px; padding: 16px; border-radius: var(--r-lg); border: 1px solid var(--rule); background: var(--surface); box-shadow: var(--sh-sm); }
+.guide-me-h { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
+.guide-me-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.guide-me-steps li { display: flex; align-items: center; gap: 8px; }
+.guide-chips { flex-wrap: wrap; gap: 6px; }
+.guide-no-chip { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; flex: none; }
+
+.guide-flow-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--surface-2); padding: 10px; }
+.guide-flow { display: block; width: 100%; height: auto; }
+.guide-lane { fill: var(--surface); stroke: var(--rule); }
+.guide-lane.yours { fill: var(--accent-wash); stroke: color-mix(in srgb, var(--accent) 40%, var(--rule)); }
+.guide-lane-label { font-size: 13px; font-weight: 700; fill: var(--ink-2); }
+.guide-you { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; fill: var(--accent); }
+.guide-link { fill: none; stroke: var(--rule-strong); stroke-width: 1.6; }
+.guide-arrowhead { fill: var(--rule-strong); }
+.guide-step { cursor: pointer; outline: none; }
+.guide-step rect { fill: var(--surface); stroke: var(--accent); stroke-width: 1.4; transition: fill .15s ease; }
+.guide-lane.yours ~ .guide-step rect { fill: var(--surface); }
+.guide-step:hover rect, .guide-step:focus-visible rect { fill: var(--accent-wash); stroke-width: 2.2; }
+.guide-step.decides rect { stroke: var(--warn-2); stroke-dasharray: 5 3; }
+.guide-step.absent rect { stroke: var(--rule-strong); stroke-dasharray: 2 4; fill: var(--surface-2); }
+.guide-step.absent .guide-step-text { fill: var(--faint); }
+.guide-step-text { font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+.guide-no { fill: var(--accent); }
+.guide-step.decides .guide-no { fill: var(--warn-2); }
+.guide-step.absent .guide-no { fill: var(--faint); }
+.guide-no-text { font-size: 11.5px; font-weight: 700; fill: #fff; }
+.guide-key { margin: 0; font-size: 12.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.guide-key-box { display: inline-block; width: 18px; height: 12px; border-radius: 4px; border: 1.4px solid var(--accent); margin-left: 8px; }
+.guide-key-box:first-child { margin-left: 0; }
+.guide-key-box.decides { border-color: var(--warn-2); border-style: dashed; }
+.guide-key-box.absent { border-color: var(--rule-strong); border-style: dotted; }
+
+.guide-steps { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.guide-card { display: grid; gap: 10px; align-content: start; padding: 16px; border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--sh-sm); scroll-margin-top: 90px; }
+.guide-card.yours { border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); }
+.guide-card.absent { background: var(--surface-2); box-shadow: none; }
+.guide-card.flash { animation: guide-flash 1.4s ease; }
+@keyframes guide-flash { 0%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); } 100% { box-shadow: var(--sh-sm); } }
+.guide-card header { display: flex; align-items: center; gap: 10px; }
+.guide-card h3 { margin: 0; font-size: 16px; flex: 1; }
+.guide-card p { margin: 0; color: var(--ink-2); line-height: 1.5; }
+.guide-who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; }
+.guide-how { margin: 0; padding-left: 20px; display: grid; gap: 5px; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
+.guide-leaves { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: var(--muted) !important; }
+.guide-leaves svg { flex: none; margin-top: 2px; color: var(--ok-2); }
+.guide-card footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--rule); font-size: 13px; }
+.guide-rules { gap: 5px; flex-wrap: wrap; }
+.guide-rules code, .guide-numbers code, .guide-rulelist code { font-size: 11.5px; padding: 1px 6px; border-radius: 5px; background: var(--surface-2); border: 1px solid var(--rule); color: var(--muted); }
+.guide-beside { display: grid; gap: 8px; padding-top: 6px; }
+.guide-beside-row { display: grid; grid-template-columns: 130px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--rule); border-radius: var(--r); font-size: 13.5px; color: var(--ink-2); }
+
+.guide-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; }
+.guide-role { display: grid; gap: 10px; align-content: start; padding: 16px; border: 1px solid var(--rule); border-radius: var(--r-lg); background: var(--surface); }
+.guide-role.yours { border-color: color-mix(in srgb, var(--accent) 45%, var(--rule)); background: linear-gradient(var(--accent-wash), var(--accent-wash)) top / 100% 3px no-repeat, var(--surface); }
+.guide-role header { display: flex; align-items: center; gap: 12px; }
+.guide-role header > div { flex: 1; min-width: 0; }
+.guide-role h3 { margin: 0; font-size: 16px; }
+.guide-line { display: grid; grid-template-columns: 78px minmax(0, 1fr); gap: 10px; font-size: 13.5px; color: var(--ink-2); line-height: 1.5; }
+.guide-line ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+
+.guide-screens { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+.guide-screen { all: unset; box-sizing: border-box; cursor: pointer; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 14px; border: 1px solid var(--rule); border-radius: var(--r); background: var(--surface); transition: border-color .15s ease, transform .15s ease; }
+.guide-screen:hover, .guide-screen:focus-visible { border-color: var(--accent); transform: translateY(-1px); }
+.guide-screen > span:last-child { display: grid; gap: 2px; font-size: 13.5px; line-height: 1.45; }
+.guide-states { flex-wrap: wrap; }
+.guide-moves { width: 100%; font-size: 13.5px; }
+.guide-numbers { display: grid; grid-template-columns: minmax(200px, max-content) minmax(0, 1fr); gap: 10px 22px; margin: 0; font-size: 14px; }
+.guide-numbers dt { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.guide-numbers dd { margin: 0; color: var(--ink-2); line-height: 1.5; }
+.guide-rulelist { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px 18px; font-size: 13.5px; }
+.guide-rulelist > div { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+
+@media (max-width: 900px) {
+  .guide-hero { grid-template-columns: 1fr; }
+  .guide-beside-row { grid-template-columns: 1fr; gap: 6px; }
+  .guide-numbers { grid-template-columns: 1fr; gap: 2px 0; }
+  .guide-numbers dd { margin-bottom: 10px; }
+  .guide-steps, .guide-roles, .guide-screens, .guide-rulelist { grid-template-columns: 1fr; }
+}
+@media print {
+  .sidebar, .page-actions, .topbar, .toasts { display: none !important; }
+  .guide-flow-wrap { overflow: visible; }
+  .guide-flow { min-width: 0 !important; }
+  .guide-card, .guide-role, .panel { break-inside: avoid; box-shadow: none; }
+  .tab-panel { display: block; }
+}

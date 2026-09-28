@@ -49,6 +49,7 @@ scaffolds/_overlays/finance/
     insight.py                     the insight API as functions, for a router or a job
     demo.py                        the demonstration data
     starter.py                     the business logic an application starts with
+    guide.py                       what the library tells the people who use the application
     screens.py                     which of the library's screens a story is nearest to
   backend/app/connectors/erp.py    the ERP connector
   frontend/finance.js, finance.css the dashboard kit and the work screens
@@ -397,6 +398,23 @@ Two things the platform learned from the same application, for every pack:
 a module in its manifest (`screens: backend/app/<name>/screens.py`); nothing in the orchestrator
 knows which screens there are.
 
+## The guide
+
+Every application has a **Guide** screen and a `docs/USER-GUIDE.md`
+([ENTERPRISE.md](ENTERPRISE.md#the-guide)), written from what the application is. The finance
+library adds what only it knows (`guide.py`):
+
+- **the process**, purchase to pay, in seven steps: raise a requisition, approve or reject it, raise
+  and send the order, receive the goods, match the invoice, approve it for payment, pay; and
+  beside it suppliers, contracts and the budget. Each step says what happens, how it is done on
+  the screen, which rules decide it and what it leaves behind;
+- **who performs each step**, read from the lifecycle the application registered, so an
+  application whose brief calls accounts payable "AP specialist" has a guide in its own words;
+- **which screen serves each step**, by the call the screen makes (`fin.worklists.receiving(`),
+  so a step with no screen in this application is shown as not part of it yet;
+- **the numbers the organisation set** with `fin.configure`, in words: "Budget holder: up to
+  £2,000; Head of department: up to £20,000", "within 1% of what was received, and £25 at most".
+
 ## The ERP connector
 
 `erp()` keeps the contract of every connector ([CONNECTORS.md](CONNECTORS.md)): sandboxed
@@ -425,11 +443,11 @@ Set `APPS_<SETTING>` in the platform's `.env`; it reaches each deployed applicat
 ## Verification
 
 ```
-docker compose exec orchestrator python -m app.selftest_finance      73 checks, no model calls (docker compose run --rm --no-deps -T orchestrator … leaves a run in flight alone)
+docker compose exec orchestrator python -m app.selftest_finance      79 checks, no model calls (docker compose run --rm --no-deps -T orchestrator … leaves a run in flight alone)
 ```
 covers the overlay's manifest, the standard-entity merge, the demonstration data (loaded as
 SQL), the starting domain under the domain stage's own check, the contracts a Developer is
-shown, the library's screen for a story and its standing in for one that fails, the insight API and the operations as the people of the function (77 checks of their
+shown, the library's screen for a story and its standing in for one that fails, the insight API, the operations and the guide as the people of the function (82 checks of their
 own, among them a purchase from the request to the ERP), every `GET` answering without an error
 in applications with all, some and none of the entities, and the library's 85 rule tests.
 
@@ -446,7 +464,9 @@ docker run --rm --network fintest_default -v "$PWD/../..:/t" -v "$PWD/../shots:/
 ```
 opens every blueprint and the component gallery as the CFO and as accounts payable, at three
 widths and in both themes, and reports console errors, failed calls, text that should never be
-shown, and widgets that are empty, failed or spilling (78 checks), with a screenshot of each.
+shown, and widgets that are empty, failed or spilling; it opens the Guide as a requester, as the
+CFO and on a phone, follows a step of the diagram to its screen, and downloads the document (88
+checks), with a screenshot of each.
 `browse_work.py`, run the same way against a fresh deployment, opens every worklist at three
 widths and then takes one purchase through the application, each step as the person whose job it
 is: a requester raises and submits a request, the budget holder approves it (and rejects another,
@@ -491,6 +511,8 @@ model to write it reliably is the next thing to prove.
    `create_table()`, `schema_classes()`, `column_names()`, `class_name()`), `demo`
    (`rows(tables, today=)`) and `starter` (`domain(tables, classes)`). Each is optional.
 3. An `api.py` with a `router` in the library's package is served under `/api` by the kernel.
+   A `guide.py` there (`process(flows, tables)`, `numbers(roles)`, `screens()`, `USES`) is what the
+   application's guide says of the department's process.
    A connector module in `backend/app/connectors/` is discovered.
 4. `packs/<name>.yaml` with `build.overlays: [enterprise, <name>]` and the product guidance.
 

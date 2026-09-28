@@ -118,6 +118,8 @@ then the four commands above. See `PLANE.md` for how the mirror works.
 | Continue a failed or cancelled run | `POST /api/runs/{id}/retry` — keeps everything already done |
 | Restart an app on a fresh database | `POST /api/runs/{id}/deploy?fresh=true` (drops its volume; `init.sql` runs again) |
 | Restart an app keeping its data | Apps page → Redeploy, or `POST /api/runs/{id}/deploy` |
+| Bring an app built earlier up to date with the platform (its guide, the kernel, a library's fixes) | `POST /api/runs/{id}/deploy?refresh=true`; only the platform's own files change, never a story's |
+| Read an app's guide | Its **Guide** screen, or `docs/USER-GUIDE.md` in its workspace |
 | Regenerate an app's demonstration data | `POST /api/runs/{id}/reseed`, then deploy with `fresh=true` |
 | Redraw a codebase map | Codebases page → Draw map, or `POST /api/runs/{id}/codemap?ai=false` (seconds); `ai=true` adds the local model's explanations |
 | Mirror a run into Plane | Boards page → Mirror to Plane, or `POST /api/runs/{id}/plane/sync` |
@@ -137,8 +139,8 @@ back (see "stale image" below):
 ```powershell
 docker compose exec orchestrator python -m app.selftest_core           # engine, model client, traces, git, vectors, code maps, check rules, Plane helpers (211 checks)
 docker compose exec orchestrator python -m app.selftest                # every build-time check, no model calls
-docker compose exec orchestrator python -m app.selftest_enterprise     # connectors (live, against local stand-ins), the kernel through three personas, the domain stage's checks (80 checks)
-docker compose exec orchestrator python -m app.selftest_finance        # the finance library: overlay, standard entities, data, starting domain, library screens, the API in an application (73 checks)
+docker compose exec orchestrator python -m app.selftest_enterprise     # connectors (live, against local stand-ins), the kernel through three personas, the domain stage's checks (83 checks)
+docker compose exec orchestrator python -m app.selftest_finance        # the finance library: overlay, standard entities, data, starting domain, library screens, the API in an application (79 checks)
 docker compose exec orchestrator python -m app.integrations.selftest   # the Jira mirror against a fake Jira
 docker compose exec orchestrator python -m app.integrations.plane check  # Plane answers with the configured token
 ```

@@ -16,6 +16,8 @@
     POST /api/platform/integrations/events/{id}/retry
     POST /api/platform/integrations/{connector}/test
     GET  /api/platform/users
+    GET  /api/platform/guide                            what the application is for, who does what, how a record moves
+    GET  /api/platform/guide.md                         the same as a document, with its diagrams
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ from collections import Counter
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -346,3 +349,19 @@ def users(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
              "email": u.email, "roles": u.role_list(), "role_labels": [labels.get(r, r) for r in u.role_list()],
              "active": u.active, "persona": u.persona, "last_sign_in": u.last_sign_in}
             for u in db.query(AppUser).order_by(AppUser.full_name).all()]
+
+
+# --------------------------------------------------------------------------- the guide
+
+@router.get("/guide")
+def guide() -> dict[str, Any]:
+    """What the application is for, who does what and how a record moves, for whoever is signed in."""
+    from . import guide as written
+    return written.build(current())
+
+
+@router.get("/guide.md", response_class=PlainTextResponse)
+def guide_document() -> PlainTextResponse:
+    """The guide as a document (Markdown, its diagrams in Mermaid): docs/USER-GUIDE.md."""
+    from . import guide as written
+    return PlainTextResponse(written.markdown(written.build(None)), media_type="text/markdown; charset=utf-8")

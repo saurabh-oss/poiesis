@@ -70,7 +70,9 @@ product:
     This backlog is for an application a finance or procurement team will run its work on.
     The platform already provides — so write NO stories for them — sign-in with demonstration
     personas, roles and permissions, an Approvals inbox, an Audit trail, a Business rules
-    catalogue, an Integrations screen with a connector outbox, and notifications. It also
+    catalogue, an Integrations screen with a connector outbox, notifications, and a Guide
+    that explains the application to the people who use it (purchase to pay as a diagram,
+    who does what, how a record moves), so write no help page or user manual. It also
     provides, ready to compose, whole dashboards (executive summary, spend analysis, budget
     control, accounts payable, purchase to pay, suppliers, controls, savings) with period
     picker, comparison with last year or the period before, filters by cost centre, category

@@ -415,6 +415,11 @@ async def _deploy(run_id: str, *, fresh: bool = False) -> Outcome:
         passed = await asyncio.to_thread(write_app_env, run_id)
         if passed:
             changes = [*changes, "connector settings passed to the app: " + ", ".join(passed)]
+        # What the application's own guide cannot know by itself: what the brief was for, which
+        # stories are in it, which screen delivers each.
+        from . import guide
+        if await asyncio.to_thread(guide.write, run_id):
+            changes = [*changes, "the application's guide was brought up to date"]
     except (DeployError, yaml.YAMLError, OSError) as exc:
         _record(run_id, status="failed", detail=str(exc))
         return Outcome("failed", project=project, detail=str(exc))
@@ -477,9 +482,30 @@ async def _deploy(run_id: str, *, fresh: bool = False) -> Outcome:
         _record(run_id, status="failed", url=url, detail=failure)
         return Outcome("failed", url=url, port=chosen, project=project, detail=failure)
 
+    written = await _document(run_id, entry, container_port)
+    if written:
+        changes = [*changes, written]
     detail = "; ".join([db_note, *changes]).strip("; ")
     _record(run_id, status="running", url=url, detail=detail)
     return Outcome("running", url=url, port=chosen, project=project, detail=detail)
+
+
+async def _document(run_id: str, service: str, port: int) -> str:
+    """Keep the running application's guide in its repository as docs/USER-GUIDE.md: the one the
+    application writes of itself where it has the kernel, a plainer one from the platform's record
+    where it has not. Returns what was done, in words, or ""."""
+    from . import guide
+    try:
+        code, out = await _compose(
+            run_id, "exec", "-T", service, "wget", "-qO-", "--header", f"Authorization: Bearer {service_token(run_id)}",
+            f"http://127.0.0.1:{port}/api/platform/guide.md", timeout=60)
+        text = out if code == 0 and out.lstrip().startswith("# ") else guide.plain(guide.record(run_id))
+        if not await asyncio.to_thread(guide.keep, run_id, text):
+            return ""
+        await asyncio.to_thread(commit, run_id, "docs: the application's guide for the people who use it")
+        return f"{guide.DOCUMENT} written"
+    except Exception as exc:  # noqa: BLE001 — a document is never why a deployment fails
+        return f"the guide could not be written as a document: {str(exc)[:160]}"
 
 
 async def restart_running() -> list[str]:

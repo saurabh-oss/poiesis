@@ -44,10 +44,32 @@ async def get_deployment(run_id: str):
         return runtime.as_row(row) if row else None
 
 
-async def _deploy_and_announce(run_id: str, fresh: bool = False) -> None:
+def _bring_up_to_date(run_id: str) -> list[str]:
+    """The platform's own files in an application already built (the shell, the kernel, a
+    department library, their screens), as they stand in the platform now."""
+    from ..graph.nodes.scaffold import refresh_platform_files
+    from ..workspace import guide, repo
+    with session() as s:
+        run = s.get(Run, run_id)
+        title = run.title if run is not None else ""
+    state = {"run_id": run_id, "title": title, "vision": guide._latest(run_id, "vision"),
+             "architecture": guide._latest(run_id, "architecture")}
+    changed = refresh_platform_files(run_id, state)
+    if changed:
+        repo.commit(run_id, "chore(platform): the platform's own files brought up to date")
+    return changed
+
+
+async def _deploy_and_announce(run_id: str, fresh: bool = False, refresh: bool = False) -> None:
     await emit(run_id, "Starting the application on request"
                        + (" with a fresh database (init.sql runs again)" if fresh else ""),
                agent="release", stage="deploy")
+    if refresh:
+        changed = await asyncio.to_thread(_bring_up_to_date, run_id)
+        await emit(run_id, ("The platform's own files brought up to date: " + ", ".join(changed[:12])
+                            + (f" and {len(changed) - 12} more" if len(changed) > 12 else ""))
+                   if changed else "The platform's own files were already up to date",
+                   agent="scaffold", stage="deploy", data={"files": changed})
     outcome = await runtime.deploy(run_id, fresh=fresh)
     if outcome.status == "running":
         await emit(run_id, f"Running at {outcome.url} — checking every screen in a browser",
@@ -66,9 +88,11 @@ async def _deploy_and_announce(run_id: str, fresh: bool = False) -> None:
 
 
 @router.post("/api/runs/{run_id}/deploy", status_code=202)
-async def deploy_run(run_id: str, fresh: bool = False):
+async def deploy_run(run_id: str, fresh: bool = False, refresh: bool = False):
     """Start (or restart) the run's application. `fresh=true` drops its database volume
-    first, so regenerated demonstration data in db/init.sql is what it opens with."""
+    first, so regenerated demonstration data in db/init.sql is what it opens with.
+    `refresh=true` first brings the platform's own files in it up to date (the shell, the
+    kernel, a department library), so an application built last month gets this month's fixes."""
     with session() as s:
         if s.get(Run, run_id) is None:
             raise HTTPException(404, "run not found")
@@ -77,8 +101,8 @@ async def deploy_run(run_id: str, fresh: bool = False):
                                  "application itself before the release decision.")
     job = _jobs.get(run_id)
     if job is None or job.done():
-        _jobs[run_id] = asyncio.create_task(_deploy_and_announce(run_id, fresh))
-    return {"status": "starting", "fresh": fresh}
+        _jobs[run_id] = asyncio.create_task(_deploy_and_announce(run_id, fresh, refresh))
+    return {"status": "starting", "fresh": fresh, "refresh": refresh}
 
 
 @router.get("/api/runs/{run_id}/shots/{name}")
